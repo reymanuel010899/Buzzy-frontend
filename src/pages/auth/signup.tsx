@@ -36,7 +36,7 @@ const SignUp: React.FC = () => {
     }
 
     register(formData)(dispatch)
-    console.log("rey manuel--------")
+   
   };
 
   return (

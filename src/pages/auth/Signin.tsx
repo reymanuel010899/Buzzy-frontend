@@ -2,15 +2,26 @@ import React, { useState } from "react";
 import { motion } from "framer-motion";
 import { Mail, Lock, Eye, EyeOff } from "lucide-react";
 import { Link } from "react-router-dom";
-
+import { fetchWithAuthProps } from "../../redux/actions/Login";
+import Login from "../../redux/actions/Login";
 const SignIn: React.FC = () => {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [data, setData] = useState<fetchWithAuthProps>({
+    email: '',
+    password: ''
+  });
   const [showPassword, setShowPassword] = useState(false);
 
+   const {email, password} = data;
+    const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+
+      setData(prevState => ({...prevState, [e.target.name]: e.target.value}));
+          
+  };
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    console.log("Email:", email, "Password:", password);
+    Login(data)
+
+    
   };
 
   return (
@@ -31,9 +42,10 @@ const SignIn: React.FC = () => {
             <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
             <input
               type="email"
+              name="email"
               placeholder="Correo electrónico"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) =>onChange(e)}
               className="w-full pl-10 pr-4 py-3 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-800 dark:text-white"
               required
             />
@@ -45,8 +57,9 @@ const SignIn: React.FC = () => {
             <input
               type={showPassword ? "text" : "password"}
               placeholder="Contraseña"
+              name="password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => onChange(e)}
               className="w-full pl-10 pr-12 py-3 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-800 dark:text-white"
               required
             />
@@ -63,6 +76,7 @@ const SignIn: React.FC = () => {
           <button
             type="submit"
             className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition-all"
+            onClick={e=>handleSubmit(e)}
           >
             Ingresar
           </button>
