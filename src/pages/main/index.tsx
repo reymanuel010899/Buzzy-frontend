@@ -1,11 +1,20 @@
 import Layout from "../../componets/Layout/Layout"
-const Main = () => {
+import StreamingUI from "../../componets/index/inde"
+import { connect } from "react-redux"
+import { RootState } from "../../store"
+const Main = ({}) => {
 
     return (
         <Layout>
-            <h1>Home</h1>
+            <StreamingUI/>
         </Layout>
     )
 }
 
-export default Main
+const mapStateToProps = (state: RootState) => ({
+    user: state.register.user,
+
+})
+export default connect(mapStateToProps, {
+
+})(Main)

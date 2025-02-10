@@ -10,7 +10,7 @@ const Navbar: React.FC = () => {
         
         {/* Menú y Logo */}
         <div className="flex items-center space-x-4">
-          <button className="md:hidden text-gray-700">
+          <button className="md:hidden text-white-700">
             <Menu size={24} />
           </button>
           <a href="/" className="text-2xl font-bold text-red-600">
@@ -25,7 +25,7 @@ const Navbar: React.FC = () => {
             placeholder="Buscar"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full outline-none text-gray-700"
+            className="w-full outline-none text-white-700"
           />
           <button className="text-gray-600">
             <Search size={20} />
@@ -33,8 +33,8 @@ const Navbar: React.FC = () => {
         </div>
 
         {/* Íconos de acciones */}
-        <div className="flex items-center space-x-4">
-          <button className="hidden md:flex text-gray-700">
+        <div className="flex items-center space-x-8">
+          <button className="hidden md:flex text-gray-700 ml-15 mr-15">
             <Video size={24} />
           </button>
           <button className="hidden md:flex text-gray-700">
@@ -47,7 +47,7 @@ const Navbar: React.FC = () => {
       </div>
 
       {/* Barra de Búsqueda en móviles */}
-      <div className="md:hidden px-4 pb-3">
+      <div className="md:hidden px-4 pb-4">
         <div className="flex items-center border border-gray-300 rounded-full px-4 py-2">
           <input
             type="text"

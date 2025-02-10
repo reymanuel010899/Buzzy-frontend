@@ -5,8 +5,11 @@ import { Mail, Lock, User, Eye, EyeOff } from "lucide-react";
 import { IDataSignUp } from "../../componets/auth/auth.interface";
 import { register } from "../../redux/actions/register";
 import { useDispatch } from 'react-redux';
+import { useNavigate
 
+ } from "react-router-dom";
 const SignUp: React.FC = () => {
+  const navigate = useNavigate()
   const dispatch = useDispatch(); 
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -35,7 +38,9 @@ const SignUp: React.FC = () => {
       return;
     }
 
-    register(formData)(dispatch)
+    register(formData)(dispatch).then((res)=>{
+      navigate('/')
+    })
    
   };
 

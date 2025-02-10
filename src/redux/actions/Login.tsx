@@ -8,9 +8,6 @@ export interface fetchWithAuthProps {
 async function fetchWithAuth(options: fetchWithAuthProps) {
   let accessToken = localStorage.getItem("accessToken");
     let refreshToken = localStorage.getItem("refreshToken");
-  console.log(accessToken, "-------");
-  console.log(refreshToken, " **************")
-
   // Verificar si existe accessToken
   if (!accessToken) {
     throw new Error("No access token found");
@@ -27,7 +24,6 @@ async function fetchWithAuth(options: fetchWithAuthProps) {
         },
       }
     );
-    console.log(response)
     // Si la respuesta es 401 (No autorizado), intentar refrescar el token
     if (response.status === 401) {
       const refreshToken = localStorage.getItem("refreshToken");

@@ -1,22 +1,18 @@
 import { SUCCEES_REGISTER, FAILED_REGISTER } from "../type";
 
 const inicializerState = {
-    user: null,
-    access_token: null,
-    refresh_token: null,
+    media: null,
     error: null, // Agregamos un estado para manejar los errores
 }
 
-const register = (state = inicializerState, action: {type: string, payload: any}) => { 
+const getMedia = (state = inicializerState, action: {type: string, payload: any}) => { 
     const { type, payload } = action;
     switch (type) {
         case SUCCEES_REGISTER:
             // Al hacer el registro exitoso, guardamos el usuario y el token
             return {
                 ...state,
-                user: payload.user,    // Asegúrate de que 'user' y 'token' estén en el payload
-                access_token: payload.access,
-                refresh_token: payload.refresh,  // Si el backend devuelve un token de acceso, lo agregamos aquí
+                media: payload,    // Asegúrate de que 'user' y 'token' estén en el payload
                 error: null,           // Limpiamos el error
             };
         case FAILED_REGISTER:
@@ -30,4 +26,4 @@ const register = (state = inicializerState, action: {type: string, payload: any}
     }
 }
 
-export default register;
+export default getMedia;
