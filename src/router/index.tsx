@@ -6,6 +6,7 @@ import {
   } from "react-router-dom";
 import Main from "../pages/main";
 import SignUp from "../pages/auth/signup";
+import LivePage from "../pages/main/LivePage";
 
   
   export const router = createBrowserRouter(
@@ -27,6 +28,12 @@ import SignUp from "../pages/auth/signup";
               path="/"
               element={
                   <Main/>
+              }
+            />
+             <Route
+              path="/lives"
+              element={
+                  <LivePage/>
               }
             />
       </>

@@ -1,19 +1,19 @@
-import React, { useEffect } from 'react';
+import { useEffect } from 'react';
 import { getMedia } from '../../redux/actions/getMedia';
-
+import BottomNavbar from '../Layout/ButtonNavar';
+import { Link } from 'react-router-dom';
 const StreamingUI = () => {
     useEffect(()=>{
         getMedia()
     })
     return (
         <div className="bg-gradient-to-r from-white-900 via-gray-800 to-gray-900 text-white min-h-screen font-sans">
-
             <main className="pt-24 p-6">
                 <section className="relative w-full h-[500px] flex items-center justify-center text-center">
                     <div className="relative w-full h-full bg-cover bg-center rounded-lg overflow-hidden" style={{ backgroundImage: "url('https://via.placeholder.com/1600x900')" }}>
                         <div className="absolute inset-0 bg-black bg-opacity-60 flex flex-col justify-center items-center px-4">
                             <h2 className="text-5xl font-extrabold text-blue-400 animate-pulse">iniciar transmision en vivo</h2>
-                            <button className="mt-6 px-8 py-3 bg-purple-600 rounded-full text-lg shadow-xl hover:bg-purple-700 transition duration-300">Start</button>
+                            <Link to={'/lives'} className="mt-6 px-8 py-3 bg-purple-600 rounded-full text-lg shadow-xl hover:bg-purple-700 transition duration-300">Start</Link>
                         </div>
                     </div>
                 </section>
@@ -30,6 +30,7 @@ const StreamingUI = () => {
                     </div>
                 </section>
             </main>
+            <BottomNavbar/>
         </div>
     );
 };

@@ -2,7 +2,7 @@ import { SUCCEES_REGISTER, FAILED_REGISTER } from "../type";
 
 const inicializerState = {
     media: null,
-    error: null, // Agregamos un estado para manejar los errores
+    error: null,
 }
 
 const getMedia = (state = inicializerState, action: {type: string, payload: any}) => { 
