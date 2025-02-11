@@ -2,18 +2,23 @@ import Layout from "../../componets/Layout/Layout"
 import StreamingUI from "../../componets/index/inde"
 import { connect } from "react-redux"
 import { RootState } from "../../store"
+import { useEffect } from "react";
+import { getMedia } from "../../redux/actions/getMedia";
+const Main = ({ media, getMedia }: { media: any; getMedia: () => void }) => {
+    useEffect(() => {
+        getMedia(); // Aquí se llama correctamente la acción
+    }, [getMedia]);
 
-const Main = ({}) => {
+
     return (
         <Layout>
-            <StreamingUI/>
+            <StreamingUI media={media} />
         </Layout>
-    )
-}
+    );
+};
 
 const mapStateToProps = (state: RootState) => ({
-    user: state.register.user,
-})
-export default connect(mapStateToProps, {
+    media: state.getMedia.media,
+});
 
-})(Main)
+export default connect(mapStateToProps, { getMedia })(Main);

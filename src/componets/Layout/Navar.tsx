@@ -13,7 +13,7 @@ const Navbar: React.FC = () => {
           <button className="md:hidden text-white-700">
             <Menu size={24} />
           </button>
-          <a href="/" className="text-2xl font-bold text-red-600">
+          <a href="/" className="text-2xl font-bold text-gray-600">
             Buzzy
           </a>
         </div>
