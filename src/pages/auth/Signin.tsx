@@ -1,10 +1,14 @@
 import React, { useState } from "react";
 import { motion } from "framer-motion";
 import { Mail, Lock, Eye, EyeOff } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { fetchWithAuthProps } from "../../redux/actions/Login";
-import Login from "../../redux/actions/Login";
+import { login } from "../../redux/actions/Login";
+import { useDispatch } from 'react-redux';
+
 const SignIn: React.FC = () => {
+  const dispatch = useDispatch()
+  const navigate = useNavigate()
   const [data, setData] = useState<fetchWithAuthProps>({
     email: '',
     password: ''
@@ -19,9 +23,9 @@ const SignIn: React.FC = () => {
   };
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    Login(data)
-
-    
+    login(data)(dispatch).then(()=>{
+      navigate('/')
+    })
   };
 
   return (

@@ -1,4 +1,4 @@
-import { SUCCEES_REGISTER, FAILED_REGISTER } from "../type";
+import { SUCCEES_LOGIN, FAILED_LOGIN } from "../type";
 
 const inicializerState = {
     user: null,
@@ -7,10 +7,11 @@ const inicializerState = {
     error: null,
 }
 
-const register = (state = inicializerState, action: {type: string, payload: any}) => { 
+const LoginReducer = (state = inicializerState, action: {type: string, payload: any}) => { 
     const { type, payload } = action;
+    console.log(payload, "******")
     switch (type) {
-        case SUCCEES_REGISTER:
+        case SUCCEES_LOGIN:
             return {
                 ...state,
                 user: payload.user, 
@@ -18,7 +19,7 @@ const register = (state = inicializerState, action: {type: string, payload: any}
                 refresh_token: payload.refresh, 
                 error: null,     
             };
-        case FAILED_REGISTER:
+        case FAILED_LOGIN:
             return {
                 ...state,
                 error: payload,
@@ -28,4 +29,4 @@ const register = (state = inicializerState, action: {type: string, payload: any}
     }
 }
 
-export default register;
+export default LoginReducer;

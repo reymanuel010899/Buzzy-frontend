@@ -2,8 +2,9 @@ import BottomNavbar from '../Layout/ButtonNavar';
 import { Link } from 'react-router-dom';
 import Categories from './categoria';
 import { Video } from './main.interface';
-import { Eye, MessageCircle, Heart } from 'lucide-react'; // 📌 Importamos los iconos
+import { Eye, MessageCircle, Heart } from 'lucide-react'; 
 import { useState, useEffect } from 'react';
+import SubBottomNavbarGame from '../Layout/SubButtonNavar';
 
 interface StreamingUIProps {
     media: Video[] | null;
@@ -11,26 +12,58 @@ interface StreamingUIProps {
 
 const StreamingUI = ({ media }: StreamingUIProps) => {
     const [isMobile, setIsMobile] = useState(window.innerWidth <= 500);
-    console.log(media);
-
+    const [isLiked, setIsLiked] = useState(false);
+    const [isComment, setIsComment] = useState(false);
+    const [isView, setIsView] = useState(false);
     useEffect(() => {
         const handleResize = () => setIsMobile(window.innerWidth <= 500);
         window.addEventListener('resize', handleResize);
         return () => window.removeEventListener('resize', handleResize);
     }, []);
 
+    useEffect(() => {
+        if (isLiked) {
+        setTimeout(() => {
+            setIsLiked(false);
+        }, 500);
+        }
+    }, [isLiked]);
+
+    useEffect(() => {
+        if (isComment) {
+        setTimeout(() => {
+            setIsComment(false);
+        }, 500);
+        }
+    }, [isComment]);
+
+    useEffect(() => {
+        if (isView) {
+        setTimeout(() => {
+            setIsView(false);
+        }, 500);
+        }
+    }, [isView]);
+
+
+
+
     // Función para manejar los clics en los iconos
     const handleLikeClick = (videoId: string) => {
+        setIsLiked(true)
+    
         console.log(`Se hizo click en "Like" del video con ID: ${videoId}`);
         // Aquí puedes agregar lógica adicional para actualizar el contador de likes, etc.
     };
 
     const handleCommentClick = (videoId: string) => {
+        setIsComment(true)
         console.log(`Se hizo click en "Comentario" del video con ID: ${videoId}`);
         // Lógica para manejar clic en los comentarios
     };
 
     const handleViewClick = (videoId: string) => {
+        setIsView(true)
         console.log(`Se hizo click en "Vista" del video con ID: ${videoId}`);
         // Lógica para manejar clic en vistas (si lo necesitas)
     };
@@ -71,7 +104,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                                     zIndex: 1,  // Aseguramos que el contenedor esté encima
                                 }}
                             >
-                                {/* Video como fondo */}
                                 <video
                                     className="absolute inset-0 w-full h-full object-cover"
                                     autoPlay
@@ -91,32 +123,44 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                                 <div className="w-full p-4 mt-auto bg-opacity-70 z-10">
                                     <div className="flex items-center justify-between w-full px-2">
                                         <div
-                                            className="flex items-center cursor-pointer"
+                                            className="flex flex-col items-center text-red-500 transition-all duration-500 cursor-pointer"
                                             onClick={() => handleViewClick('1')}
                                         >
-                                            <Eye className="w-7 h-7 text-gray-400 mr-1" />
-                                            <span className="text-gray-400 text-sm">{1 || 0}</span>
+                                            <Eye className={`transition-all duration-500 ${
+                                            isView ? "w-8 h-8 fill-current" : "w-7 h-7"
+                                            } text-gray-500`}/>
+                                            <span className="text-gray-400 text-sm w-full text-center mt-1">{1 || 0}</span>
                                         </div>
                                         <div
-                                            className="flex items-center flex-grow justify-center cursor-pointer"
+                                            className="flex flex-col items-center text-red-500 transition-all duration-500 cursor-pointer"
                                             onClick={() => handleCommentClick('1')}
                                         >
-                                            <MessageCircle className="w-7 h-7 text-gray-400 mr-1" />
-                                            <span className="text-gray-400 text-sm">{1 || 0}</span>
+                                        <MessageCircle
+                                            className={`transition-all duration-500 ${
+                                                isComment ? "w-8 h-8 fill-current" : "w-7 h-7"
+                                            } text-gray-500`}
+                                            />
+                                            <span className="text-gray-400 text-sm w-full text-center mt-1">{1 || 0}</span>
                                         </div>
                                         <div
-                                            className="flex items-center cursor-pointer"
+                                            className="flex flex-col items-center text-red-500 transition-all duration-500 cursor-pointer"
                                             onClick={() => handleLikeClick('1')}
                                         >
-                                            <Heart className="w-7 h-7 text-red-500 mr-1" />
-                                            <span className="text-gray-400 text-sm">{1 || 0}</span>
-                                        </div>
+                                        <Heart
+                                            className={`transition-all duration-500 ${
+                                                isLiked ? "w-8 h-8 fill-current" : "w-7 h-7"
+                                            } text-red-500`}
+                                        />
+                                        <span className="text-gray-400 text-sm w-full text-center mt-1">{1 || 0}</span>
+                                    </div>
                                     </div>
                                 </div>
                             </div>
                         ))}
                     </div>
                 </section>
+                <h1>heloo</h1>
+            <SubBottomNavbarGame/>
             </main>
             <BottomNavbar />
         </div>
