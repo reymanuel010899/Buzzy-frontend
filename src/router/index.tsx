@@ -7,6 +7,7 @@ import {
 import Main from "../pages/main";
 import SignUp from "../pages/auth/signup";
 import LivePage from "../pages/main/LivePage";
+import Marketplace from "../pages/main/Marker";
 
   
   export const router = createBrowserRouter(
@@ -34,6 +35,12 @@ import LivePage from "../pages/main/LivePage";
               path="/lives"
               element={
                   <LivePage/>
+              }
+            />
+            <Route
+              path="/marker"
+              element={
+                  <Marketplace/>
               }
             />
       </>
