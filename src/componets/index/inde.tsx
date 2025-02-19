@@ -2,9 +2,8 @@ import BottomNavbar from '../Layout/ButtonNavar';
 import { Link } from 'react-router-dom';
 import Categories from './categoria';
 import { Video } from './main.interface';
-import { Eye, MessageCircle, Heart } from 'lucide-react'; 
+import { Eye, MessageCircle, Heart, Medal } from 'lucide-react'; 
 import { useState, useEffect } from 'react';
-import SubBottomNavbarGame from '../Layout/SubButtonNavar';
 
 interface StreamingUIProps {
     media: Video[] | null;
@@ -12,9 +11,10 @@ interface StreamingUIProps {
 
 const StreamingUI = ({ media }: StreamingUIProps) => {
     const [isMobile, setIsMobile] = useState(window.innerWidth <= 500);
-    const [isLiked, setIsLiked] = useState(false);
+    const [isLiked, setIsLiked] = useState(false);  // Estado para manejar "like"
     const [isComment, setIsComment] = useState(false);
     const [isView, setIsView] = useState(false);
+
     useEffect(() => {
         const handleResize = () => setIsMobile(window.innerWidth <= 500);
         window.addEventListener('resize', handleResize);
@@ -23,51 +23,45 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
     useEffect(() => {
         if (isLiked) {
-        setTimeout(() => {
-            setIsLiked(false);
-        }, 500);
+            setTimeout(() => {
+                setIsLiked(true);
+            }, 500);
         }
     }, [isLiked]);
 
     useEffect(() => {
         if (isComment) {
-        setTimeout(() => {
-            setIsComment(false);
-        }, 500);
+            setTimeout(() => {
+                setIsComment(true);
+            }, 500);
         }
     }, [isComment]);
 
     useEffect(() => {
         if (isView) {
-        setTimeout(() => {
-            setIsView(false);
-        }, 500);
+            setTimeout(() => {
+                setIsView(true);
+            }, 500);
         }
     }, [isView]);
 
-
-
-
-    // Función para manejar los clics en los iconos
     const handleLikeClick = (videoId: string) => {
-        setIsLiked(true)
-    
+        setIsLiked((prev) => !prev);
         console.log(`Se hizo click en "Like" del video con ID: ${videoId}`);
-        // Aquí puedes agregar lógica adicional para actualizar el contador de likes, etc.
     };
 
     const handleCommentClick = (videoId: string) => {
-        setIsComment(true)
+        setIsComment(true);
         console.log(`Se hizo click en "Comentario" del video con ID: ${videoId}`);
-        // Lógica para manejar clic en los comentarios
     };
 
     const handleViewClick = (videoId: string) => {
-        setIsView(true)
+        setIsView(true);
         console.log(`Se hizo click en "Vista" del video con ID: ${videoId}`);
-        // Lógica para manejar clic en vistas (si lo necesitas)
     };
-
+    media?.map((data) => {
+        console.log(data.video_url);
+    });
     return (
         <div className="bg-gradient-to-r from-white-900 via-gray-800 to-gray-900 text-white min-h-screen font-sans">
             <main className="pt-24 p-6">
@@ -101,23 +95,26 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                                 style={{
                                     height: isMobile ? '600px' : 'auto',
                                     overflow: 'hidden',
-                                    zIndex: 1,  // Aseguramos que el contenedor esté encima
+                                    zIndex: 1, 
                                 }}
                             >
-                                <video
-                                    className="absolute inset-0 w-full h-full object-cover"
-                                    autoPlay
-                                    muted
-                                    loop
-                                >
-                                    <source src={data.video_url || "https://via.placeholder.com/1600x900"} type="video/mp4" />
-                                    Tu navegador no soporta el formato de video.
-                                </video>
 
                                 {/* Gradiente sobre el video */}
                                 <div
                                     className="absolute inset-0 bg-gradient-to-t from-black to-transparent opacity-50"
-                                ></div>
+                                >
+                                <video
+                                    autoPlay
+                                    muted
+                                    loop
+                                    controls
+                                    onCanPlay={() => console.log('Video ready to play')}
+                                >
+                                    <source src={data.video_url || 'https://drive.google.com/file/d/1r8nBMye5K09_dN3ylT-ZMIAFQLM28mXS/view?usp=sharing' } type="video/mp4" />
+                                    Tu navegador no soporta el formato de video.
+                                </video>
+
+                                </div>
 
                                 {/* Footer con las interacciones */}
                                 <div className="w-full p-4 mt-auto bg-opacity-70 z-10">
@@ -126,33 +123,27 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                                             className="flex flex-col items-center text-red-500 transition-all duration-500 cursor-pointer"
                                             onClick={() => handleViewClick('1')}
                                         >
-                                            <Eye className={`transition-all duration-500 ${
-                                            isView ? "w-8 h-8 fill-current" : "w-7 h-7"
-                                            } text-gray-500`}/>
-                                            <span className="text-gray-400 text-sm w-full text-center mt-1">{1 || 0}</span>
+                                            <Eye className={`transition-all duration-500 ${isView ? "w-8 h-8 fill-current" : "w-7 h-7"} text-gray-500`} />
+                                            <span className="text-gray-400 text-sm w-full text-center mt-1">{1 | 0}</span>
                                         </div>
                                         <div
                                             className="flex flex-col items-center text-red-500 transition-all duration-500 cursor-pointer"
                                             onClick={() => handleCommentClick('1')}
                                         >
-                                        <MessageCircle
-                                            className={`transition-all duration-500 ${
-                                                isComment ? "w-8 h-8 fill-current" : "w-7 h-7"
-                                            } text-gray-500`}
+                                            <MessageCircle
+                                                className={`transition-all duration-500 ${isComment ? "w-8 h-8 fill-current" : "w-7 h-7"} text-gray-500`}
                                             />
-                                            <span className="text-gray-400 text-sm w-full text-center mt-1">{1 || 0}</span>
+                                            <span className="text-gray-400 text-sm w-full text-center mt-1">{data.comments_count}</span>
                                         </div>
                                         <div
                                             className="flex flex-col items-center text-red-500 transition-all duration-500 cursor-pointer"
                                             onClick={() => handleLikeClick('1')}
                                         >
-                                        <Heart
-                                            className={`transition-all duration-500 ${
-                                                isLiked ? "w-8 h-8 fill-current" : "w-7 h-7"
-                                            } text-red-500`}
-                                        />
-                                        <span className="text-gray-400 text-sm w-full text-center mt-1">{1 || 0}</span>
-                                    </div>
+                                            <Heart
+                                                className={`transition-all duration-500 ${isLiked ? "w-8 h-8 fill-current" : "w-7 h-7"} ${isLiked ? "text-red-500" : "text-gray-500"}`}
+                                            />
+                                            <span className="text-gray-400 text-sm w-full text-center mt-1">{data.likes_count}</span>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
