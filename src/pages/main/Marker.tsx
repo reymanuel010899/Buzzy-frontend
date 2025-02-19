@@ -26,7 +26,7 @@ const Marketplace = () => {
   return (
     <div className={`min-h-screen ${darkMode ? "bg-gray-900 text-white" : "bg-gray-200 text-black"}`}> 
       <header className="flex items-center justify-between p-6 shadow-lg bg-opacity-90 backdrop-blur-md">
-        <h1 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-blue-500">
+        <h1 className="text-3xl sm:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-blue-500">
           Marketplace Futurista
         </h1>
         <div className="flex space-x-4 items-center">
@@ -50,9 +50,9 @@ const Marketplace = () => {
         </div>
       </header>
       
-      <motion.div className="flex justify-center space-x-6 p-4 bg-gray-900 text-white shadow-md" initial={{ y: -50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.5 }}>
-        <motion.div className="relative">
-          <select className="px-4 py-2 bg-gray-800 rounded-full hover:bg-gray-700 transition" value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value)}>
+      <motion.div className="flex flex-col sm:flex-row justify-center space-y-4 sm:space-x-6 sm:space-y-0 p-4 bg-gray-900 text-white shadow-md" initial={{ y: -50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.5 }}>
+        <motion.div className="relative w-full sm:w-auto">
+          <select className="w-full px-4 py-2 bg-gray-800 rounded-full hover:bg-gray-700 transition" value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value)}>
             <option value="">Todas las Categorías</option>
             {categories.map((category) => (
               <option key={category} value={category}>{category}</option>
@@ -60,8 +60,8 @@ const Marketplace = () => {
           </select>
         </motion.div>
         
-        <motion.div className="relative">
-          <select className="px-4 py-2 bg-gray-800 rounded-full hover:bg-gray-700 transition" value={selectedLocation} onChange={(e) => setSelectedLocation(e.target.value)}>
+        <motion.div className="relative w-full sm:w-auto">
+          <select className="w-full px-4 py-2 bg-gray-800 rounded-full hover:bg-gray-700 transition" value={selectedLocation} onChange={(e) => setSelectedLocation(e.target.value)}>
             <option value="">Todas las Ubicaciones</option>
             {locations.map((location) => (
               <option key={location} value={location}>{location}</option>
@@ -88,4 +88,3 @@ const Marketplace = () => {
 };
 
 export default Marketplace;
-

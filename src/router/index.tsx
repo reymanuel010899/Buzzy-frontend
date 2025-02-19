@@ -8,6 +8,10 @@ import Main from "../pages/main";
 import SignUp from "../pages/auth/signup";
 import LivePage from "../pages/main/LivePage";
 import Marketplace from "../pages/main/Marker";
+import Wallet from "../pages/main/wallet";
+import Store from "../pages/main/store";
+import Game from "../pages/main/game";
+
 
   
   export const router = createBrowserRouter(
@@ -37,10 +41,30 @@ import Marketplace from "../pages/main/Marker";
                   <LivePage/>
               }
             />
+
             <Route
               path="/marker"
               element={
                   <Marketplace/>
+                }  />
+
+             <Route
+              path="/game"
+              element={
+                  <Game/>
+              }
+            />
+             <Route
+              path="/store"
+              element={
+                  <Store/>
+              }
+            />
+             <Route
+              path="/wallet"
+              element={
+                  <Wallet/>
+
               }
             />
       </>

@@ -159,8 +159,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                         ))}
                     </div>
                 </section>
-                <h1>heloo</h1>
-            <SubBottomNavbarGame/>
             </main>
             <BottomNavbar />
         </div>
