@@ -1,12 +1,11 @@
 import BottomNavbar from '../Layout/ButtonNavar';
 import { Link } from 'react-router-dom';
 import Categories from './categoria';
-import { Video } from './main.interface';
-import { Eye, MessageCircle, Heart, Medal } from 'lucide-react'; 
+import { Video  as VideoPro} from './main.interface';
+import { Eye, MessageCircle, Heart, Volume2, VolumeX } from 'lucide-react'; 
 import { useState, useEffect } from 'react';
-
 interface StreamingUIProps {
-    media: Video[] | null;
+    media: VideoPro[] | null;
 }
 
 const StreamingUI = ({ media }: StreamingUIProps) => {
@@ -59,12 +58,19 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         setIsView(true);
         console.log(`Se hizo click en "Vista" del video con ID: ${videoId}`);
     };
-    media?.map((data) => {
-        console.log(data.video_url);
-    });
+    const [isMuted, setIsMuted] = useState(true);
+    useEffect(() => {
+        const handleResize = () => setIsMobile(window.innerWidth <= 500);
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+    }, []);
+
+    const toggleMute = () => {
+        setIsMuted(!isMuted);
+    };
     return (
         <div className="bg-gradient-to-r from-white-900 via-gray-800 to-gray-900 text-white min-h-screen font-sans">
-            <main className="pt-24 p-6">
+            <main className="pt-24 p-1">
                 <section className="relative w-full h-[500px] flex items-center justify-center text-center">
                     <div
                         className="relative w-full h-full bg-cover bg-center rounded-lg overflow-hidden"
@@ -87,62 +93,77 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 <section className="mt-10">
                     <h3 className="text-3xl font-semibold text-center mb-6">Trending Series</h3>
                     <Categories />
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                        {media?.map((data, index) => (
+                    <div className="grid grid-cols-1 pt-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                    {media?.map((data, index) => (
                             <div
                                 key={index}
                                 className="relative p-4 rounded-lg hover:scale-105 transform transition duration-300 flex flex-col items-center"
                                 style={{
-                                    height: isMobile ? '600px' : 'auto',
+                                    height: isMobile ? '800px' : '800px',
                                     overflow: 'hidden',
                                     zIndex: 1, 
                                 }}
                             >
 
+                                <button
+                                      className="absolute top-2 right-2 bg-gray-800 text-white p-2 rounded-full shadow-lg z-50"
+                                    onClick={toggleMute}
+                                    >
+                                    {isMuted ? <VolumeX size={24} /> : <Volume2 size={24} />}
+                                </button>
                                 {/* Gradiente sobre el video */}
                                 <div
-                                    className="absolute inset-0 bg-gradient-to-t from-black to-transparent opacity-50"
+                                    className="absolute inset-0 bg-gradient-to-t from-black to-transparent"
                                 >
                                 <video
                                     autoPlay
-                                    muted
+                                    muted={isMuted}
                                     loop
-                                    controls
-                                    onCanPlay={() => console.log('Video ready to play')}
+                                    playsInline
+                                    className="w-full h-[800px] object-cover"
                                 >
-                                    <source src={data.video_url || 'https://drive.google.com/file/d/1r8nBMye5K09_dN3ylT-ZMIAFQLM28mXS/view?usp=sharing' } type="video/mp4" />
+                                    <source src={data.video} type="video/mp4" />
                                     Tu navegador no soporta el formato de video.
                                 </video>
 
                                 </div>
 
                                 {/* Footer con las interacciones */}
-                                <div className="w-full p-4 mt-auto bg-opacity-70 z-10">
+                                <div className="w-full mt-auto bg-opacity-70 z-80">
+                                    <div className='pb-10'>
+                                        <div className="flex items-center space-x-3">
+                            
+                                            <button className="text-white">
+                                                <img className="w-8 h-8 rounded-full object-cover" src={`${ data.user_id?.profile_picture ? data.user_id.profile_picture  : "http://localhost:8000/media/profile_pics/avatar.webp" }`} alt="" />
+                                            </button>
+                                    <Link className=" text-white  border-white" to={'/wallet'}>{data.user_id?.username}</Link>
+                                        </div>
+                                    </div>
                                     <div className="flex items-center justify-between w-full px-2">
                                         <div
                                             className="flex flex-col items-center text-red-500 transition-all duration-500 cursor-pointer"
                                             onClick={() => handleViewClick('1')}
                                         >
-                                            <Eye className={`transition-all duration-500 ${isView ? "w-8 h-8 fill-current" : "w-7 h-7"} text-gray-500`} />
-                                            <span className="text-gray-400 text-sm w-full text-center mt-1">{1 | 0}</span>
+                                            <Eye className={`transition-all duration-500 ${isView ? "w-8 h-8 fill-current" : "w-7 h-7"} text-white`} />
+                                            <span className="text-white text-sm w-full text-center mt-1">{1 | 0}</span>
                                         </div>
                                         <div
                                             className="flex flex-col items-center text-red-500 transition-all duration-500 cursor-pointer"
                                             onClick={() => handleCommentClick('1')}
                                         >
                                             <MessageCircle
-                                                className={`transition-all duration-500 ${isComment ? "w-8 h-8 fill-current" : "w-7 h-7"} text-gray-500`}
+                                                className={`transition-all duration-500 ${isComment ? "w-8 h-8 fill-current" : "w-7 h-7"} text-white`}
                                             />
-                                            <span className="text-gray-400 text-sm w-full text-center mt-1">{data.comments_count}</span>
+                                            <span className="text-white text-sm w-full text-center mt-1">{data.comments_count}</span>
                                         </div>
                                         <div
                                             className="flex flex-col items-center text-red-500 transition-all duration-500 cursor-pointer"
                                             onClick={() => handleLikeClick('1')}
                                         >
                                             <Heart
-                                                className={`transition-all duration-500 ${isLiked ? "w-8 h-8 fill-current" : "w-7 h-7"} ${isLiked ? "text-red-500" : "text-gray-500"}`}
+                                                className={`transition-all duration-500 ${isLiked ? "w-8 h-8 fill-current" : "w-7 h-7"} ${isLiked ? "text-red-500" : "text-white"}`}
                                             />
-                                            <span className="text-gray-400 text-sm w-full text-center mt-1">{data.likes_count}</span>
+                                            <span className="text-white text-sm w-full text-center mt-1">{data.likes_count}</span>
                                         </div>
                                     </div>
                                 </div>

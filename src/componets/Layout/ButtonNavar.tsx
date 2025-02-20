@@ -1,10 +1,10 @@
 import React from "react";
-import { FaHome, FaMoneyBill, FaPlusCircle, FaGamepad, FaUser, FaStore } from "react-icons/fa";
+import { FaHome, FaMoneyBill, FaPlusCircle, FaGamepad, FaStore } from "react-icons/fa";
 import { Link } from "react-router-dom";
 
 const BottomNavbar: React.FC = () => {
   return (
-  <nav className="fixed bottom-0 left-0 w-full bg-gray-900/50 text-white flex justify-around items-center py-2 shadow-lg">
+  <nav className="fixed bottom-0 left-0 w-full bg-gray-900/90 text-white flex justify-around items-center py-2 shadow-lg z-100">
   {/* Contenido del nav */}
       <button className="flex flex-col items-center text-gray-400 hover:text-white">
      

@@ -18,7 +18,7 @@ const Navbar: React.FC = () => {
           </a>
         </div>
 
-        {/* Barra de Búsqueda */}
+       
         <div className="hidden md:flex flex-grow max-w-lg items-center border border-gray-300 rounded-full px-4 py-2">
           <input
             type="text"
@@ -32,7 +32,7 @@ const Navbar: React.FC = () => {
           </button>
         </div>
 
-        {/* Íconos de acciones */}
+      
         <div className="flex items-center space-x-8">
           <button className="hidden md:flex text-gray-700 ml-15 mr-15">
             <Video size={24} />
@@ -44,6 +44,7 @@ const Navbar: React.FC = () => {
             <UserCircle size={32} />
           </button>
         </div>
+        
       </div>
 
       {/* Barra de Búsqueda en móviles */}
