@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Search, Video, Bell, MessageCircleMoreIcon, UserCircle } from "lucide-react";
+import { Link } from "react-router-dom";
 
 const Navbar: React.FC = () => {
   const [search, setSearch] = useState("");
@@ -39,7 +40,7 @@ const Navbar: React.FC = () => {
             <Bell size={24} />
           </button>
           <button className="text-black">
-            <UserCircle size={32} />
+            <Link to={'/profile'}><UserCircle size={32} /></Link>
           </button>
         </div>
 

@@ -3,7 +3,8 @@ import { Wallet, Plus, ArrowDown, ArrowUp } from "lucide-react";
 import BottomNavbar from "../Layout/ButtonNavar";
 
 const WalletComponent = () => {
-  const [balance, setBalance] = useState(1250.0);
+  // setBalance
+  const [balance, ] = useState(1250.0);
 
   const transactions = [
     { description: "Compra en Store", amount: 50, type: "income" },

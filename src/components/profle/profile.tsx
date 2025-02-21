@@ -3,6 +3,7 @@
 import { Share2, Settings, Link, Play } from "lucide-react"
 import { Button } from "../ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs"
+import BottomNavbar from "../Layout/ButtonNavar"
 
 // interface VideoItem {
 //   id: string
@@ -126,6 +127,7 @@ export default function ProfileSeccion() {
           </TabsContent>
         </Tabs>
       </div>
+      <BottomNavbar />
     </div>
   )
 }

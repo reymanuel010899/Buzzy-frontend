@@ -1,6 +1,4 @@
-@import "tailwindcss/preflight";
-@import "tailwindcss/utilities"; /* ✅ SOLO USA `utilities` */
-
+@import "tailwindcss/index";
 @custom-variant dark (&:is(.dark *));
 .cover-container {
     display: flex;
