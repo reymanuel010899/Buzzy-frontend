@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { FiSearch, FiSun, FiMoon } from "react-icons/fi";
+import { FiSearch,  FiSun, FiMoon } from "react-icons/fi";
 import { motion } from "framer-motion";
-
+import { FaPlusCircle } from "react-icons/fa";
+import BottomNavbar from "../../componets/Layout/ButtonNavar";
 const categories = ["Electrónica", "Moda", "Hogar", "Juguetes", "Deportes", "Libros"];
 const locations = ["Ciudad de México", "Guadalajara", "Monterrey", "Cancún"];
 const products = [
@@ -25,28 +26,31 @@ const Marketplace = () => {
 
   return (
     <div className={`min-h-screen ${darkMode ? "bg-gray-900 text-white" : "bg-gray-200 text-black"}`}> 
-      <header className="flex items-center justify-between p-6 shadow-lg bg-opacity-90 backdrop-blur-md">
-        <h1 className="text-3xl sm:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-blue-500">
-          Marketplace Futurista
+        <h1 className="text-3xl text-center p-5 sm:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-blue-500">
+          Marketplace
         </h1>
+      <header className="flex items-center justify-between p-6 shadow-lg bg-opacity-90 backdrop-blur-md">
         <div className="flex space-x-4 items-center">
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.5 }} className="relative">
+            <FaPlusCircle size={35} />
+          <motion.div  initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.5 }} className="relative">
             <input
               type="text"
               placeholder="Buscar..."
-              className="px-4 py-2 rounded-full shadow-md bg-gray-800 text-white focus:outline-none"
+              className="px-3 py-2 rounded-full shadow-md bg-gray-800 text-white focus:outline-none"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
-            <FiSearch className="absolute top-3 right-3 text-gray-400" />
+            <FiSearch  className="absolute top-3 right-3 text-gray-400" />
           </motion.div>
           <motion.button 
             onClick={() => setDarkMode(!darkMode)}
-            className="text-xl p-2 rounded-full bg-gray-700 hover:bg-gray-600 transition"
+            className="text-xl p-3 rounded-full bg-white hover:bg-gray-600 transition"
+          
             whileHover={{ scale: 1.1 }}
           >
-            {darkMode ? <FiSun /> : <FiMoon />}
+            {darkMode ? <FiSun color="black"/> : <FiMoon color="black"/>}
           </motion.button>
+        
         </div>
       </header>
       
@@ -83,6 +87,7 @@ const Marketplace = () => {
           <p className="text-center col-span-full text-gray-400">No se encontraron productos</p>
         )}
       </motion.div>
+      <BottomNavbar/>
     </div>
   );
 };
