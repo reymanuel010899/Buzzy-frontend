@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { IDataSignUp } from '../../componets/auth/auth.interface';
+import { IDataSignUp } from '../../components/auth/auth.interface';
 import { SUCCEES_REGISTER, FAILED_REGISTER } from '../type'
 
 export const register = (formData: IDataSignUp ) => async (dispatch: any) => {

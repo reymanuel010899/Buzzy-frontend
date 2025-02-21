@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { Mail, Lock, User, Eye, EyeOff } from "lucide-react";
-import { IDataSignUp } from "../../componets/auth/auth.interface";
+import { IDataSignUp } from "../../components/auth/auth.interface";
 import { register } from "../../redux/actions/register";
 import { useDispatch } from 'react-redux';
 import { useNavigate

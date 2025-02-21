@@ -9,6 +9,11 @@ export interface Video {
     tags: string[];
     thumbnail_url: string;
     updated_at: string; // También podría ser Date si se convierte
-    user_id: number;
+    user_id: {
+        id: number;
+        username: string;
+        profile_picture: string;
+    };
     video_url: string;
+    video: string;
 }

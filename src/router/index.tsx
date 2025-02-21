@@ -11,6 +11,7 @@ import Marketplace from "../pages/main/Marker";
 import Wallet from "../pages/main/wallet";
 import Store from "../pages/main/store";
 import Game from "../pages/main/game";
+import Profile from "../pages/profille/profile";
 
 
   
@@ -67,7 +68,14 @@ import Game from "../pages/main/game";
 
               }
             />
-             http://localhost:5174/
+             <Route
+              path="/profile"
+              element={
+                  <Profile/>
+
+              }
+            />
+  
       </>
     )
   );

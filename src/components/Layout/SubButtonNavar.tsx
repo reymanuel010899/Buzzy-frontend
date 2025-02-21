@@ -1,6 +1,6 @@
 import React from "react";
-import { FaHome, FaSearch, FaPlusCircle, FaGamepad, FaUser, FaStore } from "react-icons/fa";
-import { Link } from "react-router-dom";
+import { FaHome,  FaPlusCircle, FaGamepad, FaUser, FaStore } from "react-icons/fa";
+// import { Link } from "react-router-dom";
 
 const SubBottomNavbarGame: React.FC = () => {
   return (

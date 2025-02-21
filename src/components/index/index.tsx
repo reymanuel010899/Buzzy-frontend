@@ -2,7 +2,7 @@ import BottomNavbar from '../Layout/ButtonNavar';
 import { Link } from 'react-router-dom';
 import Categories from './categoria';
 import { Video  as VideoPro} from './main.interface';
-import { Eye, MessageCircle, Heart, MessageCircleMoreIcon, Volume2, VolumeX } from 'lucide-react'; 
+import { Eye, MessageCircle, Heart, Volume2, VolumeX } from 'lucide-react'; 
 import { useState, useEffect, useRef } from 'react';
 interface StreamingUIProps {
     media: VideoPro[] | null;

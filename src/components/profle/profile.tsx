@@ -1,25 +1,25 @@
 
 
 import { Share2, Settings, Link, Play } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Button } from "../ui/button"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs"
 
-interface VideoItem {
-  id: string
-  views: number
-  thumbnail: string
-}
+// interface VideoItem {
+//   id: string
+//   views: number
+//   thumbnail: string
+// }
 
-interface ProfileProps {
-  username: string
-  displayName: string
-  following: number
-  followers: number
-  likes: number
-  description: string
-  websiteUrl: string
-  videos: VideoItem[]
-}
+// interface ProfileProps {
+//   username: string
+//   displayName: string
+//   following: number
+//   followers: number
+//   likes: number
+//   description: string
+//   websiteUrl: string
+//   videos: VideoItem[]
+// }
 
 export default function ProfileSeccion() {
 

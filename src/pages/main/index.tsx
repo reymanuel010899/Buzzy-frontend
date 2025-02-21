@@ -1,10 +1,10 @@
-import Layout from "../../componets/Layout/Layout"
-import StreamingUI from "../../componets/index"
+import Layout from "../../components/Layout/Layout"
+import StreamingUI from "../../components/index/index"
 import { connect } from "react-redux"
 import { RootState } from "../../store"
 import { useEffect,  useRef } from "react";
 import { getMedia } from "../../redux/actions/getMedia";
-const Main = ({ media, getMedia }: { media: any; getMedia: () => void }) => {
+const Main = ({ media, getMedia }: { media: []; getMedia: () => void }) => {
     const hasCalled = useRef(false);
     useEffect(() => {
         if (!hasCalled.current) {

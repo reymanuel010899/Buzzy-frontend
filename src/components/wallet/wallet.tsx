@@ -3,10 +3,8 @@ import { Wallet, Plus, ArrowDown, ArrowUp } from "lucide-react";
 import BottomNavbar from "../Layout/ButtonNavar";
 
 const WalletComponent = () => {
-  // Estado para el balance (puedes actualizar la lógica para hacerlo dinámico)
   const [balance, setBalance] = useState(1250.0);
 
-  // Lista de transacciones simuladas (reemplázala con datos reales según sea necesario)
   const transactions = [
     { description: "Compra en Store", amount: 50, type: "income" },
     { description: "Pago recibido", amount: 100, type: "income" },
@@ -15,7 +13,7 @@ const WalletComponent = () => {
   ];
 
   return (
-    <div className="flex flex-col items-center p-4 text-white space-y-8 bg-gradient-to-r from-white-900 via-gray-800 to-gray-900 text-white min-h-screen font-sans">
+    <div className="flex flex-col items-center p-4 text-white space-y-8 bg-gradient-to-r from-white-900 via-gray-800 to-gray-900 min-h-screen font-sans">
       {/* Tarjeta principal de la Wallet */}
       <div className="w-full max-w-md  from-indigo-800 via-purple-800 to-pink-800 p-6 rounded-3xl shadow-2xl transform hover:scale-105 transition duration-300">
         <div className="flex flex-col items-center">

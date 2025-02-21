@@ -2,7 +2,7 @@ import { useState } from "react";
 import { FiSearch,  FiSun, FiMoon } from "react-icons/fi";
 import { motion } from "framer-motion";
 import { FaPlusCircle } from "react-icons/fa";
-import BottomNavbar from "../../componets/Layout/ButtonNavar";
+import BottomNavbar from "../../components/Layout/ButtonNavar";
 const categories = ["Electrónica", "Moda", "Hogar", "Juguetes", "Deportes", "Libros"];
 const locations = ["Ciudad de México", "Guadalajara", "Monterrey", "Cancún"];
 const products = [
@@ -36,30 +36,29 @@ const Marketplace = () => {
             <input
               type="text"
               placeholder="Buscar..."
-              className="px-3 py-2 rounded-full shadow-md bg-gray-800 text-white focus:outline-none"
+              className="px-7 py-4 rounded-full shadow-md bg-gray-800 text-white focus:outline-none"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
-            <FiSearch  className="absolute top-3 right-3 text-gray-400" />
+            <FiSearch  className="absolute top-5 right-3 text-gray-400" />
           </motion.div>
           <motion.button 
             onClick={() => setDarkMode(!darkMode)}
-            className="text-xl p-3 rounded-full bg-white hover:bg-gray-600 transition"
+            className="text-xl p-2 rounded-full bg-white hover:bg-gray-600 transition"
           
             whileHover={{ scale: 1.1 }}
           >
             {darkMode ? <FiSun color="black"/> : <FiMoon color="black"/>}
           </motion.button>
-        
         </div>
       </header>
       
       <motion.div className="flex flex-col sm:flex-row justify-center space-y-4 sm:space-x-6 sm:space-y-0 p-4 bg-gray-900 text-white shadow-md" initial={{ y: -50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.5 }}>
         <motion.div className="relative w-full sm:w-auto">
-          <select className="w-full px-4 py-2 bg-gray-800 rounded-full hover:bg-gray-700 transition" value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value)}>
+          <select className="w-full px-2 py-2 bg-gray-800 rounded-full hover:bg-gray-700 transition" value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value)}>
             <option value="">Todas las Categorías</option>
             {categories.map((category) => (
-              <option key={category} value={category}>{category}</option>
+              <option className="w-28" key={category} value={category}>{category}</option>
             ))}
           </select>
         </motion.div>
