@@ -2,11 +2,15 @@ import Layout from "../../componets/Layout/Layout"
 import StreamingUI from "../../componets/index"
 import { connect } from "react-redux"
 import { RootState } from "../../store"
-import { useEffect } from "react";
+import { useEffect,  useRef } from "react";
 import { getMedia } from "../../redux/actions/getMedia";
 const Main = ({ media, getMedia }: { media: any; getMedia: () => void }) => {
+    const hasCalled = useRef(false);
     useEffect(() => {
-        getMedia(); // Aquí se llama correctamente la acción
+        if (!hasCalled.current) {
+            getMedia();
+            hasCalled.current = true; 
+        }
     }, [getMedia]);
 
 
