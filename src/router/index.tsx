@@ -67,6 +67,7 @@ import Game from "../pages/main/game";
 
               }
             />
+             http://localhost:5174/
       </>
     )
   );

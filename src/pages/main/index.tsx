@@ -1,5 +1,5 @@
 import Layout from "../../componets/Layout/Layout"
-import StreamingUI from "../../componets/index/inde"
+import StreamingUI from "../../componets/index"
 import { connect } from "react-redux"
 import { RootState } from "../../store"
 import { useEffect } from "react";
