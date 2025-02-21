@@ -2,8 +2,8 @@ import BottomNavbar from '../Layout/ButtonNavar';
 import { Link } from 'react-router-dom';
 import Categories from './categoria';
 import { Video  as VideoPro} from './main.interface';
-import { Eye, MessageCircle, Heart, Volume2, VolumeX } from 'lucide-react'; 
-import { useState, useEffect } from 'react';
+import { Eye, MessageCircle, Heart, MessageCircleMoreIcon, Volume2, VolumeX } from 'lucide-react'; 
+import { useState, useEffect, useRef } from 'react';
 interface StreamingUIProps {
     media: VideoPro[] | null;
 }
@@ -13,11 +13,38 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     const [isLiked, setIsLiked] = useState(false);  // Estado para manejar "like"
     const [isComment, setIsComment] = useState(false);
     const [isView, setIsView] = useState(false);
+    const videoRefs = useRef<(HTMLVideoElement | null)[]>([]);
 
     useEffect(() => {
         const handleResize = () => setIsMobile(window.innerWidth <= 500);
         window.addEventListener('resize', handleResize);
         return () => window.removeEventListener('resize', handleResize);
+    }, []);
+
+    useEffect(() => {
+        const observer = new IntersectionObserver(
+            (entries) => {
+                entries.forEach((entry) => {
+                    const video = entry.target as HTMLVideoElement;
+                    if (entry.isIntersecting) {
+                        video.play();
+                    } else {
+                        video.pause();
+                    }
+                });
+            },
+            { threshold: 0.5 } // Se activa cuando al menos el 50% del video está visible
+        );
+
+        videoRefs.current.forEach((video) => {
+            if (video) observer.observe(video);
+        });
+
+        return () => {
+            videoRefs.current.forEach((video) => {
+                if (video) observer.unobserve(video);
+            });
+        };
     }, []);
 
     useEffect(() => {
@@ -116,6 +143,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                                     className="absolute inset-0 bg-gradient-to-t from-black to-transparent"
                                 >
                                 <video
+                                    ref={(el) => (videoRefs.current[index] = el)}
                                     autoPlay
                                     muted={isMuted}
                                     loop
