@@ -4,7 +4,10 @@ import { Share2, Settings, Link, Play } from "lucide-react"
 import { Button } from "../ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs"
 import BottomNavbar from "../Layout/ButtonNavar"
-
+import { connect } from "react-redux"
+import { RootState } from "../../store"
+import { getUser } from "../../redux/actions/GetUser"
+import { useEffect } from "react"
 // interface VideoItem {
 //   id: string
 //   views: number
@@ -22,7 +25,7 @@ import BottomNavbar from "../Layout/ButtonNavar"
 //   videos: VideoItem[]
 // }
 
-export default function ProfileSeccion() {
+function ProfileSeccion({getUser, user }: { media: []; getMedia: () => void }) {
 
   const data = {
     username: "facturize",
@@ -41,8 +44,9 @@ export default function ProfileSeccion() {
       { id: "6", views: 124, thumbnail: "/placeholder.svg?height=200&width=200" },
     ],
   }
-
-
+  useEffect(() => {
+    getUser();
+  }, [getUser])
 
   return (
     <div className="min-h-screen bg-black text-white p-4 max-w-2xl mx-auto">
@@ -131,3 +135,12 @@ export default function ProfileSeccion() {
     </div>
   )
 }
+
+
+
+const mapStateToProps = (state: RootState) => ({
+  media: state.getMedia.media,
+  user: state.getUserDetail.user,
+});
+
+export default connect(mapStateToProps, { getUser })(ProfileSeccion);

@@ -1,9 +1,11 @@
 import React, { useState } from "react";
-import { Search, Video, Bell, MessageCircleMoreIcon, UserCircle } from "lucide-react";
+import { Search, Video, Bell, MessageCircleMoreIcon } from "lucide-react";
 import { Link } from "react-router-dom";
 
 const Navbar: React.FC = () => {
   const [search, setSearch] = useState("");
+  const user = JSON.parse(localStorage.getItem("user") || "{}");
+  console.log(user);
 
   return (
     <nav className="bg-white shadow-md fixed w-full top-0 z-50 px-4 md:px-6">
@@ -40,7 +42,7 @@ const Navbar: React.FC = () => {
             <Bell size={24} />
           </button>
           <button className="text-black">
-            <Link to={'/profile'}><UserCircle size={32} /></Link>
+            <Link to={'/profile'}><img className="w-8 h-8 rounded-full object-cover" src={`http://localhost:8000/${user.profile_picture}`} alt="" /></Link>
           </button>
         </div>
 

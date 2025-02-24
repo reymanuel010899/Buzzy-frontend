@@ -12,6 +12,7 @@ import Wallet from "../pages/main/wallet";
 import Store from "../pages/main/store";
 import Game from "../pages/main/game";
 import Profile from "../pages/profille/profile";
+import PrivateRoute from "../PrivateRoute";
 
 
   
@@ -30,6 +31,7 @@ import Profile from "../pages/profille/profile";
                   <SignUp/>
               }
             />
+        <Route element={<PrivateRoute />}>
             <Route
               path="/"
               element={
@@ -75,7 +77,8 @@ import Profile from "../pages/profille/profile";
 
               }
             />
-  
+          </Route>
+
       </>
     )
   );
