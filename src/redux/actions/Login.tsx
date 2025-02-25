@@ -31,6 +31,10 @@ export const login = (formData: fetchWithAuthProps) => async (dispatch: any) => 
         payload: response.data,
       });
     } else {
+      localStorage.removeItem("refreshToken");
+      localStorage.removeItem("accessToken");
+      localStorage.removeItem("isAuthenticated");
+      localStorage.removeItem("user");
       dispatch({
         type: FAILED_LOGIN,
         payload: null,

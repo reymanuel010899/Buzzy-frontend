@@ -95,6 +95,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     const toggleMute = () => {
         setIsMuted(!isMuted);
     };
+    console.log(media    )
     return (
         <div className="bg-gradient-to-r from-white-900 via-gray-800 to-gray-900 text-white min-h-screen font-sans">
             <main className="pt-24 p-1">
@@ -173,7 +174,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                                             onClick={() => handleViewClick('1')}
                                         >
                                             <Eye className={`transition-all duration-500 ${isView ? "w-8 h-8 fill-current" : "w-7 h-7"} text-white`} />
-                                            <span className="text-white text-sm w-full text-center mt-1">{1 | 0}</span>
+                                            <span className="text-white text-sm w-full text-center mt-1">{data.view_acount | 0}</span>
                                         </div>
                                         <div
                                             className="flex flex-col items-center text-red-500 transition-all duration-500 cursor-pointer"
@@ -182,7 +183,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                                             <MessageCircle
                                                 className={`transition-all duration-500 ${isComment ? "w-8 h-8 fill-current" : "w-7 h-7"} text-white`}
                                             />
-                                            <span className="text-white text-sm w-full text-center mt-1">{data.comments_count}</span>
+                                            <span className="text-white text-sm w-full text-center mt-1">{data.comments_count | 0}</span>
                                         </div>
                                         <div
                                             className="flex flex-col items-center text-red-500 transition-all duration-500 cursor-pointer"
@@ -191,7 +192,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                                             <Heart
                                                 className={`transition-all duration-500 ${isLiked ? "w-8 h-8 fill-current" : "w-7 h-7"} ${isLiked ? "text-red-500" : "text-white"}`}
                                             />
-                                            <span className="text-white text-sm w-full text-center mt-1">{data.likes_count}</span>
+                                            <span className="text-white text-sm w-full text-center mt-1">{data.like_count | 0}</span>
                                         </div>
                                     </div>
                                 </div>

@@ -25,7 +25,7 @@ const Marketplace = () => {
   );
 
   return (
-    <div className={`min-h-screen ${darkMode ? "bg-gray-900 text-white" : "bg-gray-200 text-black"}`}> 
+    <div className={`min-h-screen ${darkMode ? "bg-gray-900 text-white " : "bg-gray-200 text-black"}`}> 
         <h1 className="text-3xl text-center p-5 sm:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-blue-500">
           Marketplace
         </h1>

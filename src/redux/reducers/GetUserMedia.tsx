@@ -1,20 +1,20 @@
-import { SUCCEES_MEDIA, FAILED_MEDIA } from "../type";
+import { SUCCEES_GET_MEDIA_USER, FAILED_GET_MEDIA_USER } from "../type";
 
 const inicializerState = {
-    media: null,
+    media_user: null,
     error: null,
 }
 
-const getMedia = (state = inicializerState, action: {type: string, payload: any}) => { 
+const getMediaByUser = (state = inicializerState, action: {type: string, payload: any}) => { 
     const { type, payload } = action;
     switch (type) {
-        case SUCCEES_MEDIA:
+        case SUCCEES_GET_MEDIA_USER:
             return {
                 ...state,
-                media: payload,   
+                media_user: payload,   
                 error: null,          
             };
-        case FAILED_MEDIA:
+        case FAILED_GET_MEDIA_USER:
             return {
                 ...state,
                 error: payload,
@@ -24,4 +24,4 @@ const getMedia = (state = inicializerState, action: {type: string, payload: any}
     }
 }
 
-export default getMedia;
+export default getMediaByUser;
