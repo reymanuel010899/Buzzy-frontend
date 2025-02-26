@@ -21,7 +21,7 @@ interface User {
   last_name: string;
   profile_picture: string;
   username: string;
-  follower_all_acount: number;
+  follower_all_acount: number | null;
   like_all_count: number;
 }
 
@@ -41,8 +41,8 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: { getUser: 
     username: user && user.first_name,
     displayName: user && user.email,
     following: 35,
-    followers: user.follower_all_acount,
-    likes: user.like_all_count,
+    likes: user?.like_all_count || 0,
+    followers: user?.follower_all_acount || 0,
     description: "SOMOS UNA EMPRESA QUE GESTIONA SOFTWARE EMPRESARIALES GRATIS, SOLO PRUEBALO",
     websiteUrl: "youtube.com/channel/UCgeF...",
   };
@@ -190,11 +190,11 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: { getUser: 
             <div className="text-gray-400">Following</div>
           </div>
           <div className="text-center">
-            <div className="font-semibold">{data.followers}K</div>
+            <div className="font-semibold">{data.followers}</div>
             <div className="text-gray-400">Followers</div>
           </div>
           <div className="text-center">
-            <div className="font-semibold">{data.likes}K</div>
+            <div className="font-semibold">{data.likes}</div>
             <div className="text-gray-400">Likes</div>
           </div>
         </div>
