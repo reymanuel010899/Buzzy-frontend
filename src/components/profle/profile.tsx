@@ -60,7 +60,6 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: { getUser: 
   }, [getUserMedia]);
   
 
-  console.log(media_user&&media_user, "------------rey----------------")
 
   useEffect(() => {
     const observer = new IntersectionObserver(
@@ -105,6 +104,7 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: { getUser: 
 
 
   return (
+    <>
     <div className="min-h-screen text-white p-4 max-w-2xl mx-auto   flex flex-col items-center  space-y-8 bg-gradient-to-r from-white-900 via-gray-800 to-gray-900  font-sans">
       <div className="flex flex-col items-center space-y-4">
         {/* Logo */}
@@ -224,15 +224,17 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: { getUser: 
         </Tabs>
       </div>
       
-      {/* Modal para el video en pantalla completa */}
-      {selectedVideo && (
+     
+      <BottomNavbar />
+    </div>
+     {selectedVideo && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50"
-          style={{ height: "950px" }} 
+          className="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50  rounded-lg hover:scale-105 transform transition duration-300 "
+      
           onClick={closeFullScreen}
         >
           <div 
-            className="relative w-full h-full max-w-4xl p-4"
+            className="relative w-full h-full max-w-4xl"
             style={{ height: "100vh" }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -248,17 +250,17 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: { getUser: 
               muted={isMuted}
               loop
               playsInline
-              className="w-full h-full object-contain"
+              className="w-full h-full  object-cover"
+              style={{ maxHeight: "100vh", maxWidth: "100vw"}}
               onError={(e) => console.error("Error al cargar el video en pantalla completa:", e)}
             >
-              <source src={`http://127.0.0.1:8000/${selectedVideo.video}`} type="video/mp4" />
+              <source style={{height: '3009'}} src={`http://127.0.0.1:8000/${selectedVideo.video}`} type="video/mp4" />
               Tu navegador no soporta el formato de video.
             </video>
           </div>
         </div>
       )}
-      <BottomNavbar />
-    </div>
+    </>
   );
 }
 

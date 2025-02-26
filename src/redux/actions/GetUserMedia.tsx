@@ -8,6 +8,7 @@ export const getUserMedia = () => async (dispatch: any) => {
               Authorization: `Bearer ${localStorage.getItem("accessToken")}`
             }
         });
+        console.log(response)
         if (response.status === 200) {
             dispatch({
             type: SUCCEES_GET_MEDIA_USER,
