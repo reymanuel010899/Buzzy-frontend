@@ -99,24 +99,21 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     return (
         <div className="bg-gradient-to-r from-white-900 via-gray-800 to-gray-900 text-white min-h-screen font-sans">
             <main className="pt-24 p-1">
-                <section className="relative w-full h-[500px] flex items-center justify-center text-center">
-                    <div
-                        className="relative w-full h-full bg-cover bg-center rounded-lg overflow-hidden"
-                        style={{ backgroundImage: "url('https://via.placeholder.com/1600x900')" }}
-                    >
-                        <div className="absolute inset-0 bg-black bg-opacity-60 flex flex-col justify-center items-center px-4">
-                            <h2 className="text-5xl font-extrabold text-blue-400 animate-pulse">
-                                Iniciar transmisión en vivo
-                            </h2>
-                            <Link
-                                to={'/lives'}
-                                className="mt-6 px-8 py-3 bg-purple-600 rounded-full text-lg shadow-xl hover:bg-purple-700 transition duration-300"
-                            >
-                                Start
-                            </Link>
-                        </div>
-                    </div>
-                </section>
+            <section className="relative w-full h-[400px] flex items-center justify-center text-center mb-8">
+          <div className="relative w-full h-full bg-gradient-to-br from-purple-900/50 to-blue-900/50 rounded-2xl overflow-hidden">
+            <div className="absolute inset-0 flex flex-col justify-center items-center px-4 backdrop-blur-sm">
+              <h2 className="text-4xl md:text-5xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400 mb-6">
+                Iniciar transmisión en vivo
+              </h2>
+              <Link
+                to={"/lives"}
+                className="px-8 py-3 bg-purple-600 rounded-full text-lg font-medium shadow-xl hover:bg-purple-700 transition-all duration-300 hover:scale-105"
+              >
+                Start
+              </Link>
+            </div>
+          </div>
+        </section>
 
                 <section className="mt-10">
                     <h3 className="text-3xl font-semibold text-center mb-6">Trending Series</h3>
