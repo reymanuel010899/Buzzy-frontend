@@ -71,10 +71,9 @@ import PrivateRoute from "../PrivateRoute";
               }
             />
              <Route
-              path="/profile"
+              path="/profile/:username"
               element={
                   <Profile/>
-
               }
             />
           </Route>

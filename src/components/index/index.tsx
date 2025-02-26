@@ -162,7 +162,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                                             <button className="text-white">
                                                 <img className="w-8 h-8 rounded-full object-cover" src={`${ data.user_id?.profile_picture ? data.user_id.profile_picture  : "http://localhost:8000/media/profile_pics/avatar.webp" }`} alt="" />
                                             </button>
-                                        <Link className=" text-white  border-white" to={'/wallet'}>{data.user_id?.username}</Link>
+                                        <Link className=" text-white  border-white" to={`/profile/${data.user_id?.username}`}>{data.user_id?.username}</Link>
                                         </div>
                                     </div>
                                     <div className="flex items-center justify-between w-full px-2">

@@ -38,7 +38,7 @@ const Navbar: React.FC = () => {
           <button className="hidden md:flex text-gray-400 hover:text-purple-400 transition-colors">
             <Bell className="text-purple-400 w-8 h-8" size={24} />
           </button>
-          <Link to="/profile" className="relative group">
+          <Link to={`/profile/${user.username}/`} className="relative group">
             <img
               className="w-10 h-10 rounded-full object-cover border-2 border-transparent group-hover:border-purple-400 transition-all duration-300"
               src={`http://localhost:8000/${user.profile_picture}`}

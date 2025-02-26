@@ -1,4 +1,4 @@
-import { Share, Settings, Link, Volume2, VolumeX, Play, X } from "lucide-react";
+import { Share, Settings, Link, Volume2, VolumeX, Play, X, Share2, Bookmark } from "lucide-react";
 import { Button } from "../ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
 import BottomNavbar from "../Layout/ButtonNavar";
@@ -7,6 +7,8 @@ import { RootState } from "../../store";
 import { getUser } from "../../redux/actions/GetUser";
 import { getUserMedia } from "../../redux/actions/GetUserMedia";
 import { useEffect, useRef, useState } from "react";
+import {  MessageCircle, Heart } from "lucide-react"
+import { useParams } from "react-router-dom";
 
 interface User {
   bio: string;
@@ -19,6 +21,8 @@ interface User {
   last_name: string;
   profile_picture: string;
   username: string;
+  follower_all_acount: number;
+  like_all_count: number;
 }
 
 interface VideoItem {
@@ -30,35 +34,64 @@ interface VideoItem {
   media_user?: object
 }
 
-function ProfileSeccion({ getUser, user, getUserMedia, media_user }: { getUser: () => void, user: User, getUserMedia:  () => void, media_user: VideoItem }) {
+function ProfileSeccion({ getUser, user, getUserMedia, media_user }: { getUser: (username: string) => void, user: User, getUserMedia:  (username: string) => void, media_user: VideoItem }) {
   const [isMuted, setIsMuted] = useState(true);
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([]);
   const data = {
     username: user && user.first_name,
     displayName: user && user.email,
     following: 35,
-    followers: 33,
-    likes: 303.2,
+    followers: user.follower_all_acount,
+    likes: user.like_all_count,
     description: "SOMOS UNA EMPRESA QUE GESTIONA SOFTWARE EMPRESARIALES GRATIS, SOLO PRUEBALO",
     websiteUrl: "youtube.com/channel/UCgeF...",
   };
   const userref = useRef(false)
   const [selectedVideo, setSelectedVideo] = useState<VideoItem | null>(null)
+  const [isLiked, setIsLiked] = useState(false) // Estado para manejar "like"
+  const [isComment, setIsComment] = useState(false)
+  const [isView, setIsView] = useState(false)
   const mediaref = useRef(false)
-  useEffect(() => {
-    if (!userref.current) {
-      getUser();
-      userref.current = true
-    }
-  }, [getUser]);
+  const userParams = useParams()
+  const {username} = userParams;
 
   useEffect(() => {
-    // if (!mediaref.current) {
-      getUserMedia()
+    if (!userref.current) {
+      getUser(username || '');
+      userref.current = true
+    }
+  }, [getUser, username]);
+
+  useEffect(() => {
+    if (!mediaref.current) {
+      getUserMedia(username || '')
       mediaref.current = true
-    // }
-  }, [getUserMedia]);
+    }
+  }, [getUserMedia, username]);
   
+  useEffect(() => {
+    if (isLiked) {
+      setTimeout(() => {
+        setIsLiked(true)
+      }, 500)
+    }
+  }, [isLiked])
+
+  useEffect(() => {
+    if (isComment) {
+      setTimeout(() => {
+        setIsComment(true)
+      }, 500)
+    }
+  }, [isComment])
+
+  useEffect(() => {
+    if (isView) {
+      setTimeout(() => {
+        setIsView(true)
+      }, 500)
+    }
+  }, [isView])
 
 
   useEffect(() => {
@@ -102,6 +135,21 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: { getUser: 
     }
   };
 
+  const handleLikeClick = (videoId: string) => {
+    setIsLiked((prev) => !prev)
+    console.log(`Se hizo click en "Like" del video con ID: ${videoId}`)
+  }
+
+  const handleCommentClick = (videoId: string) => {
+    setIsComment(true)
+    console.log(`Se hizo click en "Comentario" del video con ID: ${videoId}`)
+  }
+
+  // const handleViewClick = (videoId: string) => {
+  //   setIsView(true)
+  //   console.log(`Se hizo click en "Vista" del video con ID: ${videoId}`)
+  // }
+
 
   return (
     <>
@@ -111,7 +159,7 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: { getUser: 
         <div className="w-24 h-24 rounded-full text-center bg-gradient-to-r from-blue-500 via-purple-500 to-blue-500 flex items-center justify-center text-4xl font-bold">
           <img
             className="w-24 h-24 rounded-full text-center object-cover"
-            src={`http://127.0.0.1:8000/${user && user.profile_picture}`}
+            src={`http://127.0.0.1:8000/${user&&user.profile_picture ? user.profile_picture : 'media/profile_pics/avatar.webp'  }`}
             alt=""
           />
         </div>
@@ -227,36 +275,100 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: { getUser: 
      
       <BottomNavbar />
     </div>
-     {selectedVideo && (
-        <div 
-          className="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50  rounded-lg hover:scale-105 transform transition duration-300 "
-      
-          onClick={closeFullScreen}
-        >
-          <div 
+    {selectedVideo && (
+        <div className="fixed inset-0 bg-black/95 flex items-center justify-center z-50" onClick={closeFullScreen}>
+          <div
             className="relative w-full h-full max-w-4xl"
             style={{ height: "100vh" }}
             onClick={(e) => e.stopPropagation()}
           >
+            {/* Close button */}
             <button
-              className="absolute top-4 right-4 text-white p-2 rounded-full shadow-lg z-60"
+              className="absolute top-4 right-4 bg-black/50 hover:bg-black/70 text-white p-2 rounded-full backdrop-blur-sm transition-all duration-300 z-50"
               onClick={closeFullScreen}
             >
-              X
+              <X className="w-6 h-6" />
             </button>
+
+            {/* Video */}
             <video
               ref={(el) => (videoRefs.current[0] = el)}
               autoPlay
               muted={isMuted}
               loop
               playsInline
-              className="w-full h-full  object-cover"
-              style={{ maxHeight: "100vh", maxWidth: "100vw"}}
+              className="w-full h-full object-cover"
+              style={{ maxHeight: "100vh", maxWidth: "100vw" }}
               onError={(e) => console.error("Error al cargar el video en pantalla completa:", e)}
             >
-              <source style={{height: '3009'}} src={`http://127.0.0.1:8000/${selectedVideo.video}`} type="video/mp4" />
+              <source src={`http://127.0.0.1:8000/${selectedVideo.video}`} type="video/mp4" />
               Tu navegador no soporta el formato de video.
             </video>
+
+            {/* Interaction buttons */}
+            <div className="absolute right-4 bottom-10 flex flex-col items-center gap-6">
+              {/* Profile */}
+              <div className="flex flex-col items-center gap-1">
+                <button className="w-12 h-12 rounded-full overflow-hidden border-2 border-white hover:border-purple-400 transition-colors">
+                  <img
+                    src={`http://127.0.0.1:8000/${selectedVideo.user_id?.profile_picture}`}
+                    alt="Profile"
+                    className="w-full h-full object-cover"
+                  />
+                </button>
+                <span className="text-white text-xs">+</span>
+              </div>
+
+              {/* Like */}
+              <div className="flex flex-col items-center gap-1">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleLikeClick(selectedVideo.id)
+                  }}
+                  className="p-3 rounded-full bg-black/50 hover:bg-black/70 backdrop-blur-sm transition-all duration-300"
+                >
+                  <Heart className={`w-6 h-6 ${isLiked ? "fill-red-500 text-red-500" : "text-white"}`} />
+                </button>
+                <span className="text-white text-xs">{selectedVideo.likes_count || 0}</span>
+              </div>
+
+              {/* Comment */}
+              <div className="flex flex-col items-center gap-1">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleCommentClick(selectedVideo.id)
+                  }}
+                  className="p-3 rounded-full bg-black/50 hover:bg-black/70 backdrop-blur-sm transition-all duration-300"
+                >
+                  <MessageCircle className="w-6 h-6 text-white" />
+                </button>
+                <span className="text-white text-xs">{selectedVideo.comments_count || 0}</span>
+              </div>
+
+              {/* Bookmark */}
+              <div className="flex flex-col items-center gap-1">
+                <button
+                  className="p-3 rounded-full bg-black/50 hover:bg-black/70 backdrop-blur-sm transition-all duration-300"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Bookmark className="w-6 h-6 text-white" />
+                </button>
+                <span className="text-white text-xs">54K</span>
+              </div>
+
+              {/* Share */}
+              <div className="flex flex-col items-center gap-1">
+                <button
+                  className="p-3 rounded-full bg-black/50 hover:bg-black/70 backdrop-blur-sm transition-all duration-300"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Share2 className="w-6 h-6 text-white" />
+                </button>
+                <span className="text-white text-xs">81.5K</span>
+              </div>
+            </div>
           </div>
         </div>
       )}
