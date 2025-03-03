@@ -41,7 +41,7 @@ const Navbar: React.FC = () => {
           <Link to={`/profile/${user.username}/`} className="relative group">
             <img
               className="w-10 h-10 rounded-full object-cover border-2 border-transparent group-hover:border-purple-400 transition-all duration-300"
-              src={`http://localhost:8000/${user.profile_picture}`}
+              src={`http://localhost:8000${user.profile_picture ? user.profile_picture : '/profile_pics/avatar.webp'}`}
               alt="Profile"
             />
             <div className="absolute inset-0 rounded-full bg-purple-400 opacity-0 group-hover:opacity-25 transition-opacity duration-300"></div>

@@ -13,6 +13,7 @@ import Store from "../pages/main/store";
 import Game from "../pages/main/game";
 import Profile from "../pages/profille/profile";
 import PrivateRoute from "../PrivateRoute";
+// import { MapScreen } from "../components/index";
 
 
   
@@ -76,6 +77,7 @@ import PrivateRoute from "../PrivateRoute";
                   <Profile/>
               }
             />
+            {/* <Route path="/map" element={<MapScreen />} /> */}
           </Route>
 
       </>

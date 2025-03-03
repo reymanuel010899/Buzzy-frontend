@@ -159,7 +159,7 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: { getUser: 
         <div className="w-24 h-24 rounded-full text-center bg-gradient-to-r from-blue-500 via-purple-500 to-blue-500 flex items-center justify-center text-4xl font-bold">
           <img
             className="w-24 h-24 rounded-full text-center object-cover"
-            src={`http://127.0.0.1:8000/${user&&user.profile_picture ? user.profile_picture : 'media/profile_pics/avatar.webp'  }`}
+            src={`http://127.0.0.1:8000${user&&user.profile_picture ? user.profile_picture : 'profile_pics/avatar.webp'  }`}
             alt=""
           />
         </div>

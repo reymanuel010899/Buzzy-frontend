@@ -1,5 +1,7 @@
 export interface Video {
     id: number;
+    latitude: string;
+    longitude: string;
     category: number;
     comments_count: number;
     view_acount: number;
@@ -11,7 +13,7 @@ export interface Video {
     thumbnail_url: string;
     updated_at: string; // También podría ser Date si se convierte
     user_id: {
-        id: number;
+        email: string;
         username: string;
         profile_picture: string;
     };
