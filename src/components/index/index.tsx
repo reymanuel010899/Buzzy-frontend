@@ -1,35 +1,201 @@
 import BottomNavbar from '../Layout/ButtonNavar';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import Categories from './categoria';
 import { Video as VideoPro } from './main.interface';
 import { Eye, MessageCircle, Heart, Volume2, VolumeX } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
-import { GoogleMap, Marker, useLoadScript } from '@react-google-maps/api';
-import { getMeta } from '../../redux/actions/getMeta';
-import { useDispatch } from 'react-redux';
-// interface Location {
-//     latitude: number;
-//     longitude: number;
-// }
+import { Canvas, useFrame } from '@react-three/fiber';
+import { XR } from '@react-three/xr'; // Usamos XR directamente
+import { OrbitControls } from '@react-three/drei'; // Mantengo OrbitControls para desarrollo, pero lo quitaré para usuarios finales si lo deseas
+import * as THREE from 'three';
+import { createXRStore } from '@react-three/xr'; // Asegúrate de que esta exportación esté disponible en @react-three/xr@6.6.8
 
 interface StreamingUIProps {
     media: VideoPro[] | null;
 }
 
+const ARVideo: React.FC<{
+    videoUrl: string;
+    onLoaded?: () => void;
+    onClose?: () => void;
+}> = ({ videoUrl, onLoaded, onClose }) => {
+    const xrStore = createXRStore();
+
+    const VideoPlane: React.FC<{ videoUrl: string }> = ({ videoUrl }) => {
+        const videoRef = useRef<HTMLVideoElement>(null);
+        const meshRef = useRef<THREE.Mesh>(null);
+        const [dynamicPosition, setDynamicPosition] = useState<THREE.Vector3>(new THREE.Vector3(0, 1, -2)); // Posición inicial
+        const [direction, setDirection] = useState<THREE.Vector3>(new THREE.Vector3(1, 0, 0)); // Dirección inicial del movimiento
+        const speed = 0.05; // Velocidad de movimiento
+        const [isWalking, setIsWalking] = useState(true); // Estado para controlar si el video "camina"
+
+        useEffect(() => {
+            if (videoRef.current) {
+                videoRef.current.src = videoUrl;
+                videoRef.current.crossOrigin = 'anonymous'; // Permitir CORS si el video está en otro dominio
+                videoRef.current.load(); // Forzar la carga del video
+                videoRef.current.play().catch((error) => console.error('Error playing video:', error));
+            }
+        }, [videoUrl]);
+
+        useEffect(() => {
+            const texture = new THREE.VideoTexture(videoRef.current!);
+            texture.minFilter = THREE.LinearFilter; // Optimizar para rendimiento
+            texture.magFilter = THREE.LinearFilter;
+            if (meshRef.current) {
+                meshRef.current.material = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide }); // Usar DoubleSide para mayor visibilidad
+            }
+        }, [videoUrl]);
+
+        // Animación para mover el video y simular caminar
+        useFrame(() => {
+            if (meshRef.current && meshRef.current.material && (meshRef.current.material as THREE.MeshBasicMaterial).map) {
+                (meshRef.current.material as THREE.MeshBasicMaterial).map.needsUpdate = true;
+
+                if (isWalking) {
+                    // Movimiento simple: el video "camina" en la dirección actual
+                    const newPosition = meshRef.current.position.clone().add(direction.clone().multiplyScalar(speed));
+                    setDynamicPosition(newPosition);
+
+                    // Cambiar dirección aleatoriamente para simular un paseo más natural
+                    if (Math.random() < 0.01) { // 1% de probabilidad por frame de cambiar dirección
+                        const newDirection = new THREE.Vector3(
+                            Math.random() * 2 - 1, // X entre -1 y 1
+                            0, // Mantén Y en 0 (no sube ni baja)
+                            Math.random() * 2 - 1 // Z entre -1 y 1
+                        ).normalize();
+                        setDirection(newDirection);
+                    }
+
+                    // Mantener el video sobre el suelo (ajusta según hit-testing)
+                    if (newPosition.y < 1) { // Ajusta 1 según la altura del suelo en tu escena
+                        setDynamicPosition(new THREE.Vector3(newPosition.x, 1, newPosition.z));
+                    }
+                }
+            }
+        });
+
+        // Hit-testing para posicionar el video en una superficie real
+        useEffect(() => {
+            const handleXRSession = (xrSession: XRSession) => {
+                if (!xrSession) return;
+
+                const hitTestSource = xrSession.requestHitTestSource({ space: xrSession.devicePose!.space });
+                hitTestSource.then((source) => {
+                    const onHitTest = (event: XRHitTestEvent) => {
+                        const hit = event.hits[0]; // Primer impacto en una superficie real
+                        if (hit && meshRef.current) {
+                            setDynamicPosition(new THREE.Vector3(hit.position.x, hit.position.y, hit.position.z));
+                            setIsWalking(true); // Reinicia el caminar cuando detecta una superficie
+                        }
+                    };
+                    xrSession.addEventListener('hit-test', onHitTest);
+                    return () => xrSession.removeEventListener('hit-test', onHitTest);
+                }).catch((error) => console.error('Error en hit-test:', error));
+            };
+
+            const session = xrStore.getState().session;
+            if (session) {
+                handleXRSession(session);
+            } else {
+                xrStore.subscribe((state) => {
+                    if (state.session) {
+                        handleXRSession(state.session);
+                    }
+                });
+            }
+        }, []);
+
+        return (
+            <mesh ref={meshRef} position={dynamicPosition} scale={[2, 1.5, 1]} rotation={[0, 0, 0]}>
+                <planeGeometry args={[1, 1]} />
+                <meshBasicMaterial />
+                <video
+                    ref={videoRef}
+                    autoPlay
+                    loop
+                    muted // Mute por defecto para evitar problemas en dispositivos móviles/Quest
+                    playsInline
+                    style={{ display: 'none' }}
+                    onError={(e) => console.error('Video error:', e)}
+                    onLoadedMetadata={() => console.log('Video loaded successfully')}
+                >
+                    <source src={videoUrl} type="video/mp4" />
+                    Tu navegador no soporta el formato de video.
+                </video>
+            </mesh>
+        );
+    };
+
+    const ARSessionManager: React.FC<{ videoUrl: string; onLoaded?: () => void; onClose?: () => void }> = ({
+        videoUrl,
+        onLoaded,
+        onClose,
+    }) => {
+        return (
+            <Canvas>
+                <XR store={xrStore}>
+                    {({ session }) => {
+                        useEffect(() => {
+                            if (onLoaded && session) onLoaded();
+                        }, [onLoaded, session]);
+
+                        if (!session) {
+                            return (
+                                <div style={{ position: 'absolute', top: 20, left: 20, zIndex: 1000 }}>
+                                    <button
+                                        onClick={() => {
+                                            navigator.xr
+                                                ?.requestSession('immersive-ar', { requiredFeatures: ['local-floor', 'hit-test'] })
+                                                .then((xrSession) => {
+                                                    xrStore.setSession(xrSession);
+                                                    xrSession.addEventListener('end', () => {
+                                                        xrStore.setSession(null);
+                                                        if (onClose) onClose();
+                                                    });
+                                                })
+                                                .catch((error) => console.error('Error iniciando AR:', error));
+                                        }}
+                                        style={{
+                                            padding: '10px 20px',
+                                            background: '#007bff',
+                                            color: 'white',
+                                            border: 'none',
+                                            borderRadius: 5,
+                                            cursor: 'pointer',
+                                        }}
+                                    >
+                                        Iniciar Realidad Aumentada
+                                    </button>
+                                </div>
+                            );
+                        }
+
+                        return (
+                            <>
+                                <ambientLight intensity={0.5} />
+                                <pointLight position={[10, 10, 10]} />
+                                <VideoPlane videoUrl={videoUrl} />
+                                {/* Mantengo OrbitControls para desarrollo, pero lo eliminaré para usuarios finales si lo deseas */}
+                                <OrbitControls enablePan={false} enableZoom={false} enableRotate={false} />
+                            </>
+                        );
+                    }}
+                </XR>
+            </Canvas>
+        );
+    };
+
+    return <ARSessionManager videoUrl={videoUrl} onLoaded={onLoaded} onClose={onClose} />;
+};
+
 const StreamingUI = ({ media }: StreamingUIProps) => {
-    const dispatch = useDispatch()
     const [isMobile, setIsMobile] = useState(window.innerWidth <= 500);
     const [isLiked, setIsLiked] = useState(false);
     const [isComment, setIsComment] = useState(false);
     const [isView, setIsView] = useState(false);
-    // const [locations, setLocations] = useState<Record<number, Location | null>>({});
     const videoRefs = useRef<(HTMLVideoElement | null)[]>([]);
-    const navigate = useNavigate();
-
-    // Cargar Google Maps
-    const { isLoaded } = useLoadScript({
-        googleMapsApiKey: 'TU_API_KEY_DE_GOOGLE_MAPS', // Reemplaza con tu clave de API de Google Maps
-    });
+    const [isARActive, setIsARActive] = useState<number | null>(null); // Estado para controlar qué video activó AR
 
     useEffect(() => {
         const handleResize = () => setIsMobile(window.innerWidth <= 500);
@@ -81,51 +247,16 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         }
     }, [isView]);
 
-   
-    // Manejar clic en el video para mostrar el mapa
+    // Manejar clic en el video para mostrar AR
     const handleVideoClick = (index: number) => {
         const video = media?.[index];
         if (!video) {
             alert('No se encontró el video.');
             return;
         }
-        if (video?.latitude && video?.longitude && isLoaded) {
-            navigate('/map', {
-              state: {
-                latitude: video.latitude,
-                longitude: video.longitude,
-              },
-            });
-            return;
-        }
-        
-          
-        const fordata = {
-            id: video.id,
-            category: video.category,
-            created_at: "2025-02-11T20:11:07.700796Z",
-            description: video.description,
-            thumbnail_url: video.thumbnail_url,
-            user_id: {
-                email: video.user_id.email, 
-                username: video.user_id.username,
-                profile_picture: video.user_id.profile_picture
-            },
-            video: video.video,
-            video_url: video.video_url,
-          };
-          
-        // const formData = new FormData();
-        // formData.append('video_url', video.video_url || ''); // Usa video_url si está disponible
-        // formData.append('video', video.video || ''); // Usa la ruta del archivo si es un FileField o URL
-        // formData.append('user_id', '1'); // Ajusta según tu autenticación (puedes obtenerlo del contexto)
-        // formData.append('duration', video.duration.toString()); // Usa la duración del video
-        // formData.append('category', video.category?.toString() || ''); // Opcional, ID de la categoría (si es un número)
-        // formData.append('thumbnail_url', video.thumbnail_url || ''); // Opcional
-        // formData.append('description', video.description || ''); 
-        // formData.append('tags', JSON.stringify(video.tags || [])); 
-        console.log(video)
-        getMeta(fordata)(dispatch)
+
+        // Activar la experiencia AR para este video
+        setIsARActive(index);
     };
 
     const handleLikeClick = (videoId: string) => {
@@ -149,7 +280,11 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         setIsMuted(!isMuted);
     };
 
-    console.log(media)
+    // Cerrar la experiencia AR
+    const closeAR = () => {
+        setIsARActive(null);
+    };
+
     return (
         <div className="bg-gradient-to-r from-white-900 via-gray-800 to-gray-900 text-white min-h-screen font-sans">
             <main className="pt-24 p-1">
@@ -253,34 +388,30 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                         ))}
                     </div>
                 </section>
+
+                {/* Mostrar la experiencia AR con el video si está activa */}
+                {isARActive !== null && media && (
+                    <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+                        <div className="relative w-full h-full">
+                            <ARVideo
+                                videoUrl={media[isARActive].video} // Usa el video correspondiente al índice
+                                onLoaded={() => console.log('Video AR cargado')}
+                                onClose={closeAR}
+                            />
+                            <button
+                                className="absolute top-4 right-4 bg-red-500 text-white p-2 rounded-full shadow-lg"
+                                onClick={closeAR}
+                            >
+                                Cerrar AR
+                            </button>
+                            <p className="absolute bottom-4 left-4 text-white">
+                                Experiencia de Realidad Aumentada Activada
+                            </p>
+                        </div>
+                    </div>
+                )}
             </main>
             <BottomNavbar />
-        </div>
-    );
-};
-
-// Componente para la pantalla del mapa (nueva ruta)
-export const MapScreen = () => {
-    const navigate = useNavigate();
-    const location = navigate.location.state as { latitude: number; longitude: number } | null;
-
-    if (!location) {
-        return <div>No se encontraron datos de ubicación.</div>;
-    }
-
-    return (
-        <div className="w-full h-screen">
-            {isLoaded ? (
-                <GoogleMap
-                    mapContainerStyle={{ width: '100%', height: '100%' }}
-                    center={{ lat: location.latitude, lng: location.longitude }}
-                    zoom={15}
-                >
-                    <Marker position={{ lat: location.latitude, lng: location.longitude }} />
-                </GoogleMap>
-            ) : (
-                <div>Cargando mapa...</div>
-            )}
         </div>
     );
 };

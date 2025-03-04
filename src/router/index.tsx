@@ -14,6 +14,7 @@ import Game from "../pages/main/game";
 import Profile from "../pages/profille/profile";
 import PrivateRoute from "../PrivateRoute";
 // import { MapScreen } from "../components/index";
+// import { MapScreen } from "../components/index";
 
 
   
