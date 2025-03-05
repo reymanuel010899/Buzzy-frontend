@@ -1,6 +1,6 @@
 import axios from 'axios'
 import { SUCCEES_GET_MEDIA_USER, FAILED_GET_MEDIA_USER } from '../type'
-const user_seccion =  JSON.parse(localStorage.getItem('user') || '')
+// const user_seccion =  JSON.parse(localStorage.getItem('user') || '')
 
 export const getUserMedia = (username=user_seccion.username) => async (dispatch: any) => {
     try {

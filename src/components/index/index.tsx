@@ -1,17 +1,22 @@
-import BottomNavbar from '../Layout/ButtonNavar';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import Categories from './categoria';
-import { Video as VideoPro } from './main.interface';
-import { Eye, MessageCircle, Heart, Volume2, VolumeX } from 'lucide-react';
-import { useState, useEffect, useRef } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { XR } from '@react-three/xr'; // Usamos XR directamente
-import { OrbitControls } from '@react-three/drei'; // Mantengo OrbitControls para desarrollo, pero lo quitaré para usuarios finales si lo deseas
+import { XR, useXR } from '@react-three/xr';
 import * as THREE from 'three';
-import { createXRStore } from '@react-three/xr'; // Asegúrate de que esta exportación esté disponible en @react-three/xr@6.6.8
+import * as cocoSsd from '@tensorflow-models/coco-ssd';
+import '@tensorflow/tfjs';
+import { Video as VideoPro } from './main.interface'; // Asegúrate de tener esta interfaz definida
+import { Eye, MessageCircle, Heart, Volume2, VolumeX } from 'lucide-react';
+import BottomNavbar from '../Layout/ButtonNavar'; // Asegúrate de que este componente exista
+import Categories from './categoria'; // Asegúrate de que este componente exista
 
 interface StreamingUIProps {
     media: VideoPro[] | null;
+}
+
+interface DetectedObject {
+    class: string;
+    position: THREE.Vector3;
 }
 
 const ARVideo: React.FC<{
@@ -19,174 +24,262 @@ const ARVideo: React.FC<{
     onLoaded?: () => void;
     onClose?: () => void;
 }> = ({ videoUrl, onLoaded, onClose }) => {
-    const xrStore = createXRStore();
+    const [detectedObject, setDetectedObject] = useState<DetectedObject | null>(null);
+    const videoRef = useRef<HTMLVideoElement>(null);
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const [isXRSupported, setIsXRSupported] = useState(false);
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const [isLoading, setIsLoading] = useState(true);
 
-    const VideoPlane: React.FC<{ videoUrl: string }> = ({ videoUrl }) => {
-        const videoRef = useRef<HTMLVideoElement>(null);
+    // Preload del modelo COCO-SSD para mejorar rendimiento
+    useEffect(() => {
+        const preloadModel = async () => {
+            try {
+                await cocoSsd.load();
+                console.log('Modelo COCO-SSD pre-cargado con éxito');
+            } catch (err) {
+                console.error('Error al pre-cargar modelo:', err);
+            }
+        };
+        preloadModel();
+    }, []);
+
+    // Verificar soporte de WebXR
+    useEffect(() => {
+        if ('xr' in navigator) {
+            navigator.xr?.isSessionSupported('immersive-ar').then((supported) => {
+                setIsXRSupported(supported);
+                if (!supported) {
+                    setErrorMessage('WebXR no está soportado en este dispositivo.');
+                }
+                setIsLoading(false);
+            }).catch((error) => {
+                console.error('Error al verificar WebXR:', error);
+                setIsXRSupported(false);
+                setErrorMessage(`Error al verificar WebXR: ${error.message}`);
+                setIsLoading(false);
+            });
+        } else {
+            setIsXRSupported(false);
+            setErrorMessage('WebXR no está disponible en este navegador.');
+            setIsLoading(false);
+        }
+    }, []);
+
+    // Detectar objeto al cargar el componente
+    useEffect(() => {
+        const detectObject = async () => {
+            if (!videoRef.current || !canvasRef.current) {
+                console.log('Video o canvas no disponibles');
+                return;
+            }
+
+            const video = videoRef.current;
+            const canvas = canvasRef.current;
+            const context = canvas.getContext('2d');
+            if (!context) {
+                console.log('No se pudo obtener el contexto 2D del canvas');
+                return;
+            }
+
+            video.crossOrigin = 'anonymous'; // Permitir CORS
+            video.src = videoUrl;
+            video.muted = true; // Asegúrate de que esté muteado para autoplay
+            video.loop = true;
+            video.playsInline = true;
+
+            const handleLoadedData = async () => {
+                if (video.readyState >= 2) { // HAVE_CURRENT_DATA o superior
+                    console.log('Video listo. Dimensiones:', video.videoWidth, video.videoHeight);
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    console.log('Frame dibujado en canvas:', canvas);
+
+                    try {
+                        const model = await cocoSsd.load(); // Usar modelo pre-cargado si es posible
+                        const predictions = await model.detect(canvas);
+                        console.log('Predicciones:', predictions);
+
+                        if (predictions.length > 0) {
+                            const mainObject = predictions[0];
+                            console.log('Objeto detectado:', mainObject.class);
+
+                            const randomPosition = new THREE.Vector3(
+                                (Math.random() - 0.5) * 4, // -2 a 2 metros en X
+                                0.1,                       // Altura inicial
+                                -1 - Math.random() * 3     // -1 a -4 metros en Z
+                            );
+                            setDetectedObject({ class: mainObject.class, position: randomPosition });
+                        } else {
+                            console.log('No se detectaron objetos.');
+                            setErrorMessage('No se detectaron objetos en el video.');
+                        }
+                    } catch (err) {
+                        console.error('Error en detección:', {
+                            name: err.name,
+                            message: err.message,
+                            stack: err.stack,
+                        });
+                        setErrorMessage(`Error al detectar objeto: ${err.message}`);
+                    }
+                } else {
+                    console.log('Video no está listo aún. Estado:', video.readyState);
+                }
+            };
+
+            video.onloadeddata = handleLoadedData;
+            video.onerror = (e) => console.error('Error al cargar el video:', e);
+
+            video.play().catch((error) => {
+                console.error('Error al reproducir video:', error);
+                if (error.name === 'AbortError') {
+                    console.log('El intento de reproducción fue interrumpido. Asegúrate de que el video esté muteado y que el navegador permita autoplay.');
+                }
+                setErrorMessage(`Error al reproducir video: ${error.message}`);
+            });
+
+            return () => {
+                if (video) {
+                    video.pause();
+                    video.src = '';
+                }
+            };
+        };
+
+        detectObject();
+    }, [videoUrl]);
+
+    const ARObject: React.FC<{ position: THREE.Vector3; onFound: () => void }> = ({ position, onFound }) => {
+        const { gl, camera } = useXR(); // Asegúrate de que useXR esté dentro de <XR>
         const meshRef = useRef<THREE.Mesh>(null);
-        const [dynamicPosition, setDynamicPosition] = useState<THREE.Vector3>(new THREE.Vector3(0, 1, -2)); // Posición inicial
-        const [direction, setDirection] = useState<THREE.Vector3>(new THREE.Vector3(1, 0, 0)); // Dirección inicial del movimiento
-        const speed = 0.05; // Velocidad de movimiento
-        const [isWalking, setIsWalking] = useState(true); // Estado para controlar si el video "camina"
 
+        // Verificar que gl esté definido antes de usarlo
         useEffect(() => {
-            if (videoRef.current) {
-                videoRef.current.src = videoUrl;
-                videoRef.current.crossOrigin = 'anonymous'; // Permitir CORS si el video está en otro dominio
-                videoRef.current.load(); // Forzar la carga del video
-                videoRef.current.play().catch((error) => console.error('Error playing video:', error));
+            if (!gl || !meshRef.current) {
+                console.warn('Renderer gl o mesh no definidos en ARObject');
+                return;
             }
-        }, [videoUrl]);
 
-        useEffect(() => {
-            const texture = new THREE.VideoTexture(videoRef.current!);
-            texture.minFilter = THREE.LinearFilter; // Optimizar para rendimiento
-            texture.magFilter = THREE.LinearFilter;
-            if (meshRef.current) {
-                meshRef.current.material = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide }); // Usar DoubleSide para mayor visibilidad
+            console.log('Renderer gl:', gl); // Depuración
+
+            const session = gl.xr.getSession();
+            if (!session) {
+                console.warn('No hay sesión WebXR activa.');
+                return;
             }
-        }, [videoUrl]);
 
-        // Animación para mover el video y simular caminar
+            const updatePosition = async () => {
+                try {
+                    const referenceSpace = await session.requestReferenceSpace('local');
+                    const hitTestSource = await session.requestHitTestSource({ space: referenceSpace });
+                    const frame = gl.xr.getFrame();
+                    if (!frame) {
+                        console.warn('No se pudo obtener el frame WebXR.');
+                        return;
+                    }
+
+                    const hitTestResults = frame.getHitTestResults(hitTestSource);
+                    if (hitTestResults.length > 0) {
+                        const hit = hitTestResults[0];
+                        const pose = hit.getPose(referenceSpace);
+                        if (pose && meshRef.current) {
+                            meshRef.current.position.setFromMatrixPosition(new THREE.Matrix4().fromArray(pose.transform.matrix));
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error en hit-testing:', {
+                        name: error.name,
+                        message: error.message,
+                        stack: error.stack,
+                    });
+                }
+            };
+
+            session.addEventListener('select', updatePosition);
+            return () => session.removeEventListener('select', updatePosition);
+        }, [gl]); // Dependencia en gl, no gl.xr
+
+        // Raycasting para detectar interacción
         useFrame(() => {
-            if (meshRef.current && meshRef.current.material && (meshRef.current.material as THREE.MeshBasicMaterial).map) {
-                (meshRef.current.material as THREE.MeshBasicMaterial).map.needsUpdate = true;
-
-                if (isWalking) {
-                    // Movimiento simple: el video "camina" en la dirección actual
-                    const newPosition = meshRef.current.position.clone().add(direction.clone().multiplyScalar(speed));
-                    setDynamicPosition(newPosition);
-
-                    // Cambiar dirección aleatoriamente para simular un paseo más natural
-                    if (Math.random() < 0.01) { // 1% de probabilidad por frame de cambiar dirección
-                        const newDirection = new THREE.Vector3(
-                            Math.random() * 2 - 1, // X entre -1 y 1
-                            0, // Mantén Y en 0 (no sube ni baja)
-                            Math.random() * 2 - 1 // Z entre -1 y 1
-                        ).normalize();
-                        setDirection(newDirection);
-                    }
-
-                    // Mantener el video sobre el suelo (ajusta según hit-testing)
-                    if (newPosition.y < 1) { // Ajusta 1 según la altura del suelo en tu escena
-                        setDynamicPosition(new THREE.Vector3(newPosition.x, 1, newPosition.z));
-                    }
+            if (meshRef.current && camera) {
+                const raycaster = new THREE.Raycaster();
+                raycaster.setFromCamera({ x: 0, y: 0 }, camera); // Centro de la pantalla
+                const intersects = raycaster.intersectObject(meshRef.current);
+                if (intersects.length > 0) {
+                    (meshRef.current.material as THREE.MeshBasicMaterial).color.set(0xffff00); // Amarillo al encontrar
+                    onFound();
                 }
             }
         });
 
-        // Hit-testing para posicionar el video en una superficie real
-        useEffect(() => {
-            const handleXRSession = (xrSession: XRSession) => {
-                if (!xrSession) return;
-
-                const hitTestSource = xrSession.requestHitTestSource({ space: xrSession.devicePose!.space });
-                hitTestSource.then((source) => {
-                    const onHitTest = (event: XRHitTestEvent) => {
-                        const hit = event.hits[0]; // Primer impacto en una superficie real
-                        if (hit && meshRef.current) {
-                            setDynamicPosition(new THREE.Vector3(hit.position.x, hit.position.y, hit.position.z));
-                            setIsWalking(true); // Reinicia el caminar cuando detecta una superficie
-                        }
-                    };
-                    xrSession.addEventListener('hit-test', onHitTest);
-                    return () => xrSession.removeEventListener('hit-test', onHitTest);
-                }).catch((error) => console.error('Error en hit-test:', error));
-            };
-
-            const session = xrStore.getState().session;
-            if (session) {
-                handleXRSession(session);
-            } else {
-                xrStore.subscribe((state) => {
-                    if (state.session) {
-                        handleXRSession(state.session);
-                    }
-                });
-            }
-        }, []);
-
         return (
-            <mesh ref={meshRef} position={dynamicPosition} scale={[2, 1.5, 1]} rotation={[0, 0, 0]}>
-                <planeGeometry args={[1, 1]} />
-                <meshBasicMaterial />
-                <video
-                    ref={videoRef}
-                    autoPlay
-                    loop
-                    muted // Mute por defecto para evitar problemas en dispositivos móviles/Quest
-                    playsInline
-                    style={{ display: 'none' }}
-                    onError={(e) => console.error('Video error:', e)}
-                    onLoadedMetadata={() => console.log('Video loaded successfully')}
-                >
-                    <source src={videoUrl} type="video/mp4" />
-                    Tu navegador no soporta el formato de video.
-                </video>
+            <mesh ref={meshRef} position={position} scale={[0.3, 0.3, 0.3]}>
+                <boxGeometry args={[1, 1, 1]} />
+                <meshBasicMaterial color={0xff0000} />
             </mesh>
         );
     };
 
-    const ARSessionManager: React.FC<{ videoUrl: string; onLoaded?: () => void; onClose?: () => void }> = ({
-        videoUrl,
-        onLoaded,
-        onClose,
-    }) => {
-        return (
-            <Canvas>
-                <XR store={xrStore}>
-                    {({ session }) => {
-                        useEffect(() => {
-                            if (onLoaded && session) onLoaded();
-                        }, [onLoaded, session]);
-
-                        if (!session) {
-                            return (
-                                <div style={{ position: 'absolute', top: 20, left: 20, zIndex: 1000 }}>
-                                    <button
-                                        onClick={() => {
-                                            navigator.xr
-                                                ?.requestSession('immersive-ar', { requiredFeatures: ['local-floor', 'hit-test'] })
-                                                .then((xrSession) => {
-                                                    xrStore.setSession(xrSession);
-                                                    xrSession.addEventListener('end', () => {
-                                                        xrStore.setSession(null);
-                                                        if (onClose) onClose();
-                                                    });
-                                                })
-                                                .catch((error) => console.error('Error iniciando AR:', error));
-                                        }}
-                                        style={{
-                                            padding: '10px 20px',
-                                            background: '#007bff',
-                                            color: 'white',
-                                            border: 'none',
-                                            borderRadius: 5,
-                                            cursor: 'pointer',
-                                        }}
-                                    >
-                                        Iniciar Realidad Aumentada
-                                    </button>
-                                </div>
-                            );
-                        }
-
-                        return (
-                            <>
-                                <ambientLight intensity={0.5} />
-                                <pointLight position={[10, 10, 10]} />
-                                <VideoPlane videoUrl={videoUrl} />
-                                {/* Mantengo OrbitControls para desarrollo, pero lo eliminaré para usuarios finales si lo deseas */}
-                                <OrbitControls enablePan={false} enableZoom={false} enableRotate={false} />
-                            </>
-                        );
-                    }}
-                </XR>
-            </Canvas>
-        );
-    };
-
-    return <ARSessionManager videoUrl={videoUrl} onLoaded={onLoaded} onClose={onClose} />;
+    return (
+        <div style={{ width: '100vw', height: '100vh' }}>
+            {isLoading ? (
+                <div style={{ color: 'white', textAlign: 'center', padding: '20px' }}>
+                    Cargando...
+                </div>
+            ) : errorMessage ? (
+                <div style={{ color: 'white', textAlign: 'center', padding: '20px' }}>
+                    {errorMessage}
+                </div>
+            ) : isXRSupported ? (
+                <Canvas>
+                    <XR>
+                        <ambientLight intensity={0.5} />
+                        <pointLight position={[10, 10, 10]} />
+                        {detectedObject && (
+                            <ARObject
+                                position={detectedObject.position}
+                                onFound={() => console.log('¡Objeto encontrado!')}
+                            />
+                        )}
+                    </XR>
+                </Canvas>
+            ) : (
+                <div style={{ color: 'white', textAlign: 'center', padding: '20px' }}>
+                    WebXR no está soportado en este dispositivo o navegador.
+                </div>
+            )}
+            <video
+                ref={videoRef}
+                autoPlay
+                muted
+                loop
+                playsInline
+                style={{ display: 'none' }}
+            />
+            <canvas ref={canvasRef} style={{ display: 'none' }} />
+            <button
+                style={{
+                    position: 'absolute',
+                    top: 20,
+                    right: 20,
+                    padding: '10px',
+                    background: 'red',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '5px',
+                }}
+                onClick={onClose}
+            >
+                Cerrar AR
+            </button>
+            {detectedObject && (
+                <p style={{ position: 'absolute', bottom: 20, left: 20, color: 'white' }}>
+                    Busca el {detectedObject.class} en el mundo AR
+                </p>
+            )}
+        </div>
+    );
 };
 
 const StreamingUI = ({ media }: StreamingUIProps) => {
@@ -195,7 +288,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     const [isComment, setIsComment] = useState(false);
     const [isView, setIsView] = useState(false);
     const videoRefs = useRef<(HTMLVideoElement | null)[]>([]);
-    const [isARActive, setIsARActive] = useState<number | null>(null); // Estado para controlar qué video activó AR
+    const [isARActive, setIsARActive] = useState<number | null>(null);
 
     useEffect(() => {
         const handleResize = () => setIsMobile(window.innerWidth <= 500);
@@ -227,35 +320,14 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 if (video) observer.unobserve(video);
             });
         };
-    }, []);
+    }, [media]);
 
-    useEffect(() => {
-        if (isLiked) {
-            setTimeout(() => setIsLiked(true), 500);
-        }
-    }, [isLiked]);
-
-    useEffect(() => {
-        if (isComment) {
-            setTimeout(() => setIsComment(true), 500);
-        }
-    }, [isComment]);
-
-    useEffect(() => {
-        if (isView) {
-            setTimeout(() => setIsView(true), 500);
-        }
-    }, [isView]);
-
-    // Manejar clic en el video para mostrar AR
     const handleVideoClick = (index: number) => {
         const video = media?.[index];
         if (!video) {
             alert('No se encontró el video.');
             return;
         }
-
-        // Activar la experiencia AR para este video
         setIsARActive(index);
     };
 
@@ -275,15 +347,9 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     };
 
     const [isMuted, setIsMuted] = useState(true);
+    const toggleMute = () => setIsMuted(!isMuted);
 
-    const toggleMute = () => {
-        setIsMuted(!isMuted);
-    };
-
-    // Cerrar la experiencia AR
-    const closeAR = () => {
-        setIsARActive(null);
-    };
+    const closeAR = () => setIsARActive(null);
 
     return (
         <div className="bg-gradient-to-r from-white-900 via-gray-800 to-gray-900 text-white min-h-screen font-sans">
@@ -312,11 +378,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                             <div
                                 key={index}
                                 className="relative p-4 rounded-lg hover:scale-105 transform transition duration-300 flex flex-col items-center"
-                                style={{
-                                    height: isMobile ? '800px' : '800px',
-                                    overflow: 'hidden',
-                                    zIndex: 1,
-                                }}
+                                style={{ height: isMobile ? '800px' : '800px', overflow: 'hidden', zIndex: 1 }}
                             >
                                 <button
                                     className="absolute top-2 right-2 bg-gray-800 text-white p-2 rounded-full shadow-lg z-50"
@@ -389,25 +451,13 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                     </div>
                 </section>
 
-                {/* Mostrar la experiencia AR con el video si está activa */}
                 {isARActive !== null && media && (
                     <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-                        <div className="relative w-full h-full">
-                            <ARVideo
-                                videoUrl={media[isARActive].video} // Usa el video correspondiente al índice
-                                onLoaded={() => console.log('Video AR cargado')}
-                                onClose={closeAR}
-                            />
-                            <button
-                                className="absolute top-4 right-4 bg-red-500 text-white p-2 rounded-full shadow-lg"
-                                onClick={closeAR}
-                            >
-                                Cerrar AR
-                            </button>
-                            <p className="absolute bottom-4 left-4 text-white">
-                                Experiencia de Realidad Aumentada Activada
-                            </p>
-                        </div>
+                        <ARVideo
+                            videoUrl={media[isARActive].video}
+                            onLoaded={() => console.log('AR cargado')}
+                            onClose={closeAR}
+                        />
                     </div>
                 )}
             </main>

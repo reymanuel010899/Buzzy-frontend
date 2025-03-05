@@ -1,8 +1,8 @@
 import axios from 'axios'
 import { SUCCEES_GET_USER, FAILED_GET_USER } from '../type'
-const user_seccion =  JSON.parse(localStorage.getItem('user') || '')
+// const user_seccion =  JSON.parse(localStorage.getItem('user') || '')
 
-export const getUser = (username=user_seccion.username) => async (dispatch: any) => {
+export const getUser = (username='') => async (dispatch: any) => {
 
     try {
       const response = await axios.get(`http://localhost:8000/api/get-user/${username}`,{

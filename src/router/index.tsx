@@ -13,6 +13,7 @@ import Store from "../pages/main/store";
 import Game from "../pages/main/game";
 import Profile from "../pages/profille/profile";
 import PrivateRoute from "../PrivateRoute";
+import ARScene from "../components/ra/poof";
 // import { MapScreen } from "../components/index";
 // import { MapScreen } from "../components/index";
 
@@ -78,7 +79,7 @@ import PrivateRoute from "../PrivateRoute";
                   <Profile/>
               }
             />
-            {/* <Route path="/map" element={<MapScreen />} /> */}
+            <Route path="/map" element={<ARScene/>} />
           </Route>
 
       </>
