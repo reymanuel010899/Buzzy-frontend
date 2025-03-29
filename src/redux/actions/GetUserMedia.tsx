@@ -1,8 +1,8 @@
 import axios from 'axios'
 import { SUCCEES_GET_MEDIA_USER, FAILED_GET_MEDIA_USER } from '../type'
-// const user_seccion =  JSON.parse(localStorage.getItem('user') || '')
-
-export const getUserMedia = (username=user_seccion.username) => async (dispatch: any) => {
+const user_seccion =  JSON.parse(localStorage.getItem('user') || '')
+import type { AppDispatch } from "../../store"; 
+export const getUserMedia = (username=user_seccion?.username) => async (dispatch: AppDispatch) => {
     try {
         const response = await axios.get(`http://localhost:8000/api/get-media-user/${username}`, {
             headers: {

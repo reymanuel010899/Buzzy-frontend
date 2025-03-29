@@ -1,14 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Canvas, useFrame } from '@react-three/fiber';
-import { XR, useXR } from '@react-three/xr';
+import { Canvas } from '@react-three/fiber';
+import { XR, createXRStore, XRStore } from '@react-three/xr'; // Added createXRStore import
 import * as THREE from 'three';
 import * as cocoSsd from '@tensorflow-models/coco-ssd';
 import '@tensorflow/tfjs';
-import { Video as VideoPro } from './main.interface'; // Asegúrate de tener esta interfaz definida
+import { Video as VideoPro } from './main.interface';
 import { Eye, MessageCircle, Heart, Volume2, VolumeX } from 'lucide-react';
-import BottomNavbar from '../Layout/ButtonNavar'; // Asegúrate de que este componente exista
-import Categories from './categoria'; // Asegúrate de que este componente exista
+import BottomNavbar from '../Layout/ButtonNavar';
+import Categories from './categoria';
+
+// Create XR store outside the component to avoid re-creation
+const xrStore: XRStore = createXRStore();
 
 interface StreamingUIProps {
     media: VideoPro[] | null;
@@ -23,7 +26,7 @@ const ARVideo: React.FC<{
     videoUrl: string;
     onLoaded?: () => void;
     onClose?: () => void;
-}> = ({ videoUrl, onLoaded, onClose }) => {
+}> = ({ videoUrl, onClose }) => {
     const [detectedObject, setDetectedObject] = useState<DetectedObject | null>(null);
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -31,7 +34,7 @@ const ARVideo: React.FC<{
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(true);
 
-    // Preload del modelo COCO-SSD para mejorar rendimiento
+    // Preload del modelo COCO-SSD
     useEffect(() => {
         const preloadModel = async () => {
             try {
@@ -66,76 +69,53 @@ const ARVideo: React.FC<{
         }
     }, []);
 
-    // Detectar objeto al cargar el componente
+    // Detectar objeto
     useEffect(() => {
         const detectObject = async () => {
-            if (!videoRef.current || !canvasRef.current) {
-                console.log('Video o canvas no disponibles');
-                return;
-            }
+            if (!videoRef.current || !canvasRef.current) return;
 
             const video = videoRef.current;
             const canvas = canvasRef.current;
             const context = canvas.getContext('2d');
-            if (!context) {
-                console.log('No se pudo obtener el contexto 2D del canvas');
-                return;
-            }
+            if (!context) return;
 
-            video.crossOrigin = 'anonymous'; // Permitir CORS
+            video.crossOrigin = 'anonymous';
             video.src = videoUrl;
-            video.muted = true; // Asegúrate de que esté muteado para autoplay
+            video.muted = true;
             video.loop = true;
             video.playsInline = true;
 
             const handleLoadedData = async () => {
-                if (video.readyState >= 2) { // HAVE_CURRENT_DATA o superior
-                    console.log('Video listo. Dimensiones:', video.videoWidth, video.videoHeight);
+                if (video.readyState >= 2) {
                     canvas.width = video.videoWidth;
                     canvas.height = video.videoHeight;
                     context.drawImage(video, 0, 0, canvas.width, canvas.height);
-                    console.log('Frame dibujado en canvas:', canvas);
 
                     try {
-                        const model = await cocoSsd.load(); // Usar modelo pre-cargado si es posible
+                        const model = await cocoSsd.load();
                         const predictions = await model.detect(canvas);
-                        console.log('Predicciones:', predictions);
 
                         if (predictions.length > 0) {
                             const mainObject = predictions[0];
-                            console.log('Objeto detectado:', mainObject.class);
-
                             const randomPosition = new THREE.Vector3(
-                                (Math.random() - 0.5) * 4, // -2 a 2 metros en X
-                                0.1,                       // Altura inicial
-                                -1 - Math.random() * 3     // -1 a -4 metros en Z
+                                (Math.random() - 0.5) * 4,
+                                0.1,
+                                -1 - Math.random() * 3
                             );
                             setDetectedObject({ class: mainObject.class, position: randomPosition });
                         } else {
-                            console.log('No se detectaron objetos.');
                             setErrorMessage('No se detectaron objetos en el video.');
                         }
-                    } catch (err) {
-                        console.error('Error en detección:', {
-                            name: err.name,
-                            message: err.message,
-                            stack: err.stack,
-                        });
-                        setErrorMessage(`Error al detectar objeto: ${err.message}`);
+                    } catch {
+                        setErrorMessage('Error al detectar objeto');
                     }
-                } else {
-                    console.log('Video no está listo aún. Estado:', video.readyState);
                 }
             };
 
             video.onloadeddata = handleLoadedData;
             video.onerror = (e) => console.error('Error al cargar el video:', e);
-
             video.play().catch((error) => {
                 console.error('Error al reproducir video:', error);
-                if (error.name === 'AbortError') {
-                    console.log('El intento de reproducción fue interrumpido. Asegúrate de que el video esté muteado y que el navegador permita autoplay.');
-                }
                 setErrorMessage(`Error al reproducir video: ${error.message}`);
             });
 
@@ -150,68 +130,8 @@ const ARVideo: React.FC<{
         detectObject();
     }, [videoUrl]);
 
-    const ARObject: React.FC<{ position: THREE.Vector3; onFound: () => void }> = ({ position, onFound }) => {
-        const { gl, camera } = useXR(); // Asegúrate de que useXR esté dentro de <XR>
+    const ARObject: React.FC<{ position: THREE.Vector3; onFound: () => void }> = ({ position }) => {
         const meshRef = useRef<THREE.Mesh>(null);
-
-        // Verificar que gl esté definido antes de usarlo
-        useEffect(() => {
-            if (!gl || !meshRef.current) {
-                console.warn('Renderer gl o mesh no definidos en ARObject');
-                return;
-            }
-
-            console.log('Renderer gl:', gl); // Depuración
-
-            const session = gl.xr.getSession();
-            if (!session) {
-                console.warn('No hay sesión WebXR activa.');
-                return;
-            }
-
-            const updatePosition = async () => {
-                try {
-                    const referenceSpace = await session.requestReferenceSpace('local');
-                    const hitTestSource = await session.requestHitTestSource({ space: referenceSpace });
-                    const frame = gl.xr.getFrame();
-                    if (!frame) {
-                        console.warn('No se pudo obtener el frame WebXR.');
-                        return;
-                    }
-
-                    const hitTestResults = frame.getHitTestResults(hitTestSource);
-                    if (hitTestResults.length > 0) {
-                        const hit = hitTestResults[0];
-                        const pose = hit.getPose(referenceSpace);
-                        if (pose && meshRef.current) {
-                            meshRef.current.position.setFromMatrixPosition(new THREE.Matrix4().fromArray(pose.transform.matrix));
-                        }
-                    }
-                } catch (error) {
-                    console.error('Error en hit-testing:', {
-                        name: error.name,
-                        message: error.message,
-                        stack: error.stack,
-                    });
-                }
-            };
-
-            session.addEventListener('select', updatePosition);
-            return () => session.removeEventListener('select', updatePosition);
-        }, [gl]); // Dependencia en gl, no gl.xr
-
-        // Raycasting para detectar interacción
-        useFrame(() => {
-            if (meshRef.current && camera) {
-                const raycaster = new THREE.Raycaster();
-                raycaster.setFromCamera({ x: 0, y: 0 }, camera); // Centro de la pantalla
-                const intersects = raycaster.intersectObject(meshRef.current);
-                if (intersects.length > 0) {
-                    (meshRef.current.material as THREE.MeshBasicMaterial).color.set(0xffff00); // Amarillo al encontrar
-                    onFound();
-                }
-            }
-        });
 
         return (
             <mesh ref={meshRef} position={position} scale={[0.3, 0.3, 0.3]}>
@@ -233,7 +153,7 @@ const ARVideo: React.FC<{
                 </div>
             ) : isXRSupported ? (
                 <Canvas>
-                    <XR>
+                    <XR store={xrStore}> {/* Added store prop here */}
                         <ambientLight intensity={0.5} />
                         <pointLight position={[10, 10, 10]} />
                         {detectedObject && (
@@ -289,6 +209,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     const [isView, setIsView] = useState(false);
     const videoRefs = useRef<(HTMLVideoElement | null)[]>([]);
     const [isARActive, setIsARActive] = useState<number | null>(null);
+    const [isMuted, setIsMuted] = useState(true);
 
     useEffect(() => {
         const handleResize = () => setIsMobile(window.innerWidth <= 500);
@@ -346,9 +267,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         console.log(`Se hizo click en "Vista" del video con ID: ${videoId}`);
     };
 
-    const [isMuted, setIsMuted] = useState(true);
     const toggleMute = () => setIsMuted(!isMuted);
-
     const closeAR = () => setIsARActive(null);
 
     return (

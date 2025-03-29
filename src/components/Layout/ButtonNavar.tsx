@@ -13,7 +13,7 @@ const BottomNavbar: React.FC = () => {
           { icon: Wallet, label: "Wallet", path: "wallet" },
         ].map((item, index) => (
           <Link
-          to={item.path}
+            to={item.path || ''}
             key={item.label}
             className={`flex flex-col items-center justify-center p-2 text-xs gap-1 ${
               index === 2 ? "text-purple-400" : "text-gray-400"

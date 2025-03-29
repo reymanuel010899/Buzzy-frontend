@@ -38,7 +38,7 @@ const SignUp: React.FC = () => {
       return;
     }
 
-    register(formData)(dispatch).then((res)=>{
+    register(formData)(dispatch).then(()=>{
       navigate('/')
     })
    
