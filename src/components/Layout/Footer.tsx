@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Menu, Search, Video, Bell, UserCircle } from "lucide-react";
+import "../../footer.css"
 
 const Footer: React.FC = () => {
   const [search, setSearch] = useState("");
