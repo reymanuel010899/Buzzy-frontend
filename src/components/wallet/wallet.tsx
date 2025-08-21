@@ -21,7 +21,7 @@ const WalletComponent = () => {
   const [isLoading, setIsLoading] = useState(false)
   const [activeFilter, setActiveFilter] = useState<"all" | "income" | "expense">("all")
   const [scrollPosition, setScrollPosition] = useState(0)
-
+  console.log(scrollPosition)
   // Sample transactions data
   const [transactions, setTransactions] = useState<Transaction[]>([
     {

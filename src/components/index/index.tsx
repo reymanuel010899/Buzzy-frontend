@@ -247,6 +247,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [showCategories, setShowCategories] = useState(false)
 
   useEffect(() => {
+    console.log(isMobile)
     const handleResize = () => setIsMobile(window.innerWidth <= 500)
     window.addEventListener("resize", handleResize)
     return () => window.removeEventListener("resize", handleResize)
@@ -578,7 +579,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                             whileTap={{ scale: 0.9 }}
                             onClick={(e) => {
                               e.stopPropagation()
-                              handleLikeClick(data.id || "1")
+                              handleLikeClick((data.id?.toString() || "1"))
                             }}
                             className="flex flex-col items-center"
                           >

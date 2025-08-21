@@ -74,13 +74,13 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: ProfileSecc
   const [selectedVideo, setSelectedVideo] = useState<VideoItem | null>(null)
   const [isLiked, setIsLiked] = useState<Record<string, boolean>>({})
   const [isComment, setIsComment] = useState(false)
-  const [isView, setIsView] = useState(false)
+  // const [isView, setIsView] = useState(false)
   const mediaref = useRef(false)
   const userParams = useParams<{ username?: string }>()
   const { username } = userParams
   const [activeTab, setActiveTab] = useState("latest")
   const [scrollPosition, setScrollPosition] = useState(0)
-
+  console.log("Username from params:",isComment,scrollPosition )
   // Handle scroll for parallax effects
   useEffect(() => {
     const handleScroll = () => {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import '../../styles/Game.css'; // We'll define the styles in a separate CSS file
 
 const numbers = Array.from({ length: 13 }, (_, i) => i); // Numbers 0 to 12
@@ -43,7 +43,7 @@ const Game: React.FC = () => {
     let currentRotation = 0;
     const spinDuration = 30000; // 30 seconds
     const slowDownDuration = 5000; // Last 5 seconds for slowing down
-    const totalRotations = 10 + Math.random() * 5; // Random number of full spins (10-15)
+    // const totalRotations = 10 + Math.random() * 5; // Random number of full spins (10-15)
 
     const spinInterval = setInterval(() => {
       currentRotation += 10; // Spin speed

@@ -4,7 +4,6 @@ import { useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Search, Plus, Sun, Moon, Filter, ShoppingBag, Tag, MapPin, Sparkles } from "lucide-react"
 import BottomNavbar from "../../components/Layout/ButtonNavar"
-import { Image } from "lucide-react"
 
 // Sample data
 const categories = ["Electrónica", "Moda", "Hogar", "Juguetes", "Deportes", "Libros"]
@@ -249,14 +248,14 @@ const Marketplace = () => {
                   <div className="absolute -inset-0.5 rounded-2xl bg-gradient-to-r from-[#7000ff] to-[#00f0ff] opacity-0 group-hover:opacity-70 blur-sm transition-opacity duration-300"></div>
                   <div className="relative bg-[#0c1033]/90 backdrop-blur-md rounded-2xl overflow-hidden border border-[#2a2f5e] group-hover:border-transparent transition-colors">
                     <div className="relative h-48 overflow-hidden">
-                      <Image
+        
+                      <img
                         src={product.image || "/placeholder.svg"}
                         alt={product.name}
                         width={300}
                         height={150}
                         className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
                       />
-                      <div className="absolute inset-0 bg-gradient-to-t from-[#0c1033] via-transparent to-transparent"></div>
                       <div className="absolute inset-0 bg-gradient-to-r from-[#7000ff]/10 to-[#00f0ff]/10 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 
                       {/* Category badge */}

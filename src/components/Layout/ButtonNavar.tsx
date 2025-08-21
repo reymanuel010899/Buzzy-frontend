@@ -27,7 +27,7 @@ const BottomNavbar: React.FC = () => {
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-[#2a2f5e] bg-[#0c1033]/90 backdrop-blur-lg">
       <div className="flex h-16 items-center justify-around px-2">
-        {navItems.map((item, index) => (
+        {navItems.map((item) => (
           <React.Fragment key={item.label}>
             {item.isSpecial ? (
               // Special center button
