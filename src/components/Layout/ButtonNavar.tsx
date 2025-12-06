@@ -12,9 +12,9 @@ const BottomNavbar: React.FC = () => {
   // Navigation items
   const navItems = [
     { icon: Home, label: "Home", path: "/" },
-    { icon: Compass, label: "Game", path: "/game" },
-    { icon: Plus, label: "Create", path: null, isSpecial: true },
     { icon: ShoppingBag, label: "Store", path: "/marker" },
+    { icon: Plus, label: "Create", path: null, isSpecial: true },
+    { icon: Compass, label: "Game", path: "/game" },
     { icon: Wallet, label: "Wallet", path: "/wallet" },
   ]
 

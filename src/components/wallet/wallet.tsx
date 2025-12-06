@@ -1,10 +1,12 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect} from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Wallet, Plus, ArrowDown, ArrowUp, Clock, DollarSign } from "lucide-react"
+import { Wallet, Plus, ArrowDown, ArrowUp, Clock, DollarSign } from 'lucide-react';
 import BottomNavbar from "../Layout/ButtonNavar"
-
+import { createTransactions } from "../../redux/actions/createTransactions";
+import { useDispatch } from 'react-redux';
+import { IUser } from "../../interfaces/auth";
 interface Transaction {
   id: string
   description: string
@@ -13,17 +15,28 @@ interface Transaction {
   date: string
 }
 
-const WalletComponent = () => {
-  const [balance, setBalance] = useState(1250.0)
+type WalletComponentProps = {
+  user?: IUser | null;
+  balances?: string | number;
+  getWallet: () => void;
+  pass_code?: string;
+  wallet_type?: string;
+}
+
+const WalletComponent = ({ balances, getWallet, pass_code, wallet_type, user}: WalletComponentProps) => {
+  console.log(user)
+  const dispatch = useDispatch(); 
+  const [balance, setBalance] = useState(parseInt(balances?.toString() || "0"))
   const [showAddFundsModal, setShowAddFundsModal] = useState(false)
   const [showWithdrawModal, setShowWithdrawModal] = useState(false)
   const [amount, setAmount] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [activeFilter, setActiveFilter] = useState<"all" | "income" | "expense">("all")
   const [scrollPosition, setScrollPosition] = useState(0)
+  // let count = useRef(0)
   console.log(scrollPosition)
   // Sample transactions data
-  const [transactions, setTransactions] = useState<Transaction[]>([
+  const [transactions] = useState<Transaction[]>([
     {
       id: "tx1",
       description: "Compra en Store",
@@ -53,7 +66,12 @@ const WalletComponent = () => {
       date: "2025-04-07",
     },
   ])
-
+  useEffect(()=>{
+    // if(count.current >= 1) return;
+    // count.current += 1
+    getWallet()
+    setBalance(balances ? parseInt(balances.toString()) : 0)
+  }, [balances])
   // Handle scroll for parallax effects
   useEffect(() => {
     const handleScroll = () => {
@@ -66,27 +84,21 @@ const WalletComponent = () => {
 
   const handleAddFunds = () => {
     if (!amount || isNaN(Number(amount))) return
-
     setIsLoading(true)
-
-    // Simulate API call
+   
+    // Simulate API call /wallet
     setTimeout(() => {
-      const amountNum = Number(amount)
-      setBalance((prev) => prev + amountNum)
-
-      // Add transaction to history
-      const newTransaction: Transaction = {
-        id: `tx${Date.now()}`,
-        description: "Fondos agregados",
-        amount: amountNum,
-        type: "income",
-        date: new Date().toISOString().split("T")[0],
-      }
-
-      setTransactions((prev) => [newTransaction, ...prev])
+      createTransactions({
+      amount: Number(amount),
+      transaction_type: "deposit",
+      description: "Fondos agregados"
+    })(dispatch).then(()=> {
       setAmount("")
       setShowAddFundsModal(false)
       setIsLoading(false)
+      getWallet()
+      setBalance(balances ? parseInt(balances.toString()) : 0)
+    })
     }, 1500)
   }
 
@@ -100,24 +112,20 @@ const WalletComponent = () => {
     }
 
     setIsLoading(true)
-
     // Simulate API call
     setTimeout(() => {
-      setBalance((prev) => prev - amountNum)
+      createTransactions({
+      amount: Number(amount),
+      transaction_type: "withdrawal",
+      description: "Fondos retirados"
+    })(dispatch).then(()=> {
 
-      // Add transaction to history
-      const newTransaction: Transaction = {
-        id: `tx${Date.now()}`,
-        description: "Retiro de fondos",
-        amount: -amountNum,
-        type: "expense",
-        date: new Date().toISOString().split("T")[0],
-      }
-
-      setTransactions((prev) => [newTransaction, ...prev])
       setAmount("")
-      setShowWithdrawModal(false)
+      setShowAddFundsModal(false)
       setIsLoading(false)
+      getWallet()
+      setBalance(balances ? parseInt(balances.toString()) : 0)
+    })
     }, 1500)
   }
 
@@ -153,7 +161,8 @@ const WalletComponent = () => {
             {/* Decorative elements */}
             <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-[#7000ff]/20 to-[#00f0ff]/20 rounded-full blur-xl -translate-y-1/2 translate-x-1/2"></div>
             <div className="absolute bottom-0 left-0 w-24 h-24 bg-gradient-to-tr from-[#7000ff]/20 to-[#00f0ff]/20 rounded-full blur-xl translate-y-1/2 -translate-x-1/2"></div>
-
+              <span className="wallet-badge">{wallet_type?.toUpperCase()}</span>
+           
             <div className="flex flex-col items-center relative z-10">
               <motion.div
                 initial={{ scale: 0.8, opacity: 0 }}
@@ -175,6 +184,7 @@ const WalletComponent = () => {
               >
                 Mi Wallet
               </motion.h2>
+              <p>{pass_code?.toUpperCase()}</p>
 
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
@@ -183,7 +193,7 @@ const WalletComponent = () => {
                 className="relative"
               >
                 <div className="absolute -inset-4 rounded-full bg-gradient-to-r from-[#7000ff]/30 to-[#00f0ff]/30 opacity-0 group-hover:opacity-100 blur-md transition-opacity duration-300"></div>
-                <p className="text-5xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-white to-[#00f0ff] my-4">
+                <p className="text-5xl font-extrabold bg-clip-text  bg-gradient-to-r from-white to-[#00f0ff] my-4">
                   ${balance.toFixed(2)}
                 </p>
               </motion.div>

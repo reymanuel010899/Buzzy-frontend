@@ -2,6 +2,7 @@ import axios from "axios";
 import { SUCCEES_LOGIN, FAILED_LOGIN } from "../type";
 
 import type { AppDispatch } from "../../store"; 
+import apiClient from "../client/api-client";
 export interface FetchWithAuthProps {
   email: string;
   password: string;
@@ -11,8 +12,8 @@ export interface FetchWithAuthProps {
 export const login = (formData: FetchWithAuthProps) => async (dispatch: AppDispatch) => {
   try {
     // Solicitud de login SIN Authorization header (login fresco)
-    const response = await axios.post(
-      "http://127.0.0.1:8000/api/login/",
+    const response = await apiClient.post(
+      "/api/login/",
       formData,
       {
         headers: {
@@ -37,6 +38,7 @@ export const login = (formData: FetchWithAuthProps) => async (dispatch: AppDispa
       dispatch({ type: FAILED_LOGIN, payload: null });
     }
   } catch (error: unknown) {
+       debugger
     handleLoginError(error, formData, dispatch);
   }
 };

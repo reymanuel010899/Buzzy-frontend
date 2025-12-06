@@ -1,9 +1,21 @@
-import { Navigate, Outlet } from "react-router-dom";
+import { Navigate } from 'react-router-dom';
+import { useContext } from 'react';
+import { ReactNode } from 'react';
+import { AuthContext } from './context/ AuthContext';
 
-const PrivateRoute: React.FC = () => {
-  const token = localStorage.getItem("accessToken");
 
-  return token ? <Outlet /> : <Navigate to="/sign-in" />;
+const ProtectedRoute: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const { user } = useContext(AuthContext);
+  const token = localStorage.getItem('accessToken');
+  console.log("Token en ProtectedRoute:", token);
+  console.log("User en ProtectedRoute:", user);
+
+
+  if ( !token) {
+    return <Navigate to="/sign-in" replace />;
+  }
+
+  return <>{children}</>;
 };
 
-export default PrivateRoute;
+export default ProtectedRoute;
