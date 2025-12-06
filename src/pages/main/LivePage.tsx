@@ -1,4 +1,4 @@
-import ScreenSharing from "../../componets/index/StartLive"
+import ScreenSharing from "../../components/index/StartLive"
 
 const LivePage = () => {
 

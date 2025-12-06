@@ -1,9 +1,9 @@
-import axios from 'axios'
 import { SUCCEES_MEDIA, FAILED_MEDIA } from '../type'
+import apiClient from '../client/api-client';
 
 export const getMedia = () => async (dispatch: any) => {
     try {
-      const response = await axios.get('http://localhost:8000/media/api/list-home/')
+      const response = await apiClient.get('/media/api/list-home/')
       if (response.status === 200) {
         dispatch({
           type: SUCCEES_MEDIA,

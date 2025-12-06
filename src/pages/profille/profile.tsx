@@ -1,4 +1,4 @@
-import ProfileSection from "../../componets/profle/profile"
+import ProfileSection from "../../components/profle/profile"
 
 const Profile = () => {
 

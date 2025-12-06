@@ -1,0 +1,5 @@
+{
+	"appId": "com.buzzy.app",
+	"appName": "buzzy-frontend",
+	"webDir": "dist"
+}

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
+    <title>Vite + React + TS</title>
+
+      <style>
+        @keyframes pulse-glow {
+          0%, 100% {
+            box-shadow: 0 0 20px #00ffff, 0 0 5px #fff;
+            transform: scale(1.0);
+          }
+          50% {
+            box-shadow: 0 0 35px #00ffff, 0 0 10px #fff;
+            transform: scale(1.05);
+          }
+        }
+        .pulsate {
+          animation: pulse-glow 2.5s infinite ease-in-out;
+        }
+        @keyframes win-flash {
+          0%, 100% {
+            text-shadow: 0 0 15px #00ffff;
+            transform: scale(1);
+          }
+          50% {
+            text-shadow: 0 0 30px #39ff14, 0 0 15px #fff;
+            transform: scale(1.1);
+          }
+        }
+        .win-animation {
+          animation: win-flash 0.8s ease-in-out;
+        }
+      </style>
+     <script type="importmap">
+    {
+      "imports": {
+        "react": "https://aistudiocdn.com/react@^19.2.0",
+        "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+        "react/": "https://aistudiocdn.com/react@^19.2.0/"
+      }
+    }
+    </script>
+    <script type="module" crossorigin src="/assets/index-ByqsDKV4.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-CuWmdID9.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

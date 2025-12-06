@@ -7,7 +7,7 @@ const inicializerState = {
     error: null,
 }
 
-const register = (state = inicializerState, action: {type: string, payload: any}) => { 
+const register = (state = inicializerState, action: {type: string, payload: {user: object, access: string, refresh: string}} ) => { 
     const { type, payload } = action;
     switch (type) {
         case SUCCEES_REGISTER:

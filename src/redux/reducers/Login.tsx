@@ -7,9 +7,8 @@ const inicializerState = {
     error: null,
 }
 
-const LoginReducer = (state = inicializerState, action: {type: string, payload: any}) => { 
+const LoginReducer = (state = inicializerState, action: {type: string, payload: {user: object, access: string, refresh: string}}) => { 
     const { type, payload } = action;
-    console.log(payload, "******")
     switch (type) {
         case SUCCEES_LOGIN:
             return {
