@@ -1125,8 +1125,8 @@ console.log(giftRecived, "===2==")
         accept="video/mp4,video/quicktime,image/jpeg,image/png,image/webp"
       />
       <div className="fixed inset-0 z-0">
-        <div className="absolute inset-0 bg-gradient-to-br from-[#0f0f3c] via-[#1a1a4a] to-[#0f0f3c] opacity-80"></div>
-        <div className="absolute inset-0 bg-[radial-gradient(#ffffff33_1px,transparent_1px)] [background-size:16px_16px] opacity-[0.03]"></div>
+        <div className="absolute inset-0 bg-black from-[#0f0f3c] via-[#1a1a4a] to-[#0f0f3c] opacity-80"></div>
+        <div className="absolute inset-0 bg-black opacity-[0.03]"></div>
       </div>
       <main ref={mainRef} className="h-screen w-full overflow-y-auto pt-30 pb-10">
         {/* Search Bar Area */}

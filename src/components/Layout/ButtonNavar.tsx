@@ -25,7 +25,7 @@ const BottomNavbar: React.FC = () => {
   }
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-[#2a2f5e] bg-[#0c1033]/90 backdrop-blur-lg">
+    <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-[#2a2f5e] bg-black">
       <div className="flex h-16 items-center justify-around px-2">
         {navItems.map((item) => (
           <React.Fragment key={item.label}>
@@ -38,7 +38,7 @@ const BottomNavbar: React.FC = () => {
                 onHoverStart={() => setHoveredItem(item.label)}
                 onHoverEnd={() => setHoveredItem(null)}
               >
-                <div className="absolute -inset-3 rounded-full bg-gradient-to-r from-[#7000ff] to-[#00f0ff] opacity-70 blur-md"></div>
+                <div className="absolute -inset-3 rounded-full  opacity-70 blur-md"></div>
                 <Link
                   to={item.path || "/create"}
                   className="relative flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-r from-[#7000ff] to-[#00f0ff] shadow-[0_0_15px_rgba(112,0,255,0.7)]"

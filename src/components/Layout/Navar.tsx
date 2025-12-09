@@ -27,7 +27,7 @@ const Navbar: React.FC = () => {
     <>
       <nav
         className={`fixed w-full top-0 z-40 px-4 md:px-6 transition-all duration-300 ${
-          scrollPosition > 20 ? "border-t border-[#2a2f5e] bg-[#0c1033]/90 backdrop-blur-lg" : "border-t border-[#2a2f5e] bg-[#0c1033]/90 backdrop-blur-lg"
+          scrollPosition > 20 ? "border-t border-[#2a2f5e] bg-black" : "border-t border-[#2a2f5e] bg-black backdrop-blur-lg"
         }`}
       >
         <div className="flex justify-between items-center max-w-7xl mx-auto py-3">
