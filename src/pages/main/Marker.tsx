@@ -15,7 +15,7 @@ const products = [
     price: "$799",
     category: "Electrónica",
     location: "Ciudad de México",
-    image: "https://via.placeholder.com/150",
+    image: "https://tienda.claro.com.do/content/images/thumbs/0028355_iphone-14-plus-256-gb-blue_618_0.png",
     rating: 4.8,
   },
   {
@@ -77,13 +77,13 @@ const Marketplace = () => {
     <div className="min-h-screen text-white bg-[#050718]">
       {/* Dynamic background with animated gradient */}
       <div className="fixed inset-0 z-0">
-        <div className="absolute inset-0 bg-gradient-to-br from-[#0f0f3c] via-[#1a1a4a] to-[#0f0f3c] opacity-80"></div>
-        <div className="absolute inset-0 bg-[url('/noise.png')] opacity-[0.03] mix-blend-overlay"></div>
+        <div className="absolute inset-0 bg-black opacity-80"></div>
+        <div className="absolute inset-0 bg-black opacity-[0.03] mix-blend-overlay"></div>
 
         {/* Animated orbs in background */}
-        <div className="absolute top-1/4 left-1/4 h-40 w-40 rounded-full bg-[#7000ff]/20 blur-3xl animate-float"></div>
+        {/* <div className="absolute top-1/4 left-1/4 h-40 w-40 rounded-full bg-[#7000ff]/20 blur-3xl animate-float"></div>
         <div className="absolute bottom-1/3 right-1/3 h-60 w-60 rounded-full bg-[#00f0ff]/20 blur-3xl animate-float-delayed"></div>
-        <div className="absolute top-2/3 left-1/2 h-32 w-32 rounded-full bg-[#a200ff]/20 blur-3xl animate-float-slow"></div>
+        <div className="absolute top-2/3 left-1/2 h-32 w-32 rounded-full bg-[#a200ff]/20 blur-3xl animate-float-slow"></div> */}
       </div>
 
       {/* Main content */}
@@ -91,7 +91,7 @@ const Marketplace = () => {
         {/* Header */}
         <header
           className={`sticky top-0 z-30 transition-all duration-500 ease-in-out ${
-            scrollPosition > 20 ? "bg-[#0c1033]/80 backdrop-blur-lg shadow-lg" : "bg-transparent"
+            scrollPosition > 20 ? "bg-black  shadow-lg" : "bg-transparent"
           }`}
         >
           <div className="px-4 py-5">
@@ -245,8 +245,8 @@ const Marketplace = () => {
                   whileHover={{ y: -5 }}
                   className="group relative"
                 >
-                  <div className="absolute -inset-0.5 rounded-2xl bg-gradient-to-r from-[#7000ff] to-[#00f0ff] opacity-0 group-hover:opacity-70 blur-sm transition-opacity duration-300"></div>
-                  <div className="relative bg-[#0c1033]/90 backdrop-blur-md rounded-2xl overflow-hidden border border-[#2a2f5e] group-hover:border-transparent transition-colors">
+                  <div className="absolute -inset-0.5 rounded-2xl bg-black opacity-0 group-hover:opacity-70 blur-sm transition-opacity duration-300"></div>
+                  <div className="relative bg-black rounded-2xl overflow-hidden border border-[#2a2f5e] group-hover:border-transparent transition-colors">
                     <div className="relative h-48 overflow-hidden">
         
                       <img
@@ -291,7 +291,7 @@ const Marketplace = () => {
                         className="w-full mt-4 relative group/btn"
                       >
                         <div className="absolute -inset-0.5 rounded-lg bg-gradient-to-r from-[#7000ff] to-[#00f0ff] opacity-70 blur-sm group-hover/btn:opacity-100 transition-opacity duration-300"></div>
-                        <div className="relative py-2 rounded-lg bg-[#0c1033] group-hover/btn:bg-[#161b4b] transition-colors flex items-center justify-center gap-2">
+                        <div className="relative py-2 rounded-lg bg-black group-hover/btn:bg-[#161b4b] transition-colors flex items-center justify-center gap-2">
                           <ShoppingBag className="h-4 w-4 text-[#00f0ff]" />
                           <span className="font-medium">Comprar</span>
                         </div>

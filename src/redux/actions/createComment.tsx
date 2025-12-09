@@ -4,6 +4,7 @@ import apiClient from '../client/api-client';
 type CreateCommentBody = {
   video_id: string;
   content: string;
+  parent_uuid: string
 };
 
 export const createComment = (body: CreateCommentBody) => async (dispatch: any) => {

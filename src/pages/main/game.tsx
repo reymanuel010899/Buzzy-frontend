@@ -137,9 +137,10 @@ const Game: React.FC = () => {
   return (
     <div 
       className="flex flex-col items-center justify-center h-screen overflow-hidden text-white p-4 pb-28 font-['Orbitron',_sans-serif]"
-      style={{ background: 'radial-gradient(circle, #1a183e, #0d0c22)' }}
+      style={{ background: 'black' }}
     >
-      <div className="absolute top-0 left-0 w-full h-full bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-20"></div>
+      <div className="absolute top-0 left-0 w-full h-full bg-black opacity-20"></div>
+      {/* <div className="absolute bottom-1/3 right-1/3 h-60 w-60 rounded-full bg-[#00f0ff]/20 blur-3xl animate-float-delayed"></div> */}
       
       <div className="z-10 text-center mb-20">
         <h2 className="text-xl text-cyan-300 tracking-widest" style={{ textShadow: '0 0 8px #00ffff' }}>MI WALLET</h2>

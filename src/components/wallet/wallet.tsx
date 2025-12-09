@@ -144,7 +144,7 @@ const WalletComponent = ({ balances, getWallet, pass_code, wallet_type, user}: W
         {/* Animated orbs in background */}
         {/* <div className="absolute top-1/4 left-1/4 h-40 w-40 rounded-full bg-[#7000ff]/20 blur-3xl animate-float"></div> */}
         {/* <div className="absolute top-2/3 left-1/2 h-32 w-32 rounded-full bg-[#a200ff]/20 blur-3xl animate-float-slow"></div> */}
-        <div className="absolute bottom-1/3 right-1/3 h-60 w-60 rounded-full bg-[#00f0ff]/20 blur-3xl animate-float-delayed"></div>
+        {/* <div className="absolute bottom-1/3 right-1/3 h-60 w-60 rounded-full bg-[#00f0ff]/20 blur-3xl animate-float-delayed"></div> */}
       </div>
 
       {/* Main content */}
@@ -353,7 +353,7 @@ const WalletComponent = ({ balances, getWallet, pass_code, wallet_type, user}: W
               onClick={(e) => e.stopPropagation()}
             >
               <div className="absolute -inset-1 bg-gradient-to-r from-[#7000ff] to-[#00f0ff] rounded-2xl opacity-50 blur-md"></div>
-              <div className="relative bg-[#0c1033]/90 backdrop-blur-md p-6 rounded-2xl border border-[#2a2f5e]">
+              <div className="relative bg-black p-6 rounded-2xl border border-[#2a2f5e]">
                 <h3 className="text-xl font-bold text-white mb-4 text-center">Agregar Fondos</h3>
 
                 <div className="mb-6">
@@ -418,7 +418,7 @@ const WalletComponent = ({ balances, getWallet, pass_code, wallet_type, user}: W
               onClick={(e) => e.stopPropagation()}
             >
               <div className="absolute -inset-1 bg-gradient-to-r from-[#7000ff] to-[#00f0ff] rounded-2xl opacity-50 blur-md"></div>
-              <div className="relative bg-[#0c1033]/90 backdrop-blur-md p-6 rounded-2xl border border-[#2a2f5e]">
+              <div className="relative bg-black backdrop-blur-md p-6 rounded-2xl border border-[#2a2f5e]">
                 <h3 className="text-xl font-bold text-white mb-4 text-center">Retirar Fondos</h3>
 
                 <div className="mb-6">

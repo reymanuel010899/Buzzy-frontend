@@ -44,7 +44,7 @@ export default function FluidSearch({ onClose, searchTerm, setSearchTerm }: Flui
         initial={{ y: -50, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ type: "spring", damping: 30, stiffness: 300 }}
-        className="w-full max-w-md rounded-2xl bg-gradient-to-b from-[#1a1a4a]/90 to-[#0f0f3c]/90 backdrop-blur-md p-4 overflow-hidden"
+        className="w-full max-w-md rounded-2xl bg-black p-4 overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Search input */}

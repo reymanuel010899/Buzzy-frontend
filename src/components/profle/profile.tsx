@@ -338,10 +338,10 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: ProfileSecc
       <div className="min-h-screen text-white flex flex-col items-center bg-[#050718] font-sans">
         {/* Fondo Dinámico */}
         <div className="fixed inset-0 z-0 pointer-events-none">
-          <div className="absolute inset-0 bg-gradient-to-br from-[#0f0f3c] via-[#1a1a4a] to-[#0f0f3c] opacity-80"></div>
+          <div className="absolute inset-0 bg-black opacity-80"></div>
           <div className="absolute inset-0 bg-[url('/noise.png')] opacity-[0.03] mix-blend-overlay"></div>
           <div className="absolute top-1/4 left-1/4 h-40 w-40 rounded-full bg-[#7000ff]/20 blur-3xl animate-float"></div>
-          <div className="absolute bottom-1/3 right-1/3 h-60 w-60 rounded-full bg-[#00f0ff]/20 blur-3xl animate-float-delayed"></div>
+          {/* <div className="absolute bottom-1/3 right-1/3 h-60 w-60 rounded-full bg-[#00f0ff]/20 blur-3xl animate-float-delayed"></div> */}
         </div>
 
         {/* --- CONTENIDO PRINCIPAL DEL PERFIL RESTAURADO --- */}
