@@ -1,8 +1,9 @@
 import { Gift } from "../../../components/index/main.interface";
+import { GiftI } from "../../../interfaces/gift";
 import { FAILED_GET_ONE_ACTIVE_GIFTS, SUCCEES_GET_ONE_ACTIVE_GIFTS } from "../../type";
 
 interface GetOneActiveGiftState {
-    gift: Gift[] | null;
+    gift: GiftI[] | null;
     error: string | null;
 }
 
