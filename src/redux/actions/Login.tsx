@@ -70,7 +70,7 @@ const handleLoginError = async (error: unknown, formData: FetchWithAuthProps, di
         }
       } catch (refreshError) {
         console.error("Error refreshing token:", refreshError);
-        window.location.href = "/login";
+        window.location.href = "/sign-in";
       }
     } else {
       console.error("No refresh token available");
