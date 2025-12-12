@@ -1,12 +1,11 @@
 import { AnimatePresence, motion } from "framer-motion"
-import { CommentData } from "../index"
 import { useState, useRef, useEffect } from "react"
 import { Smile, X } from "lucide-react"
 import { allEmojis } from "./emojis"
+import { CommentData } from "../index"
 
-// Tipo extendido con replies
+// EXTENDER COMENTARIO
 type CommentWithReply = CommentData & {
-    parent_uuid?: string | null
     replies?: CommentWithReply[]
 }
 
@@ -33,36 +32,47 @@ export const ShowComments = ({
     const [showEmojiPicker, setShowEmojiPicker] = useState(false)
     const [replyingTo, setReplyingTo] = useState<{ uuid: string; username: string } | null>(null)
     const [openReplies, setOpenReplies] = useState<Record<string, boolean>>({})
+    const [commentsTree, setCommentsTree] = useState<CommentWithReply[]>([])
 
     const emojiPickerRef = useRef<HTMLDivElement>(null)
     const emojiButtonRef = useRef<HTMLButtonElement>(null)
 
-    // ---------------------------------
-    // ✅ Convertir lista PLANA a ÁRBOL
-    // ---------------------------------
     const buildCommentTree = (list: CommentWithReply[]) => {
-        const map: Record<string, CommentWithReply> = {}
-        const roots: CommentWithReply[] = []
+        const map = new Map<string, CommentWithReply>();
         
         list.forEach(c => {
-            map[c.uuid] = { ...c, replies: [] }
-        })
-        console.log( list, "*********************")
-        
-        list.forEach(c => {
-            if (c.parent_uuid) {
-                if (map[c.parent_uuid]) {
-                    map[c.parent_uuid].replies!.push(map[c.uuid])
+            map.set(c.uuid, { ...c, replies: [] });
+        });
+
+        const roots: CommentWithReply[] = [];
+
+        map.forEach(comment => {
+            const parentUuid = comment.parent?.uuid;
+
+            if (parentUuid) {
+                const parent = map.get(parentUuid);
+                if (parent) {
+                    parent.replies!.push(comment);
+                } else {
+                    roots.push(comment);
                 }
             } else {
-                roots.push(map[c.uuid])
+                roots.push(comment);
             }
-        })
-        
-        return roots
-    }
+        });
 
-    const commentTree = comments ? buildCommentTree(comments) : []
+        return roots;
+    };
+    console.log(comments, "*-")
+
+    // Ejecutar el árbol cuando lleguen los comentarios del backend
+    useEffect(() => {
+        if (comments && comments.length > 0) {
+            const tree = buildCommentTree(comments);
+            console.log(comments, "--------------------------------")
+            setCommentsTree(tree);
+        }
+    }, [comments]);
 
     // ---------------------------------
     // EMOJIS
@@ -132,7 +142,7 @@ export const ShowComments = ({
             >
                 <div className="flex items-start gap-3">
                     <img
-                        src={`http://localhost:8000/media/${comment.user_id.profile_picture || 'profile_pics/avatar.webp'}`}
+                        src={`http://localhost:8000/media/${comment.user_id.profile_picture || "profile_pics/avatar.webp"}`}
                         alt={comment.user_id.username}
                         className="h-10 w-10 rounded-full object-cover border border-white/10 flex-shrink-0"
                     />
@@ -154,15 +164,13 @@ export const ShowComments = ({
                             </button>
                         </div>
 
-                        {/* BOTÓN VER RESPUESTAS */}
                         {hasReplies && (
                             <button
                                 className="mt-2 text-xs text-[#8b9cff] hover:text-white"
                                 onClick={() => toggleReplies(comment.uuid)}
                             >
-                                {isOpen
-                                    ? "Ocultar respuestas"
-                                    : `Ver ${comment.replies!.length} respuestas`}
+                                {isOpen ? "---- Hide replies" : `---- View ${comment.replies!.length} replies`}
+                                <div className="x1xp9za0 x1q0q8m5 xso031l xbmvrgn x17z2i9w"></div>
                             </button>
                         )}
                     </div>
@@ -172,7 +180,6 @@ export const ShowComments = ({
                     </motion.button>
                 </div>
 
-                {/* RESPUESTAS ANIDADAS */}
                 {hasReplies && isOpen && (
                     <motion.div
                         initial={{ opacity: 0, height: 0 }}
@@ -180,7 +187,7 @@ export const ShowComments = ({
                         exit={{ opacity: 0, height: 0 }}
                         className="mt-3"
                     >
-                        {comment.replies!.map(reply => renderComment(reply, depth + 1))}
+                        {comment.replies!.map(r => renderComment(r, depth + 1))}
                     </motion.div>
                 )}
             </motion.div>
@@ -188,7 +195,7 @@ export const ShowComments = ({
     }
 
     // ---------------------------------
-    // UI PRINCIPAL
+    // UI
     // ---------------------------------
     return (
         <AnimatePresence>
@@ -207,30 +214,27 @@ export const ShowComments = ({
                         animate={{ y: 0 }}
                         exit={{ y: "100%" }}
                         transition={{ type: "spring", damping: 30, stiffness: 300 }}
-                        className="fixed bottom-15 left-0 right-0 max-h-[55vh] z-50 flex flex-col bg-[#0f0f1a] rounded-t-3xl overflow-hidden"
+                        className="fixed bottom-13 left-0 right-0 max-h-[55vh] z-50 flex flex-col bg-black rounded-t-3xl overflow-hidden"
                         onClick={(e) => e.stopPropagation()}
                     >
-                        <div className="flex justify-center pt-4 pb-2">
-                            <div className="w-12 h-1.5 bg-white/30 rounded-full cursor-pointer" />
-                        </div>
+                        <div className="flex justify-center p-3 "><div className="w-12 h-1.5 bg-[#00f0ff] rounded-full cursor-pointer"></div></div>
 
-                        <h1 className="text-center font-bold text-white text-lg pb-2">Comentarios</h1>
+                        <h2 className="text-center font-bold text-white pb-2">Comentarios</h2>
 
-                        {/* LISTA */}
                         <div className="flex-1 overflow-y-auto px-4 pb-24 custom-scrollbar">
-                            {!commentTree.length ? (
+                            {!commentsTree.length ? (
                                 <div className="flex justify-center items-center h-32">
                                     <p className="text-[#a2b0ff] text-sm">Aún no hay comentarios</p>
                                 </div>
                             ) : (
                                 <div className="space-y-1">
-                                    {commentTree.map(c => renderComment(c))}
+                                    {commentsTree.map(c => renderComment(c))}
                                 </div>
                             )}
                         </div>
 
                         {/* INPUT */}
-                        <div className="border-t border-white/10 bg-[#0f0f1a] px-4 pt-3 pb-6">
+                        <div className="border-t border-white/20 bg-black px-1 pt-2 pb-4">
                             <AnimatePresence>
                                 {replyingTo && (
                                     <motion.div
@@ -314,7 +318,7 @@ export const ShowComments = ({
 
                                 <div className="p-4 overflow-y-auto" style={{ maxHeight: "320px" }}>
                                     <div className="grid grid-cols-8 gap-3">
-                                        {allEmojis.slice(0, 96).map((emoji, i) => (
+                                        {allEmojis.map((emoji, i) => (
                                             <motion.span
                                                 key={i}
                                                 whileTap={{ scale: 1.6 }}
