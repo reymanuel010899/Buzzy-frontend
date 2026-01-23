@@ -1,4 +1,5 @@
 export interface GiftI {
+    uuid?: string;
     name: string;
     slug: string;
     emoji: string;

@@ -1,16 +1,16 @@
 "use client"
 
 import React, { useState } from "react"
-import { Home, Plus, ShoppingBag, Wallet, Compass } from "lucide-react"
+import {  Plus } from "lucide-react"
 import {
   HomeIcon,
   ShoppingBagIcon,
   WalletIcon,
   MapIcon,
-  PlusCircleIcon,
 } from "@heroicons/react/24/solid";
 import { Link, useLocation } from "react-router-dom"
 import { motion } from "framer-motion"
+import profileIconC from "./ProfileIcon";
 
 const BottomNavbar: React.FC = () => {
   const location = useLocation()
@@ -19,10 +19,12 @@ const BottomNavbar: React.FC = () => {
   // Navigation items
   const navItems = [
     { icon: HomeIcon, label: "Home", path: "/" },
+      { icon: WalletIcon, label: "Wallet", path: "/wallet" },
     { icon: ShoppingBagIcon, label: "Store", path: "/marker" },
     { icon: Plus, label: "Create", path: null, isSpecial: true },
     { icon: MapIcon, label: "Game", path: "/game" },
     { icon: WalletIcon, label: "Wallet", path: "/wallet" },
+    { icon: profileIconC, label: "Profile", path: "/profile" },
   ]
 
   // Check if a path is active
@@ -50,7 +52,7 @@ const BottomNavbar: React.FC = () => {
                   to={item.path || "/create"}
                   className="relative flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-r from-[#7000ff] to-[#00f0ff] shadow-[0_0_15px_rgba(112,0,255,0.7)]"
                 >
-                  <item.icon className="h-6 w-6 text-white" />
+                  <item.icon className="h-5 w-5 text-white" />
                 </Link>
                 {hoveredItem === item.label && (
                   <motion.div

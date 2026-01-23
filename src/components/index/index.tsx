@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState, useMemo } from "react"
 import { Link, useNavigate } from "react-router-dom"
-import { Eye, MessageCircle, Heart, Volume2, VolumeX, Play, Pause, Plus, Loader2, X, MoreVertical, Gift, XIcon } from "lucide-react"
+import sendMessageSound from "../../assets/sounds/sendMessage.mp3";
+import { Eye, MessageCircle, Heart, Volume2, VolumeX, Play, Pause, Plus, Loader2, X, MoreVertical} from "lucide-react"
 import BottomNavbar from "../Layout/ButtonNavar"
 import { motion, AnimatePresence } from "framer-motion"
 import { createStory } from "../../redux/actions/history/createHistory"
-import { StoryList, Video as videoI, Video } from './main.interface';
+import { StoryList, Video as videoI } from './main.interface';
 import { useDispatch, useSelector } from "react-redux"
 import { getComment } from "../../redux/actions/getComment"
 import { createComment } from "../../redux/actions/createComment"
@@ -23,7 +24,9 @@ import { getOneActiveGift } from "../../redux/actions/gift/getGiftActive"
 import { getRecivedGiftByUser } from "../../redux/actions/gift/getGiftsByUser"
 import { GiftI } from "../../interfaces/gift"
 import { ShowComments } from "../comments/modalComents"
-
+import { useChat } from "../../context/ChatContext"
+import { useTypingUsers } from "../../context/useTyping";
+import typingSound from "../../assets/sounds/whatsapp-typing.mp3";
 
 const WS_URL = "ws://localhost:8001/ws";
 interface StreamingUIProps {
@@ -45,7 +48,9 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   // Redux selectors para gifts
   const activeGifts = useSelector((state: any) => state.activeGiftReducer?.gift);
   const receivedGifts = useSelector((state: any) => state.RecivedGiftReducer?.gift);
-  const receivedGiftsByUser = useSelector((state: any) => state.RecivedGiftReducerByUser?.gift);
+  const { typingByChat, setTypingUser, removeTypingUser } = useTypingUsers();
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const { selectedChat  } = useChat();
   const oneActiveGift = useSelector((state: any) => state.GetOneactiveGiftReducer?.gift);
   const [activeVideo, setActiveVideo] = useState<number | null>(null)
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([])
@@ -95,12 +100,15 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [showFullGiftMenu, setShowFullGiftMenu] = useState(false);
   // const [giftAnimation, setGiftAnimation] = useState<{ type: string; sender: string; storyUuid: string; phase: 'initial' | 'crazy' | 'explode' | 'reward'; giftId: string } | null>(null);
   const [storyPremiumStates, setStoryPremiumStates] = useState<Record<string, boolean>>({});
+  const sendAudioRef = useRef<HTMLAudioElement | null>(null);
   const [storyPremiumStatesSee, setStoryPremiumStatesSee] = useState<Record<string, boolean>>({});
   const [storyPremiumColors, setStoryPremiumColors] = useState<Record<string, string>>({}); // Guardar colores premium por story UUID
   const isGiftsRef = useRef<GiftI[]>([]);
+  const chatSocketActiveRef = useRef(false);
+
   // Audio refs for sounds
   const audioRefs = useRef<Record<string, HTMLAudioElement | null>>({});
-  const [fullGifts, setFullGifts] = useState<Gift[]>([]);
+  const [fullGifts, setFullGifts] = useState<GiftI[]>([]);
   const [giftsLoading, setGiftsLoading] = useState(true);
   // --- R3F Scope for Gift3D ---
   // Memoizar función para evitar recreaciones
@@ -120,6 +128,12 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   } | null>(null);
 
   const [expandedDescriptions, setExpandedDescriptions] = useState({});
+   const typingAudioRef = useRef<HTMLAudioElement | null>(null);
+  
+    useEffect(() => {
+      sendAudioRef.current = new Audio(sendMessageSound);
+      typingAudioRef.current = new Audio(typingSound);
+    }, []);
 
   const handleToggleDescription = (videoId) => {
     setExpandedDescriptions(prev => ({
@@ -142,11 +156,16 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     });
     return Array.from(groups.values());
   }, [stories]);
-
+  
+  useEffect(() => {
+      sendAudioRef.current = new Audio(sendMessageSound);
+    }, []);
   useEffect(() => {
     isGiftsRef.current = isGifts;
   }, [isGifts]);
-
+  useEffect(() => {
+    chatSocketActiveRef.current = !!selectedChat;
+  }, [selectedChat]);
   // Función para convertir nombres de colores a valores RGB/hex con colores MÁS INTENSOS
   const getColorValue = (colorName: string | undefined): { hex: string; rgb: string; rgba: (opacity: number) => string } => {
     if (!colorName) {
@@ -157,7 +176,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         rgba: (opacity: number) => `rgba(0, 240, 255, ${opacity})`
       };
     }
-
+    
     // Colores originales con ligero aumento de intensidad
     const colorMap: Record<string, { hex: string; rgb: string }> = {
       red: { hex: '#ef4444', rgb: 'rgb(239, 68, 68)' },
@@ -212,7 +231,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   };
 
   const handleWSMessage = useCallback((data: any) => {
-    if (data.event === "like_updated") {
+    if (data.event === "like_updated" && user.id === data.user_id) {
       setMedia(prev =>
         prev ? prev.map((video) => {
           if (video.id === data.video_id) {
@@ -336,8 +355,22 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         }) : prev
       );
     }
+    if (data.event === "send_message") {
+      // ⛔ No es para mí
+      if (data.recipient_id !== user.id) return;
+      // ⛔ Ya estoy en ese chat, no sonar
+      // if (data.sender_id === user.id && !webscoket.is_active) return;
+      if (chatSocketActiveRef.current) return;
+      if (sendAudioRef.current) {
+        console.log("sendAudioRef.current")
+        sendAudioRef.current.currentTime = 0;
+        sendAudioRef.current
+          .play()
+          .catch(err => console.warn("Audio bloqueado:", err));
+    }
+
+    }
     if (data.event === "new_story") {
-      console.log("Nueva historia recibida via WS:", data);
       setStories((prev) => {
         if (data.story) {
           return [...prev, data.story];
@@ -351,7 +384,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         setIsGift(updatedGifts);
         setGiftRecived(updatedGifts);
 
-        // Mostrar animación del regalo que acabas de ver
         setGiftAnimation({
           type: data.gift_type,
           giftId: data.gift_uuid,
@@ -370,9 +402,23 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       // Cerrar modal de viewers si está abierto
       setShowViewersModal(false);
     }
+    if (data.event === "typing") {
+        if (data.user_id === user.id) return;
+
+        if (data.is_typing) {
+          setTypingUser(
+              data.chat_uuid,
+              data.user_id,
+              data.username ?? "Alguien"
+            );
+        } else {
+          removeTypingUser(data.chat_uuid,
+              data.user_id);
+        }
+    }
   },
     [setMedia]);
-  console.log(isGifts, "esto quedan -------------")
+
   useEffect(() => {
     setMedia(media);
   }, [media]);
@@ -585,7 +631,33 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     }, 1000);
   };
   const toggleMute = () => setIsMuted(!isMuted)
-  useWebSocket(WS_URL, handleWSMessage);
+  const socketRef = useWebSocket(WS_URL + `?user_id=${user.id}&token=${localStorage.getItem("accessToken")}`, handleWSMessage, true);
+  const handleTyping = () => {
+    if (!WS_URL || !socketRef.current) return;
+
+    const socket = chatSocketActiveRef.current;
+    if (!socket) return;
+
+    // enviar typing true
+    socketRef?.current?.send(JSON.stringify({
+      type: "typing",
+      is_typing: true
+    }));
+
+    // reset timeout
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+
+    typingTimeoutRef.current = setTimeout(() => {
+      socketRef?.current?.send(JSON.stringify({
+        type: "typing",
+        is_typing: false
+      }));
+ 
+    }, 1500);
+  };
+
   // --- Logic for Create History ---
   const handleAddHistory = () => {
     // We click the hidden input element programmatically
@@ -736,7 +808,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     console.log(currentGroup.user, user)
     const next_media_uuid = currentGroup.media[currentStoryItemIndex + 1]?.id;
     if (next_media_uuid && user.id == currentGroup.user?.id) {
-      console.log("************************************************")
       getRecivedGiftByUser(next_media_uuid)(dispatch).then((res) => {
         if (res && Array.isArray(res)) {
           setIsGift(res);
@@ -927,9 +998,8 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       setShowGiftMenu(true);
     }
   };
-  console.log(groupedStories, "--- rey")
-  console.log(currentStoryUuid, "--- rey")
-  // Cargar gifts solo una vez desde Redux o hacer la llamada si no están
+
+
   useEffect(() => {
     // Si ya tenemos los gifts en Redux, usarlos
     if (activeGifts && activeGifts.length > 0) {
@@ -973,10 +1043,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     }
   }, [dispatch, activeGifts]);
 
-  // Usar Redux para gifts recibidos por usuario - Optimizado para evitar llamadas repetidas
-  // Ref para evitar llamadas duplicadas
-  // const lastLoadedStoryUuid = useRef<string | null>(null);
-  // const loadedGiftsByStoryUuid = useRef<Set<string>>(new Set());
 
   // Usar Redux para gifts recibidos por usuario - CON VALIDACIÓN DE PROPIEDAD
   const hasEverLoadedGifts = useRef(false); // ← NUEVO: saber si ya hicimos la primera llamada
@@ -1160,91 +1226,10 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       console.log("Este viewer no ha enviado regalos aún");
     }
   }
-  // const showGiftRecived = useCallback((viewer: any) => {
-  //   console.log("1", viewer,  giftRecived)
-  //   const gifts = giftRecived?.filter((gift: any) => {
-  //     if(gift.sender === viewer.user_id) {
-  //       return gift;
-  //     }
-  //   }
-  //   ) || [];
-  //   // Asegúrate de que haya al menos un regalo
-  //   console.log(gifts, "--->>>>>>> rey manuel")
-  //   if (gifts && gifts.length > 0) {
-  //     const firstGiftId = gifts[0].id;
-  //     // Usar Redux si ya tenemos el gift, sino hacer la llamada
-  //     if (oneActiveGift && oneActiveGift.length > 0) {
-  //       // Ya tenemos el gift en Redux
-  //       gifts.splice(0, 1);
-  //     } else {
-  //       getOneActiveGift(firstGiftId, currentStoryUuid)(dispatch).then((res) => {
-  //         gifts.splice(0, 1);
-  //       });
-  //     }
-  //   } else {
-  //     console.log("Este viewer no ha enviado regalos aún");
-  //   }
-  // }, [oneActiveGift, currentStoryUuid, dispatch]);
-  console.log(isGifts, "------")
-  const setHeaderColor = (classe: string, color: string) => {
-    console.log(groupedStories, "--- rey")
-    return (
-      <>
-        <style>{`
-        .story-premium {
-          /* New background, frame, effects */
-          background: linear-gradient(135deg, #0f0f3c, #1a1a4a);
-          border: 2px solid #00f0ff;
-          box-shadow: 0 0 50px rgba(0, 240, 255, 0.5);
-        }
-        .premium-header {
-          // background: linear-gradient(to bottom, rgba(0, 240, 255, 0.2), transparent);
-        }
-        .premium-content {
-          filter: brightness(1.1) contrast(1.1);
-        }
-        .premium-media {
-          box-shadow: 0 0 30px rgba(0, 240, 255, 0.3);
-          border-radius: 20px;
-        }
-        @keyframes scan {
-          0% { transform: translateX(-100%); }
-          100% { transform: translateX(100%); }
-        }
-        .animate-scan {
-          animation: scan 3s linear infinite;
-        }
-          
-        :root {
-          --yellow-500: 46 204 113;
-          --blue-500: 59 130 246;
-          --purple-500: 168 85 247;
-          --indigo-500: 99 102 241;
-          --red-500: 239 68 68;
-          --gold-500: 234 179 8;
-          --orange-500: 249 115 22;
-          --multi-500: 255 0 255;
-          --pink-500: 236 72 153;
-          --cyan-500: 6 182 212;
-          --green-500: 34 197 94;
-          --rainbow-500: 147 51 234;
-        }
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 4px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: rgba(255, 255, 255, 0.2);
-          border-radius: 2px;
-        }
-      `}</style>
-      </>
-    )
-  }
+ 
+
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[#050718] text-white font-sans">
+    <div className="relative min-h-screen overflow-hidden bg-black text-white font-sans">
       {/* Hidden Input for File Upload */}
       <input
         type="file"
@@ -1254,7 +1239,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         accept="video/mp4,video/quicktime,image/jpeg,image/png,image/webp"
       />
       <div className="fixed inset-0 z-0">
-        <div className="absolute inset-0 bg-black from-[#0f0f3c] via-[#1a1a4a] to-[#0f0f3c] opacity-80"></div>
+        <div className="absolute inset-0 bg-black  opacity-80"></div>
         <div className="absolute inset-0 bg-black opacity-[0.03]"></div>
         <div className="absolute bottom-1/3 right-1/3 h-60 w-60 rounded-full bg-[#00f0ff]/20 blur-3xl animate-float-delayed"></div>
       </div>
@@ -1348,7 +1333,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 if (!description) {
                   return { content: [], needsTruncation: false };
                 }
-                const maxChars = 80;
+                const maxChars = 47;
                 let displayDescription = description;
                 let needsTruncation = false;
 
@@ -1462,7 +1447,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                       <div className="absolute bottom-0 left-0 right-0 py-4 px-4 pr-3 z-10">
 
                         {/* 2. PERFIL DE USUARIO */}
-                        <div className="flex items-center mb-4">
+                        <div className="flex items-center mb-1">
                           <div className="relative h-10 w-10 overflow-hidden rounded-full flex-shrink-0">
                             <img
                               className="h-full w-full object-cover rounded-full"
@@ -1506,7 +1491,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                         </div>
 
                         {/* 3. BARRA DE INTERACCIÓN Y BOTÓN DE SUSCRIPCIÓN */}
-                        <div className="flex items-center justify-between w-full mb-4">
+                        <div className={`flex items-center justify-between w-full ${isExpanded ? "pb-4" : "pb-13"}`}>
                           <div className="flex items-center gap-4">
                             <motion.button
                               whileTap={{ scale: 0.9 }}
@@ -1522,7 +1507,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                                 className={`flex h-10 w-10 items-center justify-center rounded-full ${data.liked ? "bg-red-500/20 text-red-500" : "bg-white/10 text-white"
                                   }`}
                               >
-                                <Heart className={`h-5 w-5 ${data.liked ? "fill-red-500" : ""}`} />
+                                <Heart className={`h-5 w-5 ${data.liked ? "fill-red-900" : ""}`} />
                               </motion.div>
                               <span className="text-xs text-white">{data.like_count || 0}</span>
                               <AnimatePresence>
@@ -1664,10 +1649,10 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                         {data.description && (
                           <motion.div
                             className={`
-                                              pr-2 pl-2 rounded-lg backdrop-blur-sm transition-all duration-300 ease-in-out
+                                              p-1 rounded-lg backdrop-blur-sm transition-all duration-300 ease-in-out
                                               ${isExpanded
-                                ? 'absolute max-w-[60vh] center pt-2 pb-5 pr-2  pl-2 bottom-5 left-1 right-1 max-h-[90vh] overflow-y-auto  overflow-x-hidden bg-black/80 z-20'
-                                : 'relative -mx-2  pl-2  mb-1  max-h-[100px] overflow-hidden bg-black/30'
+                                ? 'absolute max-w-[60vh] center pt-2 pb-1 pr-2  pl-2 bottom-1 -left-1  max-h-[90vh] overflow-y-auto  overflow-x-hidden bg-black/50 z-20'
+                                : 'absolute -mx-5 bottom-1 pb-1 pl-3 pr-10  max-h-[100px] overflow-hidden bg-black/50'
                               }
                                           `}
                             // className={`mb-1 bg-black/10 p-3 rounded-lg backdrop-blur-sm relative transition-all duration-300 ease-in-out ${isExpanded ? 'max-h-96 overflow-y-auto' : 'max-h-[100px] overflow-hidden'}`}
@@ -1679,7 +1664,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                               {isExpanded ? (
                                 // Mostrar contenido completo
                                 <>
-                                  {data.description.length > 80 && (
+                                  {data.description.length > 49 && (
                                     <div
                                       className="flex justify-center p-3 "
                                       onClick={(e) => {
@@ -1992,8 +1977,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 className="flex-1 bg-white/10 border border-white/20 rounded-full px-3 py-1 text-white placeholder-gray-400 focus:outline-none focus:border-[#00f0ff] backdrop-blur-md"
               />
               {isOwner ?
-
-
                 <motion.button
                   className="p-2  hover:from-[#ff0099]/80 rounded-full backdrop-blur-md text-white shadow-lg shadow-pink-500/20"
                   whileHover={{ scale: 1.1 }}
@@ -2051,7 +2034,9 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 )}
               </motion.button>
               {/* New Gift Button */}
-              <motion.button
+
+              {!isOwner && (
+                 <motion.button
                 onClick={handleGiftClick}
                 className="p-2  hover:from-[#ff0099]/80 rounded-full backdrop-blur-md text-white shadow-lg shadow-pink-500/20"
                 whileHover={{ scale: 1.1 }}
@@ -2068,8 +2053,12 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 }}
               >
                 <svg data-v-92f2660e width="25" height="25" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg"><g id="giftbox" data-v-92f2660e=""><g id="Base" data-v-92f2660e=""><g id="bottom" data-v-92f2660e=""><path id="Rectangle 15 Copy 2" d="M94 58H26V104H94V58Z" fill="#FF4F64" data-v-92f2660e=""></path><path id="Rectangle 3 Copy" opacity="0.05" d="M94 101.294H26V104H94V101.294Z" fill="black" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 5" opacity="0.1" d="M28.6842 58H26V104H28.6842V58Z" fill="white" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 6" opacity="0.05" d="M94 58H91.3158V104H94V58Z" fill="black" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 3" opacity="0.05" d="M73.8684 58H71.1842V104H73.8684V58Z" fill="black" data-v-92f2660e=""></path><path id="Rectangle Copy" d="M71.1842 58H48.5921V104H71.1842V58Z" fill="#FFD4D9" data-v-92f2660e=""></path><path id="Rectangle 2" opacity="0.1" d="M94 58H26V63.8627H94V58Z" fill="url(#paint0_linear_740_3020)" data-v-92f2660e=""></path></g></g><g id="top" data-v-92f2660e=""><path id="Rectangle 15 Copy 3" d="M100 42.665H20V60.0001H100V42.665Z" fill="#FF4F64" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 7" opacity="0.05" d="M100 42.665H97.2881V60.0001H100V42.665Z" fill="black" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 4" opacity="0.1" d="M22.7119 42.665H20V59.775H22.7119V42.665Z" fill="white" data-v-92f2660e=""></path><path id="ribbon" d="M60.0077 31.2585C59.9498 31.1677 58.6909 29.2544 58.0916 28.4143C55.4283 24.6809 52.6562 21.6866 49.7588 19.6882C45.9232 17.0425 41.9395 16.2219 38.0786 17.8014C35.6247 18.8053 33.3914 20.7344 31.3719 23.5749C27.177 29.4752 27.4011 34.7531 31.83 38.2919C34.9369 40.7745 39.8498 42.1747 46.1869 42.8621C50.835 43.3663 55.0298 43.2435 59.6147 43.3624L60.0077 31.2585ZM46.7269 37.0423C41.3928 36.4628 37.3603 35.3117 35.3278 33.6852C34.4441 32.978 34.0493 32.2813 34.0144 31.4588C33.9664 30.3263 34.5486 28.7649 35.9595 26.7772C37.3893 24.7631 38.8028 23.5403 40.1691 22.9805C43.7795 21.5011 48.4661 24.7386 53.3703 31.624C54.6954 33.4844 55.9353 35.4716 57.0626 37.4757C53.6591 37.5264 50.0985 37.4086 46.7269 37.0423ZM66.6306 31.624C71.5348 24.7386 76.2213 21.5011 79.8318 22.9805C81.1981 23.5403 82.6115 24.7631 84.0413 26.7772C85.4522 28.7649 86.0344 30.3263 85.9864 31.4588C85.9515 32.2813 85.5567 32.978 84.673 33.6852C82.6406 35.3117 78.608 36.4628 73.2739 37.0423C69.9024 37.4086 66.3417 37.5264 62.9383 37.4757C64.0656 35.4716 65.3054 33.4844 66.6306 31.624ZM59.6147 43.3626C64.0607 43.3626 69.1658 43.3663 73.8139 42.8621C80.1511 42.1747 85.0639 40.7745 88.1708 38.2919C92.5997 34.7531 92.8238 29.4752 88.6289 23.5749C86.6095 20.7344 84.3761 18.8053 81.9222 17.8014C78.0613 16.2219 74.0777 17.0425 70.242 19.6882C67.3447 21.6866 64.5725 24.6809 61.9092 28.4143C61.2369 29.3568 60.6251 30.2764 60.0004 31.2585" fill="url(#paint1_linear_740_3020)" data-v-92f2660e=""></path><path id="Rectangle" d="M76.9491 42.665H42.8248V60.0001H76.9491V42.665Z" fill="#FFD4D9" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 8" opacity="0.1" d="M100 42.665H20V45.3666H100V42.665Z" fill="white" data-v-92f2660e=""></path><path id="Rectangle 4 Copy" opacity="0.05" d="M79.661 42.665H76.9492V60.0001H79.661V42.665Z" fill="black" data-v-92f2660e=""></path></g></g><defs data-v-92f2660e=""><linearGradient id="paint0_linear_740_3020" x1="60" y1="58" x2="60" y2="63.8627" gradientUnits="userSpaceOnUse" data-v-92f2660e=""><stop data-v-92f2660e=""></stop><stop offset="1" stopOpacity="0" data-v-92f2660e=""></stop></linearGradient><linearGradient id="paint1_linear_740_3020" x1="60.0004" y1="18.9264" x2="60.0004" y2="43.3626" gradientUnits="userSpaceOnUse" data-v-92f2660e=""><stop stopColor="#FF879D" data-v-92f2660e=""></stop><stop offset="0.326625" stopColor="#FF4F64" data-v-92f2660e=""></stop><stop offset="1" stopColor="#E54659" data-v-92f2660e=""></stop></linearGradient></defs></svg>
-
               </motion.button>
+
+
+              )}
+             
+
               {/* <button className="p-3 bg-white/10 rounded-full hover:bg-white/20 backdrop-blur-md text-white">
                 <MessageCircle size={20} /> aqui habra el boton de comprartir
               </button> */}
@@ -2611,7 +2600,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         )}
       </AnimatePresence> */}
 
-      {viewingStoryUserIndex !== null && groupedStories[viewingStoryUserIndex]
+      {viewingStoryUserIndex !== null && groupedStories[viewingStoryUserIndex] || selectedChat
         ? null
         : <BottomNavbar />
       }

@@ -24,6 +24,10 @@ const SubBottomNavbarGame: React.FC = () => {
         <FaUser size={24} />
         <span className="text-xs">Perfil</span>
       </button>
+       <button className="flex flex-col items-center text-gray-400 hover:text-white">
+        <FaUser size={24} />
+        <span className="text-xs">Perfil</span>
+      </button>
     </nav>
   );
 };
