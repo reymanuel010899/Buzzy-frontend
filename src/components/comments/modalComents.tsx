@@ -7,6 +7,7 @@ import { CommentData } from "../index"
 // EXTENDER COMENTARIO
 type CommentWithReply = CommentData & {
     replies?: CommentWithReply[]
+    parent?: { uuid: string }
 }
 
 type Props = {
@@ -15,7 +16,7 @@ type Props = {
     comments: CommentWithReply[] | null
     user: { profile_picture: string }
     commentText: string
-    setCommentText: (value: string) => void
+    setCommentText: React.Dispatch<React.SetStateAction<string>>
     handlePostComment: (parentUuid?: string) => void
 }
 
@@ -39,7 +40,7 @@ export const ShowComments = ({
 
     const buildCommentTree = (list: CommentWithReply[]) => {
         const map = new Map<string, CommentWithReply>();
-        
+
         list.forEach(c => {
             map.set(c.uuid, { ...c, replies: [] });
         });
@@ -94,7 +95,7 @@ export const ShowComments = ({
     }, [showEmojiPicker])
 
     const handleEmojiSelect = (emoji: string) => {
-        setCommentText(prev => prev + emoji)
+        setCommentText((prev: string) => prev + emoji)
     }
 
     // ---------------------------------
@@ -142,7 +143,7 @@ export const ShowComments = ({
             >
                 <div className="flex items-start gap-3">
                     <img
-                        src={`http://localhost:8000/media/${comment.user_id.profile_picture || "profile_pics/avatar.webp"}`}
+                        src={`${(typeof window !== "undefined" ? (window as any).__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL : "") || process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"}/media/${comment.user_id.profile_picture || "profile_pics/avatar.webp"}`}
                         alt={comment.user_id.username}
                         className="h-10 w-10 rounded-full object-cover border border-white/10 flex-shrink-0"
                     />
@@ -253,7 +254,7 @@ export const ShowComments = ({
 
                             <div className="flex items-center gap-3">
                                 <img
-                                    src={`http://127.0.0.1:8000${user.profile_picture}`}
+                                    src={`${(typeof window !== "undefined" ? (window as any).__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL : "") || process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"}${user.profile_picture}`}
                                     alt="Yo"
                                     className="h-9 w-9 rounded-full object-cover border border-white/20"
                                 />

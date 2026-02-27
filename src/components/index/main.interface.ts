@@ -10,7 +10,7 @@ export interface Video {
     description: string;
     duration: number;
     like_count: number;
-    tags: string[];
+    tags?: {tags: string[]};
     thumbnail_url: string;
     updated_at: string; // También podría ser Date si se convierte
     current_user_followered: boolean;

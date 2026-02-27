@@ -1,20 +1,11 @@
 // src/context/ChatContext.tsx
 import { createContext, useContext, useState, ReactNode } from "react";
 
-type Chat = {
-  id: string;
-  username: string;
-  name: string;
-  lastMessage: string;
-  time: string;
-  online: boolean;
-  unread: boolean;
-  // Agrega aquí más campos si los necesitas (profile_pic, etc.)
-};
+
 
 type ChatContextType = {
-  selectedChat: Chat | null;
-  setSelectedChat: (chat: Chat | null) => void;
+  selectedChat: string | null;
+  setSelectedChat: (chatUuid: string | null) => void;
   showMessages: boolean;
   setShowMessages: (show: boolean) => void;
 };
@@ -22,7 +13,7 @@ type ChatContextType = {
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
 
 export const ChatProvider = ({ children }: { children: ReactNode }) => {
-  const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
+  const [selectedChat, setSelectedChat] = useState<string | null>(null);
   const [showMessages, setShowMessages] = useState(false);
 
   return (

@@ -5,7 +5,7 @@ import type { AppDispatch } from "../../store";
 // user_seccion?.username
 export const getUserMedia = (username  = "" ) => async (dispatch: AppDispatch) => {
     try {
-        const response = await axios.get(`http://localhost:8000/api/get-media-user/${username}`, {
+        const response = await axios.get(`${(typeof window !== "undefined" ? (window as any).__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL : "") || process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"}/api/get-media-user/${username}/`, {
             headers: {
               Authorization: `Bearer ${localStorage.getItem("accessToken")}`
             }

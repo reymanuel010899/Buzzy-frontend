@@ -367,7 +367,7 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: ProfileSecc
                     {user?.profile_picture ? (
                     <img
                         className="w-full h-full object-cover"
-                        src={`http://127.0.0.1:8000${user.profile_picture}`}
+                        src={`${(typeof window !== "undefined" ? (window as any).__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL : "") || process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"}${user.profile_picture}`}
                         alt={user.username}
                     />
                     ) : (
@@ -631,7 +631,7 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: ProfileSecc
                         <div className="absolute right-2 bottom-20 md:right-4 md:bottom-24 flex flex-col items-center gap-6 z-20">
                             <div className="relative mb-2">
                                 <div className="w-12 h-12 rounded-full border-2 border-white overflow-hidden">
-                                    <img src={`http://127.0.0.1:8000${video.user_id?.profile_picture || user?.profile_picture}`} className="w-full h-full object-cover" alt="user" />
+                                    <img src={`${(typeof window !== "undefined" ? (window as any).__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL : "") || process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"}${video.user_id?.profile_picture || user?.profile_picture}`} className="w-full h-full object-cover" alt="user" />
                                 </div>
                                 <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-[#ff0050] rounded-full p-0.5 w-5 h-5 flex items-center justify-center text-white text-xs font-bold">+</div>
                             </div>
@@ -716,7 +716,7 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: ProfileSecc
                     ) : (
                         comments.map((c, i) => (
                             <div key={c.uuid || i} className="flex gap-3">
-                                <img src={`http://127.0.0.1:8000${c.user_id.profile_picture}`} className="w-8 h-8 rounded-full object-cover" alt="u" />
+                                <img src={`${(typeof window !== "undefined" ? (window as any).__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL : "") || process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"}${c.user_id.profile_picture}`} className="w-8 h-8 rounded-full object-cover" alt="u" />
                                 <div>
                                     <div className="flex items-baseline gap-2">
                                         <span className="text-xs text-gray-400 font-bold">{c.user_id.username}</span>
@@ -729,7 +729,7 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: ProfileSecc
                     )}
                 </div>
                 <div className="p-3 border-t border-[#2a2f5e] bg-[#050718] flex items-center gap-2 pb-6 md:pb-3">
-                    <img src={`http://127.0.0.1:8000${currentUser?.profile_picture}`} className="w-8 h-8 rounded-full" alt="me" />
+                    <img src={`${(typeof window !== "undefined" ? (window as any).__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL : "") || process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"}${currentUser?.profile_picture}`} className="w-8 h-8 rounded-full" alt="me" />
                     <input 
                         className="flex-1 bg-[#1a1f3a] rounded-full px-4 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-[#00f0ff]"
                         placeholder="Añadir comentario..."

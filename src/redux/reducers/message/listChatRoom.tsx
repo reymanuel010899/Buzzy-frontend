@@ -36,8 +36,10 @@ export interface ChatListResponse {
 
 // 1. **Definir la Interfaz del Estado**
 interface ListChatRoomsState {
-  chats: ChatRoom[] | null;   // Lista de chats (null hasta que cargue)
-  loading: boolean;          // Para manejar estado de carga (opcional pero recomendado)
+  chats: {
+    chats: ChatRoom[];
+  } | null;   // Lista de chats protegida dentro de un objeto
+  loading: boolean;
   error: string | null;
 }
 
@@ -51,7 +53,9 @@ const initialState: ListChatRoomsState = {
 // 3. **Acción de Éxito**
 interface SuccessListChatsAction {
   type: typeof SUCCEES_LIST_CHATS_ROOM;
-  payload: ChatRoom[]; // El payload es el array de chats
+  payload: {
+    chats: ChatRoom[];
+  };
 }
 
 // 4. **Acción de Fallo**

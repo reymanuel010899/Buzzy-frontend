@@ -1,10 +1,10 @@
 // reducers/chatMessages.ts
 
-import { 
+import {
   SUCCESS_LOAD_MESSAGES,
   FAILED_LOAD_MESSAGES,
   LOADING_LOAD_MESSAGES,
-  ADD_NEW_MESSAGE 
+  ADD_NEW_MESSAGE
 } from '../../type';  // Asegúrate de definir estas constantes
 
 // === Interface del Mensaje (del backend) ===
@@ -19,8 +19,12 @@ export interface Message {
 
 // 1. **Estado del Reducer**
 interface ChatMessagesState {
-  messages: Message[] | null;   // Mensajes del chat actual (null si no cargado)
-  loading: boolean;             // Para skeleton o spinner
+  messages: {
+    messages: Message[];
+    chat_uuid?: string;
+    other_user?: any;
+  } | null;   // Objeto que contiene mensajes y metadata
+  loading: boolean;
   error: string | null;
 }
 
@@ -34,7 +38,11 @@ const initialState: ChatMessagesState = {
 // 3. **Acciones**
 interface SuccessLoadMessagesAction {
   type: typeof SUCCESS_LOAD_MESSAGES;
-  payload: Message[];  // Array de mensajes cargados
+  payload: {
+    messages: Message[];
+    chat_uuid?: string;
+    other_user?: any;
+  };
 }
 
 interface FailedLoadMessagesAction {
@@ -90,7 +98,9 @@ const chatMessagesReducer = (
     case ADD_NEW_MESSAGE:
       return {
         ...state,
-        messages: state.messages ? [...state.messages, action.payload] : [action.payload],
+        messages: state.messages
+          ? { ...state.messages, messages: [...state.messages.messages, action.payload] }
+          : { messages: [action.payload] },
       };
 
     default:

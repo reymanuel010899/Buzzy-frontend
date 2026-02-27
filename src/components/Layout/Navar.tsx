@@ -5,8 +5,10 @@ import sendMessageSound from "../../assets/sounds/sendMessage.mp3";
 import typingSound from "../../assets/sounds/whatsapp-typing.mp3";
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react"
-import { Search, Bell, MessageCircleMore, X, Phone, Video, Send } from "lucide-react"
-import { Link } from "react-router-dom"
+import {
+  Search, Bell, MessageCircleMore, X, Phone, Video, Send, Plus,
+} from "lucide-react"
+// import { Link } from "react-router-dom"
 import { motion, AnimatePresence, LayoutGroup } from "framer-motion"
 import FluidSearch from "./fluid-search"
 import { useChat } from "../../context/ChatContext"
@@ -18,10 +20,12 @@ import { sendMessage } from "../../redux/actions/message/sendMessage"
 import { useWebSocket } from "../../hooks/useWebSocket"
 import { allEmojis } from "../comments/emojis";
 import { useTypingUsers } from "../../context/useTyping";
+import { useUnreadMessages } from "../../context/UnreadAcount";
 
 const WS_URL = "ws://localhost:8001/ws/chat/";
 const Navbar: React.FC = () => {
   const [search, setSearch] = useState("")
+  const total = useUnreadMessages((state) => state.getTotalUnread());
   const [showSearch, setShowSearch] = useState(false)
   const [scrollPosition, setScrollPosition] = useState(0)
   const [showNotifications, setShowNotifications] = useState(false)
@@ -29,11 +33,23 @@ const Navbar: React.FC = () => {
   const chatSocketActiveRef = useRef(false);
   const { selectedChat, setSelectedChat, showMessages, setShowMessages } = useChat()
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const unreadCounts = useUnreadMessages((state) => state.unreadCounts);
   const [hoveredMessage, setHoveredMessage] = useState<string | null>(null)
-
+  const markAsRead = useUnreadMessages((state) => state.markAsRead);
+  const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
+  (void setShowAttachmentMenu); // Fix unread warning
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const { typingByChat, setTypingUser, removeTypingUser } = useTypingUsers();
-
+  // const attachmentOptions = [
+  //   { icon: <FileText className="text-indigo-400" />, label: "Documento" },
+  //   { icon: <ImageIcon className="text-blue-400" />, label: "Fotos y videos" },
+  //   { icon: <Camera className="text-pink-400" />, label: "Cámara" },
+  //   { icon: <Headphones className="text-orange-400" />, label: "Audio" },
+  //   { icon: <User className="text-cyan-400" />, label: "Contacto" },
+  //   { icon: <BarChart2 className="text-yellow-400" />, label: "Encuesta" },
+  //   { icon: <Calendar className="text-rose-400" />, label: "Evento" },
+  //   { icon: <Smile className="text-emerald-400" />, label: "Nuevo sticker" },
+  // ]
 
   const [emojiTarget, setEmojiTarget] = useState<string | null>(null)
 
@@ -50,6 +66,16 @@ const Navbar: React.FC = () => {
   const sendAudioRef = useRef<HTMLAudioElement | null>(null);
   const typingAudioRef = useRef<HTMLAudioElement | null>(null);
 
+  const unreadCountFromStore = useUnreadMessages((state) => state.unreadCounts);
+  const totalGlobal = useMemo(() => {
+    return Object.values(unreadCounts).reduce((acc, curr) => acc + curr, 0);
+  }, [unreadCounts]);
+  useEffect(() => {
+    // Si hay un chat seleccionado y tiene un UUID válido
+    if (selectedChat) {
+      markAsRead(selectedChat);
+    }
+  }, [selectedChat, markAsRead]);
   useEffect(() => {
     sendAudioRef.current = new Audio(sendMessageSound);
     typingAudioRef.current = new Audio(typingSound);
@@ -98,24 +124,24 @@ const Navbar: React.FC = () => {
       case "typing": {
 
         if (data.user_id === user.id) return;
-          typingAudioRef.current
-            ?.play()
-            .catch(() => {});
+        typingAudioRef.current
+          ?.play()
+          .catch(() => { });
 
-          const chatUUID = data.chat_uuid;
+        const chatUUID = data.chat_uuid;
 
-          if (data.is_typing) {
-            setTypingUser(
-              chatUUID,
-              data.user_id,
-              data.username ?? "Alguien"
-            );
-          } else {
-            removeTypingUser(
-              chatUUID,
-              data.user_id
-            );
-          }
+        if (data.is_typing) {
+          setTypingUser(
+            chatUUID,
+            data.user_id,
+            data.username ?? "Alguien"
+          );
+        } else {
+          removeTypingUser(
+            chatUUID,
+            data.user_id
+          );
+        }
 
         break;
       }
@@ -165,7 +191,9 @@ const Navbar: React.FC = () => {
       }));
     }, 1500);
   };
-
+  const getUnreadAcount = (chatUUID: string) => {
+    return unreadCountFromStore[chatUUID] || 0;
+  }
 
   // Cargar chats iniciales cuando se abre la ventana de mensajes
   useEffect(() => {
@@ -234,8 +262,7 @@ const Navbar: React.FC = () => {
     const payload = {
       recipient_id: backendMessages.other_user.id,
       content: input.value.trim(),
-      message_type: "text",
-
+      message_type: "text" as "text",
     }
 
     sendMessage(payload)(dispatch)
@@ -256,21 +283,23 @@ const Navbar: React.FC = () => {
   }
 
   const typingContest = (chat: any) => {
-  const chatTypingUsers = typingByChat[chat.uuid];
-  if (!chatTypingUsers) return null;
+    const chatTypingUsers = typingByChat[chat.uuid];
+    if (!chatTypingUsers) return null;
 
-  const users = Object.values(chatTypingUsers); // ← ARRAY REAL
+    const users = Object.values(chatTypingUsers);
 
-  return (
-    <motion.div className="flex items-center gap-2 text-sm text-gray-400 px-2">
-      
 
-      <span className="text-green-500">
-        {users.length > 1 ? "están escribiendo…" : "está escribiendo…"}
-      </span>
-    </motion.div>
-  );
-};
+
+    return (
+      <motion.div className="flex items-center gap-2 text-sm text-gray-400 px-2">
+
+
+        <span className="text-green-500">
+          {users.length > 1 ? "están escribiendo…" : "está escribiendo…"}
+        </span>
+      </motion.div>
+    );
+  };
 
 
   return (
@@ -280,19 +309,38 @@ const Navbar: React.FC = () => {
         className={`fixed w-full top-0 z-40 px-4 sm:px-6 transition-all duration-300 ${scrollPosition > 20 ? "bg-black backdrop-blur-lg" : "bg-black/80 backdrop-blur-2xl"
           }`}
       >
-        <div className="flex justify-between items-center mx-auto py-3">
+        <div className="flex justify-between items-center mx-auto py-5">
           <div className="flex items-center justify-center gap-5 sm:gap-6">
+
             <motion.button
+              className="relative" // Importante: el botón debe ser relative
               whileHover={{ rotate: 15, scale: 1.1 }}
               whileTap={{ scale: 0.9 }}
               onClick={() => setShowMessages(true)}
             >
-              <svg fill="currentColor" font-size="24" className="cursor-pointer" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" width="1em" height="1em"><path d="M45.73 7A2 2 0 0 0 44 6H4a2 2 0 0 0-1.48 3.35l10.44 11.47a2 2 0 0 0 2.2.52l14.49-5.5c.17-.07.25-.04.28-.03.06.02.14.08.2.2.07.1.08.2.08.27 0 .04-.02.12-.16.23l-11.9 10.1a2 2 0 0 0-.62 2.12l4.56 14.51a2 2 0 0 0 3.64.4L45.73 9a2 2 0 0 0 0-2Z"></path></svg>
+              {/* El SVG del avión de papel */}
+              <svg
+                fill="currentColor"
+                className="cursor-pointer h-7 w-10 "
+                viewBox="0 0 48 48"
+                xmlns="http://www.w3.org/2000/svg"
+                width="1em"
+                height="1em"
+              >
+                <path className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-pulse" d="M45.73 7A2 2 0 0 0 44 6H4a2 2 0 0 0-1.48 3.35l10.44 11.47a2 2 0 0 0 2.2.52l14.49-5.5c.17-.07.25-.04.28-.03.06.02.14.08.2.2.07.1.08.2.08.27 0 .04-.02.12-.16.23l-11.9 10.1a2 2 0 0 0-.62 2.12l4.56 14.51a2 2 0 0 0 3.64.4L45.73 9a2 2 0 0 0 0-2Z" />
+              </svg>
+
+              {/* El Badge con el número total global */}
+              {totalGlobal > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] bg-red-600 rounded-full flex items-center justify-center text-[10px] text-white font-bold border border-black px-1 shadow-lg animate-in zoom-in duration-300">
+                  {totalGlobal > 99 ? "99+" : totalGlobal}
+                </span>
+              )}
             </motion.button>
 
-            <Link to="/" className="text-2xl font-bold text-white hover:text-purple-400 transition-colors">
+            {/* <Link to="/" className="text-2xl font-bold text-white hover:text-purple-400 transition-colors">
               Buzzy
-            </Link>
+            </Link> */}
           </div>
 
           <div className="hidden md:flex flex-grow max-w-lg items-center bg-gray-800/60 backdrop-blur-md border border-gray-700/50 rounded-full px-4 py-2 mx-8 cursor-pointer hover:bg-gray-700/50 transition-all"
@@ -310,7 +358,7 @@ const Navbar: React.FC = () => {
               className="relative text-gray-300 hover:text-purple-400 transition-colors"
               onClick={() => setShowNotifications(true)}
             >
-              <Bell className="w-7 h-7" />
+              <Bell className="w-10 h-7" />
               <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-pulse" />
             </motion.button>
           </div>
@@ -496,7 +544,7 @@ const Navbar: React.FC = () => {
                           >
                             <div className="relative">
                               <img
-                                src={`http://127.0.0.1:8000${chat.other_user.avatar || "/profile_pics/avatar.webp"}`}
+                                src={`${(typeof window !== "undefined" ? (window as any).__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL : "") || process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"}${chat.other_user.avatar || "/profile_pics/avatar.webp"}`}
                                 alt={chat.other_user.name}
                                 className="w-12 h-12 rounded-full object-cover"
                               />
@@ -513,13 +561,14 @@ const Navbar: React.FC = () => {
                                 </span>
                               </div>
                               <p className="text-sm text-gray-400 truncate">
-                               {typingContest(chat)}
+                                {typingContest(chat)}
                               </p>
                             </div>
 
-                            {chat.unread_count > 0 && (
+                            {chat.unread_count > 0 && total > 0 && (
                               <div className="w-6 h-6 bg-purple-500 rounded-full flex items-center justify-center text-xs text-white font-bold">
-                                {chat.unread_count}
+                                {getUnreadAcount(chat.uuid)}
+                                {/* {total  || chat.unread_count} */}
                               </div>
                             )}
                           </motion.li>
@@ -563,7 +612,7 @@ const Navbar: React.FC = () => {
                       <button onClick={() => setSelectedChat(null)} className="text-gray-300 hover:text-white text-2xl">←</button>
                       <div className="relative">
                         <img
-                          src={`http://127.0.0.1:8000${currentBackendChat.other_user.avatar || "/profile_pics/avatar.webp"}`}
+                          src={`${(typeof window !== "undefined" ? (window as any).__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL : "") || process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"}${currentBackendChat.other_user.avatar || "/profile_pics/avatar.webp"}`}
                           alt={currentBackendChat.other_user.name}
                           className="w-10 h-10 rounded-full object-cover"
                         />
@@ -616,7 +665,7 @@ const Navbar: React.FC = () => {
                             <img
                               src={
                                 msg.sender_avatar
-                                  ? `http://127.0.0.1:8000/media/${msg.sender_avatar}`
+                                  ? `${(typeof window !== "undefined" ? (window as any).__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL : "") || process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"}/media/${msg.sender_avatar}`
                                   : "/profile_pics/avatar.webp"
                               }
                               alt={msg.sender_username}
@@ -748,7 +797,7 @@ const Navbar: React.FC = () => {
 
                     {/* Typing indicator */}
                     {/* {typingChat()} */}
-                    
+
                     {Object.keys(typingByChat).length > 0 && (
                       <motion.div
                         initial={{ opacity: 0, y: 10 }}
@@ -763,7 +812,7 @@ const Navbar: React.FC = () => {
                         </span>
 
                         <span className="italic">
-              
+
                           {Object.keys(typingByChat).length > 1
                             ? "están escribiendo…"
                             : "está escribiendo…"}
@@ -776,6 +825,14 @@ const Navbar: React.FC = () => {
                   {/* Input */}
                   <form onSubmit={handleSendMessage} className="p-4 border-t border-gray-700/50 bg-gray-900/95">
                     <div className="flex gap-3 items-center">
+                      <motion.button
+                        type="button"
+                        whileTap={{ scale: 0.9 }}
+                        // onClick={() => setShowAttachmentMenu(!showAttachmentMenu)}
+                        className={`p-2 rounded-full transition-colors ${showAttachmentMenu ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-800'}`}
+                      >
+                        <Plus className={`w-6 h-6 transition-transform duration-200 ${showAttachmentMenu ? 'rotate-45' : 'rotate-0'}`} />
+                      </motion.button>
                       <input
                         ref={inputRef}
                         type="text"
