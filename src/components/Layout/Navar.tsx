@@ -6,12 +6,18 @@ import typingSound from "../../assets/sounds/whatsapp-typing.mp3";
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import {
-  Search, Bell, MessageCircleMore, X, Phone, Video, Send, Plus,
+  FileText, Image as ImageIcon, Camera, Headphones, User, BarChart2, Calendar, Smile,
+  Mic, Trash2, StopCircle, Search, Bell, X, Phone, Video, Plus, Send, Download, Play, Pause,
 } from "lucide-react"
 // import { Link } from "react-router-dom"
 import { motion, AnimatePresence, LayoutGroup } from "framer-motion"
 import FluidSearch from "./fluid-search"
 import { useChat } from "../../context/ChatContext"
+import { getSocialConnections } from "../../redux/actions/message/social"
+import CustomAudioPlayer from "../Chat/CustomAudioPlayer"
+import FullscreenMediaPreview from "../Chat/FullscreenMediaPreview"
+import ContactSelectionModal from "../Chat/ContactSelectionModal"
+
 import { useDispatch, useSelector } from 'react-redux';
 import { listChatRooms } from "../../redux/actions/message/listChatRoom"
 import { RootState } from "../../store"
@@ -21,6 +27,7 @@ import { useWebSocket } from "../../hooks/useWebSocket"
 import { allEmojis } from "../comments/emojis";
 import { useTypingUsers } from "../../context/useTyping";
 import { useUnreadMessages } from "../../context/UnreadAcount";
+import { getBaseUrl } from "../../redux/client/api-client";
 
 const WS_URL = "ws://localhost:8001/ws/chat/";
 const Navbar: React.FC = () => {
@@ -34,22 +41,249 @@ const Navbar: React.FC = () => {
   const { selectedChat, setSelectedChat, showMessages, setShowMessages } = useChat()
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const unreadCounts = useUnreadMessages((state) => state.unreadCounts);
-  const [hoveredMessage, setHoveredMessage] = useState<string | null>(null)
+  const [clickedMessage, setClickedMessage] = useState<string | null>(null)
+  const clickedMessageTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // reactions: { [messageUuid]: { [emoji]: string[] (usernames) } }
+  const [reactionsMap, setReactionsMap] = useState<Record<string, Record<string, string[]>>>({});
   const markAsRead = useUnreadMessages((state) => state.markAsRead);
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
   (void setShowAttachmentMenu); // Fix unread warning
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const { typingByChat, setTypingUser, removeTypingUser } = useTypingUsers();
-  // const attachmentOptions = [
-  //   { icon: <FileText className="text-indigo-400" />, label: "Documento" },
-  //   { icon: <ImageIcon className="text-blue-400" />, label: "Fotos y videos" },
-  //   { icon: <Camera className="text-pink-400" />, label: "Cámara" },
-  //   { icon: <Headphones className="text-orange-400" />, label: "Audio" },
-  //   { icon: <User className="text-cyan-400" />, label: "Contacto" },
-  //   { icon: <BarChart2 className="text-yellow-400" />, label: "Encuesta" },
-  //   { icon: <Calendar className="text-rose-400" />, label: "Evento" },
-  //   { icon: <Smile className="text-emerald-400" />, label: "Nuevo sticker" },
-  // ]
+  const [activePreview, setActivePreview] = useState<{ url: string; type: 'image' | 'video' } | null>(null);
+  const [showContactModal, setShowContactModal] = useState(false);
+  const { connections } = useSelector((state: RootState) => state.socialReducer);
+  const [messageText, setMessageText] = useState("")
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const attachmentOptions = [
+    { icon: <ImageIcon className="text-blue-400" />, label: "Fotos y videos", type: "image/video" },
+    { icon: <Camera className="text-pink-400" />, label: "Cámara", type: "camera" },
+    { icon: <FileText className="text-indigo-400" />, label: "Documento", type: "file" },
+    { icon: <Headphones className="text-orange-400" />, label: "Audio", type: "audio" },
+    { icon: <User className="text-cyan-400" />, label: "Contacto", type: "contact" },
+    { icon: <BarChart2 className="text-yellow-400" />, label: "Encuesta", type: "poll" },
+    { icon: <Calendar className="text-rose-400" />, label: "Evento", type: "event" },
+    { icon: <Smile className="text-emerald-400" />, label: "Nuevo sticker", type: "sticker" },
+  ]
+
+  const handleFileSelect = (type: string) => {
+    const input = fileInputRef.current;
+    if (!input) return;
+
+    switch (type) {
+      case "image/video":
+      case "camera":
+        input.accept = "image/*,video/*";
+        if (type === "camera") input.capture = "environment";
+        else input.removeAttribute("capture");
+        input.click();
+        break;
+      case "file":
+        input.accept = ".pdf,.doc,.docx,.txt,.zip";
+        input.removeAttribute("capture");
+        input.click();
+        break;
+      case "audio":
+        input.accept = "audio/*";
+        input.removeAttribute("capture");
+        input.click();
+        break;
+      case "contact":
+        getSocialConnections()(dispatch);
+        setShowContactModal(true);
+        break;
+      case "poll":
+      case "event":
+      case "sticker":
+        handleSystemMessage(type);
+        break;
+      default:
+        input.accept = "*/*";
+        input.removeAttribute("capture");
+        input.click();
+    }
+
+    setShowAttachmentMenu(false);
+  };
+
+
+  const handleSendContact = (contact: any) => {
+    if (!backendMessages?.other_user?.id) return;
+
+    const contactInfo = {
+      id: contact.id,
+      username: contact.username,
+      avatar: contact.profile_picture,
+    };
+    const content = JSON.stringify(contactInfo);
+
+    const formData = new FormData();
+    formData.append("recipient_id", backendMessages.other_user.id.toString());
+    formData.append("message_type", "contact");
+    formData.append("content", content);
+
+    // Optimistic update: show contact card immediately without reloading
+    const tempId = `temp-${Date.now()}`;
+    const optimisticMsg = {
+      uuid: tempId,
+      content: content,
+      file: null,
+      sender_username: user.username,
+      sender_avatar: user.profile_picture,
+      created_at: new Date().toISOString(),
+      message_type: "contact" as const,
+    };
+    setRealtimeMessages(prev => [...prev, optimisticMsg]);
+
+    sendMessage(formData)(dispatch);
+    setShowContactModal(false);
+    setShowAttachmentMenu(false);
+  };
+
+  const handleSystemMessage = (type: string) => {
+    if (!backendMessages?.other_user?.id) return;
+
+    const tempId = `temp-${Date.now()}`;
+    const content = `[${type.toUpperCase()} enviado]`;
+    const optimisticMsg = {
+      uuid: tempId,
+      content: content,
+      sender_username: user.username,
+      sender_avatar: user.profile_picture,
+      created_at: new Date().toISOString(),
+      message_type: type as any,
+    };
+    setRealtimeMessages(prev => [...prev, optimisticMsg]);
+
+    const formData = new FormData();
+    formData.append("recipient_id", backendMessages.other_user.id.toString());
+    formData.append("message_type", type);
+    formData.append("content", content);
+
+    sendMessage(formData)(dispatch);
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !backendMessages?.other_user?.id) return;
+
+    const formData = new FormData();
+    formData.append("recipient_id", backendMessages.other_user.id.toString());
+    formData.append("file", file);
+
+    let messageType: "image" | "video" | "text" | "voice" | "gif" | "file" | "document" = "text";
+    if (file.type.startsWith("image/")) messageType = "image";
+    else if (file.type.startsWith("video/")) messageType = "video";
+    else if (file.type.startsWith("audio/")) messageType = "voice";
+    else if (file.type === "application/pdf" || file.type.includes("word") || file.type.includes("text/plain")) messageType = "document";
+    else messageType = "file";
+
+    formData.append("message_type", messageType);
+    formData.append("content", ""); // Optional for file messages
+
+    // Optimistic update (optional, but good for UX)
+    const tempId = `temp-${Date.now()}`;
+    const optimisticMsg = {
+      uuid: tempId,
+      content: "",
+      file: URL.createObjectURL(file), // Local preview
+      sender_username: user.username,
+      sender_avatar: user.profile_picture,
+      created_at: new Date().toISOString(),
+      message_type: messageType,
+    };
+    setRealtimeMessages(prev => [...prev, optimisticMsg]);
+
+    sendMessage(formData)(dispatch);
+  };
+
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        if (audioBlob.size > 1000) { // Avoid sending empty/too short recordings
+          handleVoiceUpload(audioBlob);
+        }
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+      setRecordingTime(0);
+      timerRef.current = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
+    } catch (err) {
+      console.error("Error accessing microphone:", err);
+      alert("No se pudo acceder al micrófono.");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+  };
+
+  const cancelRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.onstop = null; // Don't trigger upload
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+  };
+
+  const handleVoiceUpload = async (blob: Blob) => {
+    if (!backendMessages?.other_user?.id) return;
+
+    const file = new File([blob], "voice_message.webm", { type: "audio/webm" });
+    const formData = new FormData();
+    formData.append("recipient_id", backendMessages.other_user.id.toString());
+    formData.append("file", file);
+    formData.append("message_type", "voice");
+    formData.append("content", "");
+
+    // Optimistic update
+    const tempId = `temp-${Date.now()}`;
+    const optimisticMsg = {
+      uuid: tempId,
+      content: "",
+      file: URL.createObjectURL(blob),
+      sender_username: user.username,
+      sender_avatar: user.profile_picture,
+      created_at: new Date().toISOString(),
+      message_type: "voice" as "voice",
+    };
+    setRealtimeMessages(prev => [...prev, optimisticMsg]);
+
+    sendMessage(formData)(dispatch);
+  };
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
 
   const [emojiTarget, setEmojiTarget] = useState<string | null>(null)
 
@@ -146,6 +380,20 @@ const Navbar: React.FC = () => {
         break;
       }
 
+      case "reaction": {
+        // data.message_uuid, data.emoji, data.username
+        if (data.message_uuid && data.emoji) {
+          setReactionsMap(prev => {
+            const msgReactions = { ...(prev[data.message_uuid] || {}) };
+            const users = [...(msgReactions[data.emoji] || [])];
+            if (!users.includes(data.username)) users.push(data.username);
+            msgReactions[data.emoji] = users;
+            return { ...prev, [data.message_uuid]: msgReactions };
+          });
+        }
+        break;
+      }
+
       case "read_message": {
         // manejar leído
         break;
@@ -168,7 +416,8 @@ const Navbar: React.FC = () => {
     const socket = chatSocketActiveRef.current;
     if (!socket) return;
 
-    // enviar typing true
+    setMessageText(inputRef.current?.value || "")
+    if (!selectedChat) return;
     socketRef?.current?.send(JSON.stringify({
       type: "typing",
       is_typing: true,
@@ -210,14 +459,23 @@ const Navbar: React.FC = () => {
   // Sincronizar mensajes del backend cuando lleguen/cambien
   useEffect(() => {
     if (backendMessages?.messages && selectedChat) {
-      setRealtimeMessages(backendMessages.messages)
+      setRealtimeMessages(backendMessages.messages);
+      // Seed reactionsMap from persisted backend reactions
+      const seeded: Record<string, Record<string, string[]>> = {};
+      for (const msg of backendMessages.messages) {
+        if (msg.reactions && Object.keys(msg.reactions).length > 0) {
+          seeded[msg.uuid] = msg.reactions;
+        }
+      }
+      setReactionsMap(seeded);
     }
   }, [backendMessages?.messages, selectedChat])
 
   // Resetear mensajes locales al cambiar de chat
   useEffect(() => {
     if (selectedChat) {
-      setRealtimeMessages([])
+      setRealtimeMessages([]);
+      setReactionsMap({});
     }
   }, [selectedChat])
 
@@ -246,27 +504,27 @@ const Navbar: React.FC = () => {
     const input = inputRef.current
     if (!input?.value.trim() || !backendMessages?.other_user?.id) return
 
+    const content = input.value.trim();
     const tempId = `temp-${Date.now()}`
     const optimisticMsg = {
       uuid: tempId,
-      content: input.value.trim(),
+      content: content,
       sender_username: user.username,
       sender_avatar: user.profile_picture,
       created_at: new Date().toISOString(),
-      message_type: "text",
-    }
-
-    // Mostrar mensaje inmediatamente (mejora UX)
-    setRealtimeMessages(prev => [...prev, optimisticMsg])
-
-    const payload = {
-      recipient_id: backendMessages.other_user.id,
-      content: input.value.trim(),
       message_type: "text" as "text",
     }
 
-    sendMessage(payload)(dispatch)
+    setRealtimeMessages(prev => [...prev, optimisticMsg])
+
+    const formData = new FormData();
+    formData.append("recipient_id", backendMessages.other_user.id.toString());
+    formData.append("content", content);
+    formData.append("message_type", "text");
+
+    sendMessage(formData)(dispatch)
     input.value = ""
+    setMessageText("")
   }
   const sendReaction = (messageUuid: string, emoji: string) => {
     if (!socketRef.current) return
@@ -278,6 +536,15 @@ const Navbar: React.FC = () => {
         emoji
       })
     )
+
+    // Optimistic update: add reaction immediately for the sender
+    setReactionsMap(prev => {
+      const msgReactions = { ...(prev[messageUuid] || {}) };
+      const users = [...(msgReactions[emoji] || [])];
+      if (!users.includes(user.username)) users.push(user.username);
+      msgReactions[emoji] = users;
+      return { ...prev, [messageUuid]: msgReactions };
+    });
 
     setEmojiTarget(null)
   }
@@ -544,7 +811,7 @@ const Navbar: React.FC = () => {
                           >
                             <div className="relative">
                               <img
-                                src={`${(typeof window !== "undefined" ? (window as any).__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL : "") || process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"}${chat.other_user.avatar || "/profile_pics/avatar.webp"}`}
+                                src={`${getBaseUrl()}${chat.other_user.avatar || "/profile_pics/avatar.webp"}`}
                                 alt={chat.other_user.name}
                                 className="w-12 h-12 rounded-full object-cover"
                               />
@@ -612,7 +879,7 @@ const Navbar: React.FC = () => {
                       <button onClick={() => setSelectedChat(null)} className="text-gray-300 hover:text-white text-2xl">←</button>
                       <div className="relative">
                         <img
-                          src={`${(typeof window !== "undefined" ? (window as any).__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL : "") || process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"}${currentBackendChat.other_user.avatar || "/profile_pics/avatar.webp"}`}
+                          src={`${getBaseUrl()}${currentBackendChat.other_user.avatar || "/profile_pics/avatar.webp"}`}
                           alt={currentBackendChat.other_user.name}
                           className="w-10 h-10 rounded-full object-cover"
                         />
@@ -652,10 +919,25 @@ const Navbar: React.FC = () => {
                           initial={{ opacity: 0, y: 20 }}
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ duration: 0.3 }}
-                          onMouseEnter={() => setHoveredMessage(msg.uuid)}
-                          onMouseLeave={() => {
-                            setHoveredMessage(null)
-                            setEmojiTarget(null)
+                          onMouseEnter={undefined}
+                          onMouseLeave={undefined}
+                          onClick={(e) => {
+                            // Don't trigger if clicking a button/link inside the message
+                            if ((e.target as HTMLElement).closest('button, a, input, video, audio')) return;
+                            // Clear existing timer
+                            if (clickedMessageTimerRef.current) clearTimeout(clickedMessageTimerRef.current);
+                            // If same message, toggle off
+                            if (clickedMessage === msg.uuid) {
+                              setClickedMessage(null);
+                              setEmojiTarget(null);
+                              return;
+                            }
+                            setEmojiTarget(null);
+                            setClickedMessage(msg.uuid);
+                            // Auto-hide after 3s if user doesn't interact
+                            clickedMessageTimerRef.current = setTimeout(() => {
+                              setClickedMessage(null);
+                            }, 3000);
                           }}
                           className={`relative flex items-end gap-2 ${isMe ? "justify-end" : "justify-start"
                             }`}
@@ -665,7 +947,7 @@ const Navbar: React.FC = () => {
                             <img
                               src={
                                 msg.sender_avatar
-                                  ? `${(typeof window !== "undefined" ? (window as any).__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL : "") || process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"}/media/${msg.sender_avatar}`
+                                  ? `${getBaseUrl()}media/${msg.sender_avatar}`
                                   : "/profile_pics/avatar.webp"
                               }
                               alt={msg.sender_username}
@@ -676,33 +958,32 @@ const Navbar: React.FC = () => {
                           {/* Bubble + Emoji */}
                           <div className="relative flex items-center">
 
-                            {/* Emoji (izquierda - otros) */}
-                            {!isMe && hoveredMessage === msg.uuid && (
+                            {/* Emoji trigger (izquierda - otros) */}
+                            {!isMe && clickedMessage === msg.uuid && (
                               <motion.button
-                                initial={{ opacity: 0, scale: 0.8 }}
-                                animate={{ opacity: 1, scale: 1 }}
-                                whileTap={{ scale: 1.2 }}
-                                className="
-                                          mr-2
-                                          bg-[#1e1e2e]
-                                          rounded-full
-                                          p-1.5
-                                          shadow-md
-                                          border border-white/10
-                                          text-sm
-                                          cursor-pointer
-                                        "
-                                onClick={() => setEmojiTarget(msg.uuid)}
+                                initial={{ opacity: 0, scale: 0.5, x: -8 }}
+                                animate={{ opacity: 1, scale: 1, x: 0 }}
+                                exit={{ opacity: 0, scale: 0.5 }}
+                                className="mr-2 w-8 h-8 flex items-center justify-center bg-[#1e1e35] rounded-full shadow-xl border border-white/15 text-gray-300 hover:text-yellow-400 hover:border-yellow-400/30 transition-all cursor-pointer flex-shrink-0"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (clickedMessageTimerRef.current) clearTimeout(clickedMessageTimerRef.current);
+                                  setEmojiTarget(emojiTarget === msg.uuid ? null : msg.uuid);
+                                }}
                               >
-                                😊
+                                <span className="text-base">😊</span>
                               </motion.button>
                             )}
 
                             {/* Message bubble */}
                             <div
-                              className={`max-w-xs px-4 py-3 rounded-2xl shadow-lg ${isMe
-                                ? "bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-br-none"
-                                : "bg-gray-800/90 text-gray-100 rounded-bl-none border border-gray-700/50"
+                              className={`max-w-xs ${msg.message_type === 'text' ? 'px-4 py-3' : 'p-[1px]'} rounded-2xl shadow-xl transition-all duration-300 ${isMe
+                                ? msg.message_type === 'text'
+                                  ? "bg-gradient-to-br from-purple-600 via-purple-700 to-indigo-800 text-white rounded-br-none"
+                                  : "backdrop-blur-lg  text-white rounded-br-none"
+                                : msg.message_type === 'text'
+                                  ? "bg-[#23233b] text-gray-100 rounded-bl-none border border-white/5 shadow-inner"
+                                  : "backdrop-blur-lg text-gray-100 rounded-bl-none"
                                 }`}
                             >
                               {!isMe && (
@@ -715,81 +996,299 @@ const Navbar: React.FC = () => {
                                 <p className="text-sm leading-relaxed break-words">
                                   {msg.content}
                                 </p>
+                              ) : msg.message_type === "image" ? (
+                                <div
+                                  className="rounded-xl overflow-hidden mb-1 border border-white/10 shadow-2xl relative group p-[0.5px] bg-[#1a1a2e] cursor-pointer"
+                                  onClick={() => setActivePreview({
+                                    url: msg.file?.startsWith('http') || msg.file?.startsWith('blob:') ? msg.file : `${getBaseUrl()}media/${msg.file}`,
+                                    type: 'image'
+                                  })}
+                                >
+                                  <img
+                                    src={msg.file?.startsWith('http') || msg.file?.startsWith('blob:') ? msg.file : `${getBaseUrl()}media/${msg.file}`}
+                                    alt="Sent image"
+                                    className="max-w-full h-auto object-cover rounded-[10px] transition-transform duration-300 group-hover:scale-[1.02]"
+                                  />
+                                  <div className="media-timestamp-overlay">
+                                    {new Date(msg.created_at).toLocaleTimeString("es-DO", {
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    })}
+                                  </div>
+                                </div>
+                              ) : msg.message_type === "video" ? (
+                                <div
+                                  className="rounded-xl overflow-hidden mb-1 border border-white/10 shadow-2xl relative group p-[0.5px] bg-[#1a1a2e] cursor-pointer"
+                                  onClick={() => setActivePreview({
+                                    url: msg.file?.startsWith('http') || msg.file?.startsWith('blob:') ? msg.file : `${getBaseUrl()}media/${msg.file}`,
+                                    type: 'video'
+                                  })}
+                                >
+                                  <video
+                                    src={msg.file?.startsWith('http') || msg.file?.startsWith('blob:') ? msg.file : `${getBaseUrl()}media/${msg.file}`}
+                                    className="max-w-full h-auto rounded-[10px]"
+                                  />
+                                  <div className="media-timestamp-overlay">
+                                    {new Date(msg.created_at).toLocaleTimeString("es-DO", {
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    })}
+                                  </div>
+                                  <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/40 transition-colors">
+                                    <div className="bg-white/20 backdrop-blur-md p-2 rounded-full">
+                                      <Play className="w-8 h-8 text-white" />
+                                    </div>
+                                  </div>
+                                </div>
+                              ) : msg.message_type === "voice" ? (
+                                <div className="flex flex-col gap-1 relative">
+                                  <CustomAudioPlayer
+                                    src={msg.file?.startsWith('http') || msg.file?.startsWith('blob:') ? msg.file : `${getBaseUrl()}media/${msg.file}`}
+                                    isMe={isMe}
+                                  />
+                                  <p className={`text-[10px] mt-1 self-end ${isMe ? "text-purple-200/70" : "text-gray-500"}`}>
+                                    {new Date(msg.created_at).toLocaleTimeString("es-DO", {
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    })}
+                                  </p>
+                                </div>
+                              ) : msg.message_type === "document" || msg.message_type === "file" ? (
+                                <div className="flex items-center gap-3 py-2 px-1 min-w-[200px] bg-gray-900/40 rounded-xl border border-white/5 hover:bg-gray-900/60 transition-all cursor-pointer">
+                                  <div className={`p-2 rounded-lg ${isMe ? 'bg-purple-600/20' : 'bg-gray-700/50'}`}>
+                                    <FileText className={`w-5 h-5 ${isMe ? 'text-purple-400' : 'text-gray-300'}`} />
+                                  </div>
+                                  <div className="flex-1 overflow-hidden">
+                                    <p className="text-xs font-medium truncate text-gray-200">
+                                      {msg.file?.split('/').pop() || 'Archivo adjunto'}
+                                    </p>
+                                    <p className="text-[10px] text-gray-500 uppercase">{msg.message_type}</p>
+                                  </div>
+                                  <a
+                                    href={msg.file?.startsWith('http') ? msg.file : `${getBaseUrl()}media/${msg.file}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    download={msg.file?.split('/').pop()}
+                                    className="p-1.5 hover:bg-white/5 rounded-full transition-colors"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <Download className="w-4 h-4 text-gray-400" />
+                                  </a>
+                                </div>
+                              ) : msg.message_type === "contact" ? (
+                                <div className="bg-gray-900/40 rounded-xl p-3 border border-white/5 flex flex-col gap-3 min-w-[200px]">
+                                  <div className="flex items-center gap-3">
+                                    {(() => {
+                                      try {
+                                        const contact = JSON.parse(msg.content);
+                                        return (
+                                          <>
+                                            <img
+                                              src={contact.avatar?.startsWith('http') ? contact.avatar : `${getBaseUrl()}media/${contact.avatar}`}
+                                              className="w-12 h-12 rounded-full object-cover border border-white/10"
+                                              alt="Contact"
+                                            />
+                                            <div className="flex-1 overflow-hidden">
+                                              <p className="text-sm font-bold text-white truncate">@{contact.username}</p>
+                                              <p className="text-[10px] text-gray-500">Contacto compartido</p>
+                                            </div>
+                                          </>
+                                        );
+                                      } catch (e) {
+                                        return <p className="text-xs text-red-400">Error al cargar contacto</p>;
+                                      }
+                                    })()}
+                                  </div>
+                                  <button
+                                    className="w-full py-2 bg-purple-600/10 hover:bg-purple-600/20 text-purple-400 text-xs font-semibold rounded-lg transition-colors border border-purple-600/10"
+                                    onClick={() => {
+                                      try {
+                                        const contact = JSON.parse(msg.content);
+                                        window.location.href = `/profile/${contact.username}`;
+                                      } catch (e) { }
+                                    }}
+                                  >
+                                    Ver Perfil
+                                  </button>
+                                </div>
                               ) : (
-                                <p className="text-sm italic text-gray-400">
-                                  [ {msg.message_type.toUpperCase()} ]
-                                </p>
+                                <div className="flex items-center gap-2 py-1 px-2 bg-gray-900/20 rounded-lg italic text-gray-400 text-xs">
+                                  <span className="opacity-70 text-[10px] uppercase font-bold">{msg.message_type}</span>
+                                  <span>{msg.content || "[Contenido multimedia]"}</span>
+                                </div>
                               )}
 
-                              <p
-                                className={`text-xs mt-2 ${isMe ? "text-purple-200" : "text-gray-500"
-                                  }`}
-                              >
-                                {new Date(msg.created_at).toLocaleTimeString("es-DO", {
-                                  hour: "2-digit",
-                                  minute: "2-digit",
-                                })}
-                              </p>
+                              {msg.message_type !== 'image' && msg.message_type !== 'video' && msg.message_type !== 'voice' && (
+                                <p
+                                  className={`text-xs mt-2 ${isMe ? "text-purple-200" : "text-gray-500"
+                                    }`}
+                                >
+                                  {new Date(msg.created_at).toLocaleTimeString("es-DO", {
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  })}
+                                </p>
+                              )}
                             </div>
 
-                            {/* Emoji (derecha - yo) */}
-                            {isMe && hoveredMessage === msg.uuid && (
+                            {/* ── Reaction pills ── */}
+                            {reactionsMap[msg.uuid] && Object.keys(reactionsMap[msg.uuid]).length > 0 && (
+                              <div className={`absolute -bottom-5 ${isMe ? 'right-2' : 'left-2'} flex items-center gap-1 z-10`}>
+                                {Object.entries(reactionsMap[msg.uuid]).map(([emoji, users]) => {
+                                  const iMine = users.includes(user.username);
+                                  return (
+                                    <motion.button
+                                      key={emoji}
+                                      initial={{ scale: 0, opacity: 0 }}
+                                      animate={{ scale: 1, opacity: 1 }}
+                                      whileHover={{ scale: 1.25 }}
+                                      whileTap={{ scale: 0.9 }}
+                                      title={users.join(', ')}
+                                      className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs shadow-lg border transition-all cursor-pointer
+                                        ${iMine
+                                          ? 'bg-purple-600/30 border-purple-500/40 text-white'
+                                          : 'bg-[#1e1e35]/90 border-white/10 text-gray-200'
+                                        }`}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (iMine) {
+                                          // toggle off own reaction
+                                          setReactionsMap(prev => {
+                                            const msgR = { ...(prev[msg.uuid] || {}) };
+                                            const updated = (msgR[emoji] || []).filter(u => u !== user.username);
+                                            if (updated.length === 0) delete msgR[emoji];
+                                            else msgR[emoji] = updated;
+                                            return { ...prev, [msg.uuid]: msgR };
+                                          });
+                                        } else {
+                                          sendReaction(msg.uuid, emoji);
+                                        }
+                                      }}
+                                    >
+                                      <span>{emoji}</span>
+                                      {users.length > 1 && <span className="font-semibold ml-0.5">{users.length}</span>}
+                                    </motion.button>
+                                  );
+                                })}
+                              </div>
+                            )}
+
+                            {/* Emoji trigger (derecha - yo) */}
+                            {isMe && clickedMessage === msg.uuid && (
                               <motion.button
-                                initial={{ opacity: 0, scale: 0.8 }}
-                                animate={{ opacity: 1, scale: 1 }}
-                                whileTap={{ scale: 1.2 }}
-                                className="
-                ml-2
-                bg-[#1e1e2e]
-                rounded-full
-                p-1.5
-                shadow-md
-                border border-white/10
-                text-sm
-                cursor-pointer
-              "
-                                onClick={() => setEmojiTarget(msg.uuid)}
+                                initial={{ opacity: 0, scale: 0.5, x: 8 }}
+                                animate={{ opacity: 1, scale: 1, x: 0 }}
+                                exit={{ opacity: 0, scale: 0.5 }}
+                                className="ml-2 w-8 h-8 flex items-center justify-center bg-[#1e1e35] rounded-full shadow-xl border border-white/15 text-gray-300 hover:text-yellow-400 hover:border-yellow-400/30 transition-all cursor-pointer flex-shrink-0"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (clickedMessageTimerRef.current) clearTimeout(clickedMessageTimerRef.current);
+                                  setEmojiTarget(emojiTarget === msg.uuid ? null : msg.uuid);
+                                }}
                               >
-                                😊
+                                <span className="text-base">😊</span>
                               </motion.button>
                             )}
 
-                            {/* Emoji Picker */}
-                            {emojiTarget === msg.uuid && (
-                              <div
-                                className={`
-                absolute
-                -top-44
-                ${isMe ? "right-0" : "left-0"}
-                bg-[#1e1e2e]
-                p-3
-                rounded-2xl
-                grid grid-cols-6 gap-2
-                shadow-2xl
-                border border-white/10
-                z-50
-                max-h-48
-                overflow-y-auto
-              `}
-                              >
-                                {allEmojis.map((emoji) => (
-                                  <span
-                                    key={emoji}
-                                    className="
-                    cursor-pointer text-xl
-                    hover:scale-125
-                    transition-transform
-                  "
-                                    onClick={() => {
-                                      sendReaction(msg.uuid, emoji)
-                                      setEmojiTarget(null)
-                                    }}
-                                  >
-                                    {emoji}
-                                  </span>
-                                ))}
-                              </div>
-                            )}
+                            {/* Professional Emoji Picker */}
+                            <AnimatePresence>
+                              {emojiTarget === msg.uuid && (
+                                <motion.div
+                                  initial={{ opacity: 0, scale: 0.85, y: 8 }}
+                                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                                  exit={{ opacity: 0, scale: 0.85, y: 8 }}
+                                  transition={{ type: "spring", damping: 20, stiffness: 300 }}
+                                  className={`
+                                    absolute -top-16 ${isMe ? 'right-10' : 'left-10'}
+                                    bg-[#1a1a2e]/95 backdrop-blur-xl
+                                    border border-white/10
+                                    rounded-2xl shadow-2xl
+                                    z-50
+                                    overflow-hidden
+                                  `}
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  {/* Quick reactions bar */}
+                                  <div className="flex items-center gap-1 px-3 py-2 border-b border-white/5">
+                                    {["❤️", "😂", "😮", "😢", "😡", "👍"].map((emoji) => (
+                                      <motion.button
+                                        key={emoji}
+                                        whileHover={{ scale: 1.4, y: -4 }}
+                                        whileTap={{ scale: 0.9 }}
+                                        transition={{ type: "spring", damping: 12, stiffness: 400 }}
+                                        className="text-2xl cursor-pointer p-1 rounded-lg hover:bg-white/10 transition-colors"
+                                        onClick={() => {
+                                          sendReaction(msg.uuid, emoji);
+                                          setEmojiTarget(null);
+                                          setClickedMessage(null);
+                                        }}
+                                      >
+                                        {emoji}
+                                      </motion.button>
+                                    ))}
+                                    {/* Divider + More button */}
+                                    <div className="w-px h-6 bg-white/10 mx-1" />
+                                    <motion.button
+                                      whileHover={{ scale: 1.1 }}
+                                      whileTap={{ scale: 0.9 }}
+                                      className="w-8 h-8 flex items-center justify-center rounded-full bg-white/5 hover:bg-white/15 text-gray-400 hover:text-white transition-all text-sm font-bold"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setEmojiTarget(`${msg.uuid}-full`);
+                                      }}
+                                    >
+                                      +
+                                    </motion.button>
+                                  </div>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+
+                            {/* Full emoji grid (expanded) */}
+                            <AnimatePresence>
+                              {emojiTarget === `${msg.uuid}-full` && (
+                                <motion.div
+                                  initial={{ opacity: 0, scale: 0.9, y: 8 }}
+                                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                                  exit={{ opacity: 0, scale: 0.9, y: 8 }}
+                                  transition={{ type: "spring", damping: 20, stiffness: 300 }}
+                                  className={`
+                                    absolute -top-56 ${isMe ? 'right-10' : 'left-10'}
+                                    bg-[#1a1a2e]/95 backdrop-blur-xl
+                                    border border-white/10
+                                    rounded-2xl shadow-2xl
+                                    z-50 w-64
+                                    overflow-hidden
+                                  `}
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <div className="flex items-center justify-between px-3 py-2 border-b border-white/5">
+                                    <span className="text-xs text-gray-400 font-semibold">Reaccionar</span>
+                                    <button
+                                      className="text-gray-500 hover:text-white text-xs"
+                                      onClick={() => { setEmojiTarget(null); setClickedMessage(null); }}
+                                    >✕</button>
+                                  </div>
+                                  <div className="grid grid-cols-8 gap-1 p-3 max-h-44 overflow-y-auto custom-scrollbar">
+                                    {allEmojis.map((emoji) => (
+                                      <motion.button
+                                        key={emoji}
+                                        whileHover={{ scale: 1.3 }}
+                                        whileTap={{ scale: 0.9 }}
+                                        className="text-xl cursor-pointer p-1 rounded-lg hover:bg-white/10 transition-colors"
+                                        onClick={() => {
+                                          sendReaction(msg.uuid, emoji);
+                                          setEmojiTarget(null);
+                                          setClickedMessage(null);
+                                        }}
+                                      >
+                                        {emoji}
+                                      </motion.button>
+                                    ))}
+                                  </div>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
                           </div>
                         </motion.div>
                       )
@@ -823,30 +1322,110 @@ const Navbar: React.FC = () => {
                   </div>
 
                   {/* Input */}
-                  <form onSubmit={handleSendMessage} className="p-4 border-t border-gray-700/50 bg-gray-900/95">
+                  <form onSubmit={handleSendMessage} className="p-4 border-t border-gray-700/50 bg-gray-900/95 relative">
+                    <AnimatePresence>
+                      {showAttachmentMenu && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                          className="absolute bottom-full left-4 mb-4 bg-gray-900/95 backdrop-blur-xl border border-gray-700/50 rounded-2xl shadow-2xl p-2 grid grid-cols-4 gap-2 min-w-[280px] z-50"
+                        >
+                          {attachmentOptions.map((option, idx) => (
+                            <motion.button
+                              key={idx}
+                              type="button"
+                              whileHover={{ scale: 1.05, bg: "rgba(255,255,255,0.05)" }}
+                              whileTap={{ scale: 0.95 }}
+                              onClick={() => handleFileSelect(option.type)}
+                              className="flex flex-col items-center justify-center p-3 rounded-xl hover:bg-white/5 transition-colors gap-2"
+                            >
+                              <div className="w-10 h-10 rounded-full bg-gray-800/50 flex items-center justify-center shadow-inner">
+                                {option.icon}
+                              </div>
+                              <span className="text-[10px] text-gray-400 font-medium">{option.label}</span>
+                            </motion.button>
+                          ))}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      className="hidden"
+                      onChange={handleFileUpload}
+                      accept="image/*,video/*"
+                    />
+
                     <div className="flex gap-3 items-center">
-                      <motion.button
-                        type="button"
-                        whileTap={{ scale: 0.9 }}
-                        // onClick={() => setShowAttachmentMenu(!showAttachmentMenu)}
-                        className={`p-2 rounded-full transition-colors ${showAttachmentMenu ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-800'}`}
-                      >
-                        <Plus className={`w-6 h-6 transition-transform duration-200 ${showAttachmentMenu ? 'rotate-45' : 'rotate-0'}`} />
-                      </motion.button>
-                      <input
-                        ref={inputRef}
-                        type="text"
-                        placeholder="Escribe un mensaje..."
-                        onChange={handleTyping}
-                        className="flex-1 bg-gray-800/60 backdrop-blur-md border border-gray-700/50 rounded-full px-5 py-3.5 text-white placeholder-gray-400 focus:outline-none focus:border-purple-500 transition-all"
-                      />
+                      {!isRecording && (
+                        <motion.button
+                          type="button"
+                          whileTap={{ scale: 0.9 }}
+                          onClick={() => setShowAttachmentMenu(!showAttachmentMenu)}
+                          className={`p-2 rounded-full transition-colors ${showAttachmentMenu ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-800'}`}
+                        >
+                          <Plus className={`w-6 h-6 transition-transform duration-200 ${showAttachmentMenu ? 'rotate-45' : 'rotate-0'}`} />
+                        </motion.button>
+                      )}
+
+                      {isRecording ? (
+                        <div className="flex-1 flex items-center gap-4 bg-gray-800/60 backdrop-blur-md border border-red-500/30 rounded-full px-4 py-2">
+                          <motion.button
+                            type="button"
+                            whileHover={{ scale: 1.1, color: "#ef4444" }}
+                            onClick={cancelRecording}
+                            className="text-gray-400 p-2"
+                          >
+                            <Trash2 className="w-5 h-5" />
+                          </motion.button>
+
+                          <div className="flex-1 flex items-center gap-2">
+                            <motion.div
+                              animate={{ opacity: [1, 0.5, 1] }}
+                              transition={{ repeat: Infinity, duration: 1 }}
+                              className="w-2.5 h-2.5 bg-red-500 rounded-full"
+                            />
+                            <span className="text-white font-mono text-sm">{formatTime(recordingTime)}</span>
+                          </div>
+
+                          <span className="text-xs text-gray-400 animate-pulse">Grabando...</span>
+                        </div>
+                      ) : (
+                        <input
+                          ref={inputRef}
+                          type="text"
+                          placeholder="Escribe un mensaje..."
+                          value={messageText}
+                          onChange={handleTyping}
+                          className="flex-1 bg-gray-800/60 backdrop-blur-md border border-gray-700/50 rounded-full px-5 py-3.5 text-white placeholder-gray-400 focus:outline-none focus:border-purple-500 transition-all"
+                        />
+                      )}
+
                       <motion.button
                         whileHover={{ scale: 1.1 }}
                         whileTap={{ scale: 0.9 }}
-                        type="submit"
-                        className="bg-gradient-to-r from-purple-600 to-pink-600 p-3.5 rounded-full shadow-lg"
+                        type={messageText.trim() ? "submit" : "button"}
+                        onClick={() => {
+                          if (isRecording) {
+                            stopRecording();
+                          } else if (!messageText.trim()) {
+                            startRecording();
+                          }
+                        }}
+                        className={`p-3.5 rounded-full shadow-lg ${isRecording
+                          ? "bg-red-500 hover:bg-red-600"
+                          : "bg-gradient-to-r from-purple-600 to-indigo-600"
+                          }`}
                       >
-                        <Send className="w-5 h-5 text-white" />
+                        {isRecording ? (
+                          <StopCircle className="w-5 h-5 text-white" />
+                        ) : messageText.trim() ? (
+                          <Send className="w-5 h-5 text-white" />
+                        ) : (
+                          <Mic className="w-5 h-5 text-white" />
+                        )}
                       </motion.button>
                     </div>
                   </form>
@@ -855,6 +1434,18 @@ const Navbar: React.FC = () => {
             </>
           )}
         </AnimatePresence>
+
+        <FullscreenMediaPreview
+          activePreview={activePreview}
+          onClose={() => setActivePreview(null)}
+        />
+
+        <ContactSelectionModal
+          isOpen={showContactModal}
+          onClose={() => setShowContactModal(false)}
+          contacts={connections}
+          onSelect={handleSendContact}
+        />
 
       </LayoutGroup>
     </>

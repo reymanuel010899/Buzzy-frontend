@@ -3,6 +3,7 @@ import { useState, useRef, useEffect } from "react"
 import { Smile, X } from "lucide-react"
 import { allEmojis } from "./emojis"
 import { CommentData } from "../index"
+import { getBaseUrl } from "../../redux/client/api-client"
 
 // EXTENDER COMENTARIO
 type CommentWithReply = CommentData & {
@@ -143,7 +144,7 @@ export const ShowComments = ({
             >
                 <div className="flex items-start gap-3">
                     <img
-                        src={`${(typeof window !== "undefined" ? (window as any).__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL : "") || process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"}/media/${comment.user_id.profile_picture || "profile_pics/avatar.webp"}`}
+                        src={`${getBaseUrl()}media/${comment.user_id.profile_picture || "profile_pics/avatar.webp"}`}
                         alt={comment.user_id.username}
                         className="h-10 w-10 rounded-full object-cover border border-white/10 flex-shrink-0"
                     />
@@ -254,7 +255,7 @@ export const ShowComments = ({
 
                             <div className="flex items-center gap-3">
                                 <img
-                                    src={`${(typeof window !== "undefined" ? (window as any).__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL : "") || process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"}${user.profile_picture}`}
+                                    src={`${getBaseUrl()}${user.profile_picture}`}
                                     alt="Yo"
                                     className="h-9 w-9 rounded-full object-cover border border-white/20"
                                 />

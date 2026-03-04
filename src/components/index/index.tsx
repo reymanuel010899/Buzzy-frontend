@@ -25,6 +25,7 @@ import { getRecivedGiftByUser } from "../../redux/actions/gift/getGiftsByUser"
 import { GiftI } from "../../interfaces/gift"
 import { ShowComments } from "../comments/modalComents"
 import { useChat } from "../../context/ChatContext"
+import { getBaseUrl } from "../../redux/client/api-client";
 import { useTypingUsers } from "../../context/useTyping";
 import typingSound from "../../assets/sounds/whatsapp-typing.mp3";
 import { useUnreadMessages } from "../../context/UnreadAcount";
@@ -73,9 +74,12 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [mediaVideo, setMedia] = useState<videoI[] | null>(media);
   const [currentVideoId, setCurrentVideoId] = useState<string | null>(null);
   const [viewedVideos, setViewedVideos] = useState<Set<string>>(new Set());
-  // Mock user for demo purposes if localStorage is empty
-  const defaultUser = { username: 'BuzzyUser', profile_picture: '/avatar.webp' };
-  const user = localStorage.getItem('user') ? JSON.parse(localStorage.getItem('user') || '{}') : defaultUser;
+  // Stabilize user object to prevent unnecessary re-renders and WebSocket reconnections
+  const user = useMemo(() => {
+    const defaultUser = { username: 'BuzzyUser', profile_picture: '/avatar.webp', id: null };
+    const storedUser = localStorage.getItem('user');
+    return storedUser ? JSON.parse(storedUser) : defaultUser;
+  }, []);
   const [commentText, setCommentText] = useState("")
   const [comments, setComments] = useState<CommentData[] | null>(null)
   // New state for Story Upload
@@ -475,8 +479,12 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     setMedia(media);
   }, [media]);
 
+  const hasFetchedStories = useRef(false);
   // Cargar stories solo una vez al montar el componente
   useEffect(() => {
+    if (hasFetchedStories.current) return;
+    hasFetchedStories.current = true;
+
     getActiveStories()(dispatch).then((res: any) => {
       setStories(res);
     });
@@ -1029,8 +1037,8 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
 
   useEffect(() => {
-    // Si ya tenemos los gifts en Redux, usarlos
-    if (activeGifts && activeGifts.length > 0) {
+    // FIX: Check for null to avoid infinite loop when the list is empty ([])
+    if (activeGifts !== null) {
       const mappedGifts = activeGifts.map((gift: any) => ({
         id: gift.id?.toString(),
         name: gift.name,
@@ -1038,7 +1046,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         cost: gift.token_price,
         color: "getColorFromSlug(gift.slug)",
         animation: "getAnimationFromSlug(gift.slug)",
-        video: gift.video ? `${(typeof window !== "undefined" ? (window as any).__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL : "") || process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"}${gift.video}` : "",
+        video: gift.video ? `${getBaseUrl()}${gift.video}` : "",
         slug: gift.slug,
         token_price: gift.token_price || 0,
         is_active: gift.is_active ?? true,
@@ -1060,7 +1068,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
             cost: gift.token_price,
             color: "getColorFromSlug(gift.slug)",
             animation: "getAnimationFromSlug(gift.slug)",
-            video: gift.video ? `${(typeof window !== "undefined" ? (window as any).__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL : "") || process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"}${gift.video}` : "",
+            video: gift.video ? `${getBaseUrl()}${gift.video}` : "",
             slug: gift.slug,
             token_price: gift.token_price || 0,
             is_active: gift.is_active ?? true,
@@ -1291,11 +1299,12 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
                 className="flex flex-col items-center gap-1.5 min-w-[64px] cursor-pointer snap-start relative group"
-                onClick={handleAddHistory}>
+                onClick={handleAddHistory}
+                >
                 <div className="relative">
                   <div className={`relative h-[60px] w-[60px] rounded-full p-[2px] bg-[#0c1033] ${isUploadingStory ? 'animate-pulse' : ''}`}>
                     <img
-                      src={user.profile_picture.startsWith('http') ? user.profile_picture : `${(typeof window !== "undefined" ? (window as any).__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL : "") || process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"}${user.profile_picture}`}
+                      src={user.profile_picture.startsWith('http') ? user.profile_picture : `${getBaseUrl()}${user.profile_picture}`}
                       className={`w-full h-full rounded-full object-cover filter ${isUploadingStory ? 'brightness-50' : 'brightness-90 group-hover:brightness-100'} transition-all`}
                       alt="Tu historia"
                     />
@@ -1336,7 +1345,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                       )}
                       <div className="relative h-[60px] w-[60px] rounded-full p-[2px] bg-[#050718]">
                         <img
-                          src={`${(typeof window !== "undefined" ? (window as any).__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL : "") || process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"}/media/${story.user.profile_picture}`}
+                          src={`${getBaseUrl()}media/${story.user.profile_picture}`}
                           className="w-full h-full rounded-full object-cover group-hover:scale-105 transition-transform duration-300"
                           alt={story.user.username}
                         />
@@ -1490,7 +1499,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                           <div className="relative h-10 w-10 overflow-hidden rounded-full flex-shrink-0">
                             <img
                               className="h-full w-full object-cover rounded-full"
-                              src={`${data.user_id?.profile_picture ? `${(typeof window !== "undefined" ? (window as any).__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL : "") || process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"}/media/${data.user_id.profile_picture}` : `${(typeof window !== "undefined" ? (window as any).__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL : "") || process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"}/media/profile_pics/avatar.webp`}`}
+                              src={`${data.user_id?.profile_picture ? `${getBaseUrl()}media/${data.user_id.profile_picture}` : `${getBaseUrl()}media/profile_pics/avatar.webp`}`}
                               onError={(e) => {
                                 (e.target as HTMLImageElement).src = `https://picsum.photos/100/100?random=${index}`;
                               }}
@@ -1803,12 +1812,12 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
             {/* <div className="absolute inset-0 z-0 opacity-30 blur-3xl">
                  {isVideoContent(groupedStories[viewingStoryUserIndex].media[currentStoryItemIndex].file) ? (
                     <video
-                        src={`${(typeof window !== "undefined" ? (window as any).__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL : "") || process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"}${groupedStories[viewingStoryUserIndex].media[currentStoryItemIndex].file}`}
+                        src={`${getBaseUrl()}${groupedStories[viewingStoryUserIndex].media[currentStoryItemIndex].file}`}
                         className="w-full h-full object-cover"
                     />
                  ) : (
                     <img
-                        src={`${(typeof window !== "undefined" ? (window as any).__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL : "") || process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"}${groupedStories[viewingStoryUserIndex].media[currentStoryItemIndex].file}`}
+                        src={`${getBaseUrl()}${groupedStories[viewingStoryUserIndex].media[currentStoryItemIndex].file}`}
                         className="w-full h-full object-cover"
                         alt="Background"
                     />
@@ -1854,7 +1863,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 >
                   <video
                     key={giftAnimation.giftId}
-                    src={`${(typeof window !== "undefined" ? (window as any).__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL : "") || process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"}${giftAnimation.gift}`}
+                    src={`${getBaseUrl()}${giftAnimation.gift}`}
                     autoPlay
                     playsInline
                     muted={false}
@@ -1939,13 +1948,13 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                     background: `linear-gradient(to top right #00f0ff)`
                   }}>
                     <img
-                      src={`${(typeof window !== "undefined" ? (window as any).__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL : "") || process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"}/media/${groupedStories[viewingStoryUserIndex]?.user.profile_picture}`}
+                      src={`${getBaseUrl()}media/${groupedStories[viewingStoryUserIndex]?.user.profile_picture}`}
                       className="w-full h-full rounded-full object-cover border-2 border-[#050718]"
                       alt="User"
                       onError={(e) => {
                         (e.target as HTMLImageElement).src =
                           user?.profile_picture
-                            ? `${(typeof window !== "undefined" ? (window as any).__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL : "") || process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"}${user.profile_picture}`
+                            ? `${getBaseUrl()}${user.profile_picture}`
                             : "https://picsum.photos/100/100";
                       }}
                     />
@@ -1995,7 +2004,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 <video
                   ref={storyVideoRef}
                   key={`${viewingStoryUserIndex}-${currentStoryItemIndex}`} // Key change forces remount/replay
-                  src={`${(typeof window !== "undefined" ? (window as any).__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL : "") || process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"}/media/${groupedStories[viewingStoryUserIndex].media[currentStoryItemIndex].file}`}
+                  src={`${getBaseUrl()}media/${groupedStories[viewingStoryUserIndex].media[currentStoryItemIndex].file}`}
                   className={`max-h-full max-w-full object-contain ${storyPremiumStates[currentStoryUuid || ''] ? 'premium-media' : ''}`}
                   autoPlay={!isStoryPaused}
                   playsInline
@@ -2007,7 +2016,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                   key={`${viewingStoryUserIndex}-${currentStoryItemIndex}`}
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
-                  src={`${(typeof window !== "undefined" ? (window as any).__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL : "") || process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"}/media/${groupedStories[viewingStoryUserIndex].media[currentStoryItemIndex].file}`}
+                  src={`${getBaseUrl()}media/${groupedStories[viewingStoryUserIndex].media[currentStoryItemIndex].file}`}
                   className={`max-h-full max-w-full object-contain ${storyPremiumStates[currentStoryUuid || ''] ? 'premium-media' : ''}`}
                   alt="Story Content"
                 />
@@ -2209,7 +2218,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                             {/* Video Preview del Regalo */}
                             <div className="relative aspect-square w-full">
                               <video
-                                src={`${(typeof window !== "undefined" ? (window as any).__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL : "") || process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"}${gift.video}`}
+                                src={`${getBaseUrl()}${gift.video}`}
                                 autoPlay
                                 loop
                                 muted
@@ -2283,7 +2292,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                   <div className="flex flex-col items-center gap-3 p-4 bg-black/60 backdrop-blur-md rounded-2xl border border-white/10 shadow-2xl shadow-black/50">
                     <div className="relative">
                       <img
-                        src={`${(typeof window !== "undefined" ? (window as any).__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL : "") || process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"}${incomingUser.profile_picture}`}
+                        src={`${getBaseUrl()}${incomingUser.profile_picture}`}
                         className="w-16 h-16 rounded-full object-cover border-2 border-white/20"
                         alt={incomingUser.username}
                         onError={(e) => {
@@ -2386,7 +2395,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                         whileHover={{ scale: 1.1 }}
                       >
                         <img
-                          src={viewer.profile_picture?.startsWith('http') ? viewer.profile_picture : `${(typeof window !== "undefined" ? (window as any).__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL : "") || process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"}${viewer.profile_picture}`}
+                          src={viewer.profile_picture?.startsWith('http') ? viewer.profile_picture : `${getBaseUrl()}${viewer.profile_picture}`}
                           className="w-full h-full object-cover"
                           alt={viewer.username}
                           onError={(e) => {
@@ -2590,7 +2599,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                       className="flex items-start gap-3 py-3 border-b border-[#2a2f5e]/50 last:border-b-0"
                     >
                       <img
-                        src={`${(typeof window !== "undefined" ? (window as any).__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL : "") || process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"}/media/${comment.user_id.profile_picture || '/media/profile_pics/avatar.webp'}`}
+                        src={`${getBaseUrl()}media/${comment.user_id.profile_picture || 'profile_pics/avatar.webp'}`}
                         onError={(e) => (e.target as HTMLImageElement).src = `https://picsum.photos/40/40?random=${comment.uuid}`}
                         alt={comment.user_id.username}
                         className="h-10 w-10 rounded-full object-cover border border-[#2a2f5e]"
@@ -2614,7 +2623,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
               </div>
               <div className="sticky bottom-17 bg-black border-t border-[#2a2f5e] p-2 flex items-center gap-2 mb-4">
                 <img
-                  src={`${(typeof window !== "undefined" ? (window as any).__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL : "") || process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"}${user.profile_picture}`}
+                  src={`${getBaseUrl()}${user.profile_picture}`}
                   alt="Tu perfil"
                   className="h-9 w-9 rounded-full object-cover border border-[#2a2f5e]"
                 />

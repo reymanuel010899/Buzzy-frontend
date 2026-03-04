@@ -26,6 +26,8 @@ import RecivedGiftReducerByUser from "./reducers/gift/getGiftsByUser";
 import listChatRoomsReducer from "./reducers/message/listChatRoom";
 import chatMessagesReducer from "./reducers/message/chatMeesage";
 import sendMessageReducer from "./reducers/message/sendMessage";
+import { searchReducer } from "./reducers/Search";
+import socialReducer from "./reducers/message/social";
 
 export default combineReducers({
     register,
@@ -54,5 +56,7 @@ export default combineReducers({
     RecivedGiftReducerByUser,
     listChatRoomsReducer,
     chatMessagesReducer,
-    sendMessageReducer
+    sendMessageReducer,
+    searchReducer,
+    socialReducer,
 })

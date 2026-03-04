@@ -2,7 +2,7 @@ import axios from "axios";
 import { SUCCEES_LOGIN, FAILED_LOGIN } from "../type";
 
 import type { AppDispatch } from "../../store";
-import { apiClient } from "../client/api-client";
+import { apiClient, getBaseUrl } from "../client/api-client";
 export interface FetchWithAuthProps {
   email: string;
   password: string;
@@ -58,7 +58,7 @@ const handleLoginError = async (error: unknown, formData: FetchWithAuthProps, di
     if (refreshToken) {
       try {
         const refreshResponse = await axios.post(
-          `${(typeof window !== "undefined" ? (window as any).__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL : "") || process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000"}/api/token/refresh/`,
+          `${getBaseUrl()}api/token/refresh/`,
           { refresh: refreshToken },
           { headers: { "Content-Type": "application/json" } }
         );

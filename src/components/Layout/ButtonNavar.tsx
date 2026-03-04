@@ -5,8 +5,7 @@ import {  Plus } from "lucide-react"
 import {
   HomeIcon,
   ShoppingBagIcon,
-  WalletIcon,
-  MapIcon,
+  WalletIcon
 } from "@heroicons/react/24/solid";
 import { Link, useLocation } from "react-router-dom"
 import { motion } from "framer-motion"
@@ -19,10 +18,10 @@ const BottomNavbar: React.FC = () => {
   // Navigation items
   const navItems = [
     { icon: HomeIcon, label: "Home", path: "/" },
-      { icon: WalletIcon, label: "Wallet", path: "/wallet" },
+      // { icon: WalletIcon, label: "Wallet", path: "/wallet" },
     { icon: ShoppingBagIcon, label: "Store", path: "/marker" },
     { icon: Plus, label: "Create", path: null, isSpecial: true },
-    { icon: MapIcon, label: "Game", path: "/game" },
+    // { icon: MapIcon, label: "Game", path: "/game" },
     { icon: WalletIcon, label: "Wallet", path: "/wallet" },
     { icon: profileIconC, label: "Profile", path: "/profile" },
   ]

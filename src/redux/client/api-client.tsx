@@ -4,14 +4,18 @@ export const getBaseUrl = (): string => {
   // @ts-ignore
   const runtimeUrl = window.__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL;
 
-  if (runtimeUrl && !runtimeUrl.includes("NEXT_PUBLIC_BACKEND_URL")) {
-    let url = runtimeUrl.trim();
-    if (!url.startsWith("http")) url = `http://${url}`;
-    return url.endsWith("/") ? url : `${url}/`;
+  let url = (runtimeUrl && !runtimeUrl.includes("NEXT_PUBLIC_BACKEND_URL"))
+    ? runtimeUrl.trim()
+    : (process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000/");
+
+  if (!url.startsWith("http")) {
+    url = `http://${url}`;
   }
 
-  return process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000/";
+  return url.endsWith("/") ? url : `${url}/`;
 };
+
+export const BASE_URL = getBaseUrl();
 
 // 1. Exportación nombrada para apiClient
 export const apiClient = axios.create({
@@ -48,16 +52,79 @@ apiClientStory.interceptors.request.use((config) => {
   return config;
 });
 
-// Interceptor de respuesta para apiClient
-apiClient.interceptors.response.use(
-  (response) => response,
-  async (error) => {
-    if (error.response?.status === 401) {
-      console.log("Token inválido / expirado");
-      if (typeof window !== "undefined") {
-        window.location.href = '/sign-in';
-      }
+let isRefreshing = false;
+let failedQueue: Array<{ resolve: (value?: unknown) => void; reject: (reason?: any) => void }> = [];
+
+const processQueue = (error: any, token: string | null = null) => {
+  failedQueue.forEach((prom) => {
+    if (error) {
+      prom.reject(error);
+    } else {
+      prom.resolve(token);
     }
-    return Promise.reject(error);
+  });
+  failedQueue = [];
+};
+
+const responseInterceptor = async (error: any) => {
+  const originalRequest = error.config;
+
+  if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
+    if (isRefreshing) {
+      return new Promise((resolve, reject) => {
+        failedQueue.push({ resolve, reject });
+      })
+        .then((token) => {
+          originalRequest.headers.Authorization = `Bearer ${token}`;
+          return axios(originalRequest);
+        })
+        .catch((err) => Promise.reject(err));
+    }
+
+    originalRequest._retry = true;
+    isRefreshing = true;
+    const refreshToken = localStorage.getItem("refreshToken");
+
+    if (refreshToken) {
+      try {
+        const { data } = await axios.post(`${getBaseUrl()}api/token/refresh/`, {
+          refresh: refreshToken,
+        });
+
+        localStorage.setItem("accessToken", data.access);
+        if (data.refresh) localStorage.setItem("refreshToken", data.refresh);
+
+        originalRequest.headers.Authorization = `Bearer ${data.access}`;
+        processQueue(null, data.access);
+        return axios(originalRequest);
+      } catch (err) {
+        processQueue(err, null);
+        localStorage.removeItem("accessToken");
+        localStorage.removeItem("refreshToken");
+        localStorage.removeItem("isAuthenticated");
+        localStorage.removeItem("user");
+        if (typeof window !== "undefined") {
+          window.location.href = "/sign-in";
+        }
+        return Promise.reject(err);
+      } finally {
+        isRefreshing = false;
+      }
+    } else {
+      localStorage.removeItem("accessToken");
+      localStorage.removeItem("refreshToken");
+      localStorage.removeItem("isAuthenticated");
+      localStorage.removeItem("user");
+      if (typeof window !== "undefined") {
+        window.location.href = "/sign-in";
+      }
+      return Promise.reject(error);
+    }
   }
-);
+
+  return Promise.reject(error);
+};
+
+// Interceptor de respuesta para apiClient
+apiClient.interceptors.response.use((response) => response, responseInterceptor);
+apiClientStory.interceptors.response.use((response) => response, responseInterceptor);
