@@ -1,9 +1,15 @@
 "use client"
 
 import React, { useState } from "react"
-import { Home, Plus, ShoppingBag, Wallet, Compass } from "lucide-react"
+import {  Plus } from "lucide-react"
+import {
+  HomeIcon,
+  ShoppingBagIcon,
+  WalletIcon
+} from "@heroicons/react/24/solid";
 import { Link, useLocation } from "react-router-dom"
 import { motion } from "framer-motion"
+import profileIconC from "./ProfileIcon";
 
 const BottomNavbar: React.FC = () => {
   const location = useLocation()
@@ -11,11 +17,13 @@ const BottomNavbar: React.FC = () => {
 
   // Navigation items
   const navItems = [
-    { icon: Home, label: "Home", path: "/" },
-    { icon: ShoppingBag, label: "Store", path: "/marker" },
+    { icon: HomeIcon, label: "Home", path: "/" },
+      // { icon: WalletIcon, label: "Wallet", path: "/wallet" },
+    { icon: ShoppingBagIcon, label: "Store", path: "/marker" },
     { icon: Plus, label: "Create", path: null, isSpecial: true },
-    { icon: Compass, label: "Game", path: "/game" },
-    { icon: Wallet, label: "Wallet", path: "/wallet" },
+    // { icon: MapIcon, label: "Game", path: "/game" },
+    { icon: WalletIcon, label: "Wallet", path: "/wallet" },
+    { icon: profileIconC, label: "Profile", path: "/profile" },
   ]
 
   // Check if a path is active
@@ -25,7 +33,7 @@ const BottomNavbar: React.FC = () => {
   }
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-[#2a2f5e] bg-[#0c1033]/90 backdrop-blur-lg">
+    <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-[#2a2f5e] bg-black">
       <div className="flex h-16 items-center justify-around px-2">
         {navItems.map((item) => (
           <React.Fragment key={item.label}>
@@ -38,12 +46,12 @@ const BottomNavbar: React.FC = () => {
                 onHoverStart={() => setHoveredItem(item.label)}
                 onHoverEnd={() => setHoveredItem(null)}
               >
-                <div className="absolute -inset-3 rounded-full bg-gradient-to-r from-[#7000ff] to-[#00f0ff] opacity-70 blur-md"></div>
+                <div className="absolute -inset-3 rounded-full  opacity-70 blur-md"></div>
                 <Link
                   to={item.path || "/create"}
-                  className="relative flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-r from-[#7000ff] to-[#00f0ff] shadow-[0_0_15px_rgba(112,0,255,0.7)]"
+                  className="relative flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-r from-[#7000ff] to-[#00f0ff] shadow-[0_0_15px_rgba(112,0,255,0.7)]"
                 >
-                  <item.icon className="h-6 w-6 text-white" />
+                  <item.icon className="h-5 w-5 text-white" />
                 </Link>
                 {hoveredItem === item.label && (
                   <motion.div

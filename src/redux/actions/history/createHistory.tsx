@@ -1,24 +1,16 @@
-import axios from "axios";
-import apiClient from "../../client/api-client";
+// import apiClient from "../../client/api-client";
 import {
   SUCCEES_CREATE_STORY,
   FAILED_CREATE_STORY
 } from "../../type";
+import { apiClientStory } from "../../client/api-client";
 
 
 export const createStory = (data: FormData) => async (dispatch: any) => {
   try {
-    const token = localStorage.getItem("accessToken");
-
-    const response = await axios.post(
-      "http://127.0.0.1:8000/media/api/stories/create/",
-      data,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "multipart/form-data",
-        },
-      }
+    const response = await apiClientStory.post(
+      "/api/stories/create/",
+      data
     );
 
     dispatch({

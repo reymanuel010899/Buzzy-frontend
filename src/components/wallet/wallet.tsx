@@ -135,16 +135,16 @@ const WalletComponent = ({ balances, getWallet, pass_code, wallet_type, user}: W
   })
 
   return (
-    <div className="min-h-screen text-white bg-[#050718]">
+    <div className="min-h-screen text-white bg-black">
       {/* Dynamic background with animated gradient */}
       <div className="fixed inset-0 z-0">
-        <div className="absolute inset-0 bg-gradient-to-br from-[#0f0f3c] via-[#1a1a4a] to-[#0f0f3c] opacity-80"></div>
-        <div className="absolute inset-0 bg-[url('/noise.png')] opacity-[0.03] mix-blend-overlay"></div>
+        <div className="absolute inset-0 bg-black opacity-80"></div>
+        <div className="absolute inset-0 bg-black opacity-[0.03] mix-blend-overlay"></div>
 
         {/* Animated orbs in background */}
-        <div className="absolute top-1/4 left-1/4 h-40 w-40 rounded-full bg-[#7000ff]/20 blur-3xl animate-float"></div>
-        <div className="absolute bottom-1/3 right-1/3 h-60 w-60 rounded-full bg-[#00f0ff]/20 blur-3xl animate-float-delayed"></div>
-        <div className="absolute top-2/3 left-1/2 h-32 w-32 rounded-full bg-[#a200ff]/20 blur-3xl animate-float-slow"></div>
+        {/* <div className="absolute top-1/4 left-1/4 h-40 w-40 rounded-full bg-[#7000ff]/20 blur-3xl animate-float"></div> */}
+        {/* <div className="absolute top-2/3 left-1/2 h-32 w-32 rounded-full bg-[#a200ff]/20 blur-3xl animate-float-slow"></div> */}
+        {/* <div className="absolute bottom-1/3 right-1/3 h-60 w-60 rounded-full bg-[#00f0ff]/20 blur-3xl animate-float-delayed"></div> */}
       </div>
 
       {/* Main content */}
@@ -156,8 +156,8 @@ const WalletComponent = ({ balances, getWallet, pass_code, wallet_type, user}: W
           transition={{ duration: 0.5 }}
           className="w-full relative"
         >
-          <div className="absolute -inset-1 bg-gradient-to-r from-[#7000ff] to-[#00f0ff] rounded-3xl opacity-50 blur-md"></div>
-          <div className="relative bg-[#0c1033]/90 backdrop-blur-md p-8 rounded-3xl border border-[#2a2f5e] overflow-hidden">
+          <div className="absolute -inset-1 bg-black rounded-3xl opacity-50 blur-md"></div>
+          <div className="relative bg-black p-8 rounded-3xl border border-[#2a2f5e] overflow-hidden">
             {/* Decorative elements */}
             <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-[#7000ff]/20 to-[#00f0ff]/20 rounded-full blur-xl -translate-y-1/2 translate-x-1/2"></div>
             <div className="absolute bottom-0 left-0 w-24 h-24 bg-gradient-to-tr from-[#7000ff]/20 to-[#00f0ff]/20 rounded-full blur-xl translate-y-1/2 -translate-x-1/2"></div>
@@ -297,7 +297,7 @@ const WalletComponent = ({ balances, getWallet, pass_code, wallet_type, user}: W
                         : "bg-gradient-to-r from-red-500 to-[#ff00aa]"
                     }`}
                   ></div>
-                  <div className="relative flex justify-between items-center bg-[#0c1033]/80 backdrop-blur-md p-4 rounded-xl border border-[#2a2f5e] group-hover:border-transparent transition-colors">
+                  <div className="relative flex justify-between items-center bg-black p-4 rounded-xl border border-[#2a2f5e] group-hover:border-transparent transition-colors">
                     <div className="flex items-center gap-3">
                       <div
                         className={`flex h-10 w-10 items-center justify-center rounded-full ${
@@ -353,7 +353,7 @@ const WalletComponent = ({ balances, getWallet, pass_code, wallet_type, user}: W
               onClick={(e) => e.stopPropagation()}
             >
               <div className="absolute -inset-1 bg-gradient-to-r from-[#7000ff] to-[#00f0ff] rounded-2xl opacity-50 blur-md"></div>
-              <div className="relative bg-[#0c1033]/90 backdrop-blur-md p-6 rounded-2xl border border-[#2a2f5e]">
+              <div className="relative bg-black p-6 rounded-2xl border border-[#2a2f5e]">
                 <h3 className="text-xl font-bold text-white mb-4 text-center">Agregar Fondos</h3>
 
                 <div className="mb-6">
@@ -418,7 +418,7 @@ const WalletComponent = ({ balances, getWallet, pass_code, wallet_type, user}: W
               onClick={(e) => e.stopPropagation()}
             >
               <div className="absolute -inset-1 bg-gradient-to-r from-[#7000ff] to-[#00f0ff] rounded-2xl opacity-50 blur-md"></div>
-              <div className="relative bg-[#0c1033]/90 backdrop-blur-md p-6 rounded-2xl border border-[#2a2f5e]">
+              <div className="relative bg-black backdrop-blur-md p-6 rounded-2xl border border-[#2a2f5e]">
                 <h3 className="text-xl font-bold text-white mb-4 text-center">Retirar Fondos</h3>
 
                 <div className="mb-6">

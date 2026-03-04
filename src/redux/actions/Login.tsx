@@ -1,8 +1,8 @@
 import axios from "axios";
 import { SUCCEES_LOGIN, FAILED_LOGIN } from "../type";
 
-import type { AppDispatch } from "../../store"; 
-import apiClient from "../client/api-client";
+import type { AppDispatch } from "../../store";
+import { apiClient, getBaseUrl } from "../client/api-client";
 export interface FetchWithAuthProps {
   email: string;
   password: string;
@@ -38,7 +38,7 @@ export const login = (formData: FetchWithAuthProps) => async (dispatch: AppDispa
       dispatch({ type: FAILED_LOGIN, payload: null });
     }
   } catch (error: unknown) {
-       debugger
+    //  debugger
     handleLoginError(error, formData, dispatch);
   }
 };
@@ -58,7 +58,7 @@ const handleLoginError = async (error: unknown, formData: FetchWithAuthProps, di
     if (refreshToken) {
       try {
         const refreshResponse = await axios.post(
-          "http://127.0.0.1:8000/api/token/refresh/",
+          `${getBaseUrl()}api/token/refresh/`,
           { refresh: refreshToken },
           { headers: { "Content-Type": "application/json" } }
         );
@@ -70,7 +70,7 @@ const handleLoginError = async (error: unknown, formData: FetchWithAuthProps, di
         }
       } catch (refreshError) {
         console.error("Error refreshing token:", refreshError);
-        window.location.href = "/login";
+        window.location.href = "/sign-in";
       }
     } else {
       console.error("No refresh token available");

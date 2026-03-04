@@ -1,41 +1,130 @@
 import axios from "axios";
 
-const API_URL = "http://127.0.0.1:8000/"; // tu backend
+export const getBaseUrl = (): string => {
+  // @ts-ignore
+  const runtimeUrl = window.__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL;
 
-// Crear instancia
-const apiClient = axios.create({
-  baseURL: API_URL,
+  let url = (runtimeUrl && !runtimeUrl.includes("NEXT_PUBLIC_BACKEND_URL"))
+    ? runtimeUrl.trim()
+    : (process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000/");
+
+  if (!url.startsWith("http")) {
+    url = `http://${url}`;
+  }
+
+  return url.endsWith("/") ? url : `${url}/`;
+};
+
+export const BASE_URL = getBaseUrl();
+
+// 1. Exportación nombrada para apiClient
+export const apiClient = axios.create({
+  baseURL: getBaseUrl(),
   headers: {
     "Content-Type": "application/json",
   },
 });
 
-// Interceptor: Adjuntar token automáticamente
-apiClient.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem("accessToken");
-
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
-
-// Interceptor: Manejo de errores global
-apiClient.interceptors.response.use(
-  (response) => response,
-  async (error) => {
-    // Si el token expiró intentar refrescar
-    if (error.response?.status === 401) {
-      console.log("Token inválido / expirado");
-      window.location.href = 'sign-in'
-    }
-
-    return Promise.reject(error);
+apiClient.interceptors.request.use((config) => {
+  const token = localStorage.getItem("accessToken");
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
   }
-);
+  return config;
+});
 
-export default apiClient;
+// 2. Exportación nombrada para apiClientStory
+// NOTA: Leer el localStorage aquí solo funcionará la primera vez que se cargue el archivo.
+// Es mejor usar un interceptor para que el token siempre esté actualizado.
+export const apiClientStory = axios.create({
+  baseURL: getBaseUrl(),
+  headers: {
+    "Content-Type": "multipart/form-data",
+  },
+});
+
+// Interceptor para apiClientStory (Para que el token sea dinámico y no falle si cambia)
+apiClientStory.interceptors.request.use((config) => {
+  const token = localStorage.getItem("accessToken");
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+let isRefreshing = false;
+let failedQueue: Array<{ resolve: (value?: unknown) => void; reject: (reason?: any) => void }> = [];
+
+const processQueue = (error: any, token: string | null = null) => {
+  failedQueue.forEach((prom) => {
+    if (error) {
+      prom.reject(error);
+    } else {
+      prom.resolve(token);
+    }
+  });
+  failedQueue = [];
+};
+
+const responseInterceptor = async (error: any) => {
+  const originalRequest = error.config;
+
+  if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
+    if (isRefreshing) {
+      return new Promise((resolve, reject) => {
+        failedQueue.push({ resolve, reject });
+      })
+        .then((token) => {
+          originalRequest.headers.Authorization = `Bearer ${token}`;
+          return axios(originalRequest);
+        })
+        .catch((err) => Promise.reject(err));
+    }
+
+    originalRequest._retry = true;
+    isRefreshing = true;
+    const refreshToken = localStorage.getItem("refreshToken");
+
+    if (refreshToken) {
+      try {
+        const { data } = await axios.post(`${getBaseUrl()}api/token/refresh/`, {
+          refresh: refreshToken,
+        });
+
+        localStorage.setItem("accessToken", data.access);
+        if (data.refresh) localStorage.setItem("refreshToken", data.refresh);
+
+        originalRequest.headers.Authorization = `Bearer ${data.access}`;
+        processQueue(null, data.access);
+        return axios(originalRequest);
+      } catch (err) {
+        processQueue(err, null);
+        localStorage.removeItem("accessToken");
+        localStorage.removeItem("refreshToken");
+        localStorage.removeItem("isAuthenticated");
+        localStorage.removeItem("user");
+        if (typeof window !== "undefined") {
+          window.location.href = "/sign-in";
+        }
+        return Promise.reject(err);
+      } finally {
+        isRefreshing = false;
+      }
+    } else {
+      localStorage.removeItem("accessToken");
+      localStorage.removeItem("refreshToken");
+      localStorage.removeItem("isAuthenticated");
+      localStorage.removeItem("user");
+      if (typeof window !== "undefined") {
+        window.location.href = "/sign-in";
+      }
+      return Promise.reject(error);
+    }
+  }
+
+  return Promise.reject(error);
+};
+
+// Interceptor de respuesta para apiClient
+apiClient.interceptors.response.use((response) => response, responseInterceptor);
+apiClientStory.interceptors.response.use((response) => response, responseInterceptor);

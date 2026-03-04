@@ -27,6 +27,7 @@ import { createLike } from "../../redux/actions/createLike"
 import { createView } from "../../redux/actions/createView"
 import { getComment } from "../../redux/actions/getComment"
 import { createComment } from "../../redux/actions/createComment"
+import { getBaseUrl } from "../../redux/client/api-client"
 
 const WS_URL = "ws://localhost:8001/ws"
 
@@ -63,10 +64,10 @@ interface VideoItem {
 }
 
 interface Comment {
-    uuid: string;
-    user_id: { username: string; profile_picture: string };
-    content: string;
-    create_at: string;
+  uuid: string;
+  user_id: { username: string; profile_picture: string };
+  content: string;
+  create_at: string;
 }
 
 interface ProfileSeccionProps {
@@ -80,10 +81,10 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: ProfileSecc
   const dispatch = useDispatch();
   const userParams = useParams<{ username?: string }>()
   const { username } = userParams
-  
+
   // --- Estados Generales ---
   const [isMuted, setIsMuted] = useState(true)
-  const videoRefs = useRef<(HTMLVideoElement | null)[]>([]) 
+  const videoRefs = useRef<(HTMLVideoElement | null)[]>([])
   const userref = useRef(false)
   const mediaref = useRef(false)
   const [activeTab, setActiveTab] = useState("latest")
@@ -108,7 +109,7 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: ProfileSecc
   const [videoProgress, setVideoProgress] = useState<Record<string, number>>({});
   const [videoDuration, setVideoDuration] = useState<Record<string, number>>({});
   const [showLikeAnimation, setShowLikeAnimation] = useState<Record<string, boolean>>({});
-  
+
   // Comentarios
   const [showCommentsModal, setShowCommentsModal] = useState(false);
   const [comments, setComments] = useState<Comment[] | null>(null)
@@ -117,39 +118,39 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: ProfileSecc
 
   // --- 1. Sincronización y WebSocket ---
   useEffect(() => {
-    if(media_user) {
-        setLocalMedia(media_user);
+    if (media_user) {
+      setLocalMedia(media_user);
     }
   }, [media_user]);
 
   const handleWSMessage = useCallback((data: any) => {
     if (data.event === "like_updated") {
       setLocalMedia(prev => prev.map((video) => {
-          if (video.id === data.video_id) {
-            return { ...video, likes_count: data.likes, liked: data.liked };
-          }
-          return video;
+        if (video.id === data.video_id) {
+          return { ...video, likes_count: data.likes, liked: data.liked };
+        }
+        return video;
       }));
     }
     if (data.event === "new_comment") {
       if (data && data.user_id) {
         setLocalMedia(prev => prev.map((video) => {
-            if (video.id === data.video_id) {
-              return { ...video, comments_count: data.comments_count };
-            }
-            return video;
+          if (video.id === data.video_id) {
+            return { ...video, comments_count: data.comments_count };
+          }
+          return video;
         }));
-        if(currentVideoId === data.video_id) {
-             setComments((prevComments) => [data, ...(prevComments || [])]);
+        if (currentVideoId === data.video_id) {
+          setComments((prevComments) => [data, ...(prevComments || [])]);
         }
       }
     }
     if (data.event === "new_view") {
       setLocalMedia(prev => prev.map((video) => {
-          if (video.id === data.video_id) {
-            return { ...video, view_acount: data.view_acount };
-          }
-          return video;
+        if (video.id === data.video_id) {
+          return { ...video, view_acount: data.view_acount };
+        }
+        return video;
       }));
     }
   }, [currentVideoId]);
@@ -247,12 +248,12 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: ProfileSecc
   const handleSeek = (videoId: string, newTime: number) => {
     const index = localMedia?.findIndex(v => v.id?.toString() === videoId);
     if (index === undefined || index === -1) return;
-    if(isModalOpen) {
-        const videoElement = modalVideoRefs.current[index];
-        if (videoElement) {
-            videoElement.currentTime = newTime;
-            setVideoProgress(prev => ({ ...prev, [videoId]: newTime }));
-        }
+    if (isModalOpen) {
+      const videoElement = modalVideoRefs.current[index];
+      if (videoElement) {
+        videoElement.currentTime = newTime;
+        setVideoProgress(prev => ({ ...prev, [videoId]: newTime }));
+      }
     }
   };
 
@@ -262,7 +263,7 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: ProfileSecc
     setCurrentVideoId(vidId);
     setShowCommentsModal(true);
     getComment({ video_id: video.uuid || "" })(dispatch).then((res) => {
-        setComments(Array.isArray(res) ? res : [])
+      setComments(Array.isArray(res) ? res : [])
     });
   }
 
@@ -325,10 +326,10 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: ProfileSecc
 
   useEffect(() => {
     if (isModalOpen && modalContainerRef.current) {
-        setTimeout(() => {
-            const element = document.getElementById(`modal-video-${initialScrollIndex}`);
-            if (element) element.scrollIntoView({ behavior: 'auto' });
-        }, 10);
+      setTimeout(() => {
+        const element = document.getElementById(`modal-video-${initialScrollIndex}`);
+        if (element) element.scrollIntoView({ behavior: 'auto' });
+      }, 10);
     }
   }, [isModalOpen, initialScrollIndex]);
 
@@ -338,15 +339,15 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: ProfileSecc
       <div className="min-h-screen text-white flex flex-col items-center bg-[#050718] font-sans">
         {/* Fondo Dinámico */}
         <div className="fixed inset-0 z-0 pointer-events-none">
-          <div className="absolute inset-0 bg-gradient-to-br from-[#0f0f3c] via-[#1a1a4a] to-[#0f0f3c] opacity-80"></div>
+          <div className="absolute inset-0 bg-black opacity-80"></div>
           <div className="absolute inset-0 bg-[url('/noise.png')] opacity-[0.03] mix-blend-overlay"></div>
           <div className="absolute top-1/4 left-1/4 h-40 w-40 rounded-full bg-[#7000ff]/20 blur-3xl animate-float"></div>
-          <div className="absolute bottom-1/3 right-1/3 h-60 w-60 rounded-full bg-[#00f0ff]/20 blur-3xl animate-float-delayed"></div>
+          {/* <div className="absolute bottom-1/3 right-1/3 h-60 w-60 rounded-full bg-[#00f0ff]/20 blur-3xl animate-float-delayed"></div> */}
         </div>
 
         {/* --- CONTENIDO PRINCIPAL DEL PERFIL RESTAURADO --- */}
         <div className="relative z-10 w-full max-w-3xl mx-auto flex flex-col items-center pb-24">
-          
+
           {/* Banner Curvo */}
           <div className="w-full h-40 md:h-52 relative overflow-hidden rounded-b-[2.5rem] shadow-2xl shadow-[#7000ff]/20">
             <div className="absolute inset-0 bg-gradient-to-r from-[#7000ff] via-[#4c1d95] to-[#00f0ff] opacity-90"></div>
@@ -354,7 +355,7 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: ProfileSecc
           </div>
 
           <div className="px-4 w-full flex flex-col items-center -mt-16 md:-mt-20 space-y-4">
-            
+
             {/* Foto de Perfil (Restaurada) */}
             <motion.div
               initial={{ scale: 0.9, opacity: 0 }}
@@ -364,17 +365,17 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: ProfileSecc
             >
               <div className="rounded-full p-1 bg-[#050718]">
                 <div className="relative w-28 h-28 md:w-36 md:h-36 rounded-full overflow-hidden">
-                    {user?.profile_picture ? (
+                  {user?.profile_picture ? (
                     <img
-                        className="w-full h-full object-cover"
-                        src={`http://127.0.0.1:8000${user.profile_picture}`}
-                        alt={user.username}
+                      className="w-full h-full object-cover"
+                      src={`${getBaseUrl()}${user.profile_picture}`}
+                      alt={user.username}
                     />
-                    ) : (
+                  ) : (
                     <div className="w-full h-full bg-zinc-800 flex items-center justify-center">
-                        <User className="w-12 h-12 text-white/50" />
+                      <User className="w-12 h-12 text-white/50" />
                     </div>
-                    )}
+                  )}
                 </div>
               </div>
               {/* Badge (Restaurado) */}
@@ -402,25 +403,25 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: ProfileSecc
             >
               <div className="flex flex-col items-center cursor-pointer group">
                 <span className="text-xl md:text-2xl font-bold text-white group-hover:text-[#00f0ff] transition-colors duration-300">
-                    {user?.follower_all_acount || 0}
+                  {user?.follower_all_acount || 0}
                 </span>
                 <span className="text-xs text-gray-400 group-hover:text-gray-200">Seguidores</span>
               </div>
-              
+
               <div className="w-px h-8 bg-white/10"></div>
-              
+
               <div className="flex flex-col items-center cursor-pointer group">
                 <span className="text-xl md:text-2xl font-bold text-white group-hover:text-[#00f0ff] transition-colors duration-300">
-                    {user?.followed_all_acount || 0}
+                  {user?.followed_all_acount || 0}
                 </span>
                 <span className="text-xs text-gray-400 group-hover:text-gray-200">Seguidos</span>
               </div>
-              
+
               <div className="w-px h-8 bg-white/10"></div>
-              
+
               <div className="flex flex-col items-center cursor-pointer group">
                 <span className="text-xl md:text-2xl font-bold text-white group-hover:text-[#00f0ff] transition-colors duration-300">
-                    {user?.like_all_count || 0}
+                  {user?.like_all_count || 0}
                 </span>
                 <span className="text-xs text-gray-400 group-hover:text-gray-200">Likes</span>
               </div>
@@ -436,11 +437,11 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: ProfileSecc
               <p className="text-gray-300 leading-relaxed text-sm md:text-base">
                 {user?.bio || 'Creativo digital compartiendo momentos únicos.'}
               </p>
-              
+
               <div className="flex items-center justify-center gap-4 mt-3 text-sm text-[#00f0ff]">
                 <a href="#" className="flex items-center gap-1.5 hover:underline decoration-[#00f0ff]/50">
-                    <LinkIcon size={14} />
-                    <span>website.com</span>
+                  <LinkIcon size={14} />
+                  <span>website.com</span>
                 </a>
               </div>
             </motion.div>
@@ -452,24 +453,24 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: ProfileSecc
               transition={{ delay: 0.4 }}
               className="flex items-center gap-3 pt-2 w-full max-w-xs justify-center"
             >
-              <Button 
+              <Button
                 className="flex-1 bg-white text-black hover:bg-gray-200 font-semibold rounded-xl h-10 transition-transform active:scale-95"
               >
                 Seguir
               </Button>
-              <Button 
+              <Button
                 variant="outline"
                 className="flex-1 bg-transparent border-gray-600 hover:bg-white/10 hover:border-white text-white rounded-xl h-10"
               >
                 Mensaje
               </Button>
-              
+
               <div className="flex gap-2">
                 <Button variant="ghost" size="icon" className="rounded-xl bg-white/5 hover:bg-white/10 text-white border border-white/5 h-10 w-10">
-                    <Share size={18} />
+                  <Share size={18} />
                 </Button>
                 <Button variant="ghost" size="icon" className="rounded-xl bg-white/5 hover:bg-white/10 text-white border border-white/5 h-10 w-10">
-                    <Settings size={18} />
+                  <Settings size={18} />
                 </Button>
               </div>
             </motion.div>
@@ -483,25 +484,25 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: ProfileSecc
             className="w-full mt-8 px-2 md:px-0"
           >
             <Tabs defaultValue="latest" value={activeTab} onValueChange={setActiveTab} className="w-full">
-                {/* Tabs Flotantes (Restaurados) */}
-                <div className="sticky top-2 z-30 px-4 mb-6">
-                    <div className="relative mx-auto max-w-sm"> 
-                        <div className="absolute -inset-px rounded-full bg-gradient-to-r from-[#7000ff]/30 to-[#00f0ff]/30 opacity-50 blur-sm"></div>
-                        <TabsList className="relative grid w-full grid-cols-3 bg-[#0c1033]/90 backdrop-blur-xl border border-white/10 rounded-full p-1 h-auto">
-                        {["latest", "popular", "oldest"].map((tab) => (
-                            <TabsTrigger
-                            key={tab}
-                            value={tab}
-                            className={`rounded-full text-xs md:text-sm font-medium py-2 transition-all duration-300 capitalize
+              {/* Tabs Flotantes (Restaurados) */}
+              <div className="sticky top-2 z-30 px-4 mb-6">
+                <div className="relative mx-auto max-w-sm">
+                  <div className="absolute -inset-px rounded-full bg-gradient-to-r from-[#7000ff]/30 to-[#00f0ff]/30 opacity-50 blur-sm"></div>
+                  <TabsList className="relative grid w-full grid-cols-3 bg-[#0c1033]/90 backdrop-blur-xl border border-white/10 rounded-full p-1 h-auto">
+                    {["latest", "popular", "oldest"].map((tab) => (
+                      <TabsTrigger
+                        key={tab}
+                        value={tab}
+                        className={`rounded-full text-xs md:text-sm font-medium py-2 transition-all duration-300 capitalize
                                 data-[state=active]:bg-gradient-to-r data-[state=active]:from-[#7000ff] data-[state=active]:to-[#00f0ff] data-[state=active]:text-white data-[state=active]:shadow-lg
                                 ${activeTab === tab ? "" : "text-gray-400 hover:text-white hover:bg-white/5"}`}
-                            >
-                            {tab}
-                            </TabsTrigger>
-                        ))}
-                        </TabsList>
-                    </div>
+                      >
+                        {tab}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
                 </div>
+              </div>
 
               <TabsContent value="latest" className="px-1 md:px-4">
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-2 md:gap-4">
@@ -526,17 +527,17 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: ProfileSecc
                         </video>
                         <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/60"></div>
                         <div className="absolute bottom-2 left-2 flex items-center gap-1 text-xs font-medium">
-                            <Play className="h-3 w-3 text-white" fill="white" />
-                            <span className="text-white">{video.view_acount || 0}</span>
+                          <Play className="h-3 w-3 text-white" fill="white" />
+                          <span className="text-white">{video.view_acount || 0}</span>
                         </div>
                         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                            <AnimatePresence>
-                                {transientIconState?.videoId === video.id && (
-                                    <motion.div initial={{ opacity: 0, scale: 0.5 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 1.5 }} className="bg-black/40 backdrop-blur-sm p-3 rounded-full">
-                                        {transientIconState.icon === 'play' ? <Play className="h-6 w-6 text-white" fill="white" /> : <Pause className="h-6 w-6 text-white" fill="white" />}
-                                    </motion.div>
-                                )}
-                            </AnimatePresence>
+                          <AnimatePresence>
+                            {transientIconState?.videoId === video.id && (
+                              <motion.div initial={{ opacity: 0, scale: 0.5 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 1.5 }} className="bg-black/40 backdrop-blur-sm p-3 rounded-full">
+                                {transientIconState.icon === 'play' ? <Play className="h-6 w-6 text-white" fill="white" /> : <Pause className="h-6 w-6 text-white" fill="white" />}
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
                         </div>
                       </div>
                     </motion.div>
@@ -559,135 +560,135 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: ProfileSecc
             className="fixed inset-0 bg-black z-50 flex flex-col"
           >
             <div className="absolute top-4 right-4 z-[60]">
-                 <motion.button onClick={closeModal} className="p-2 rounded-full bg-black/20 backdrop-blur-md text-white border border-white/10 hover:bg-white/10">
-                    <X size={24} />
-                 </motion.button>
+              <motion.button onClick={closeModal} className="p-2 rounded-full bg-black/20 backdrop-blur-md text-white border border-white/10 hover:bg-white/10">
+                <X size={24} />
+              </motion.button>
             </div>
 
-            <div 
-                ref={modalContainerRef}
-                className="w-full h-full overflow-y-scroll snap-y snap-mandatory scroll-smooth no-scrollbar"
-                style={{ scrollbarWidth: 'none' }} 
+            <div
+              ref={modalContainerRef}
+              className="w-full h-full overflow-y-scroll snap-y snap-mandatory scroll-smooth no-scrollbar"
+              style={{ scrollbarWidth: 'none' }}
             >
-                {localMedia.map((video, index) => (
-                    <div 
-                        key={video.id} 
-                        id={`modal-video-${index}`}
-                        data-index={index}
-                        className="modal-video-item w-full h-full snap-center relative flex items-center justify-center bg-black"
-                    >
-                        <video
-                            ref={(el) => (modalVideoRefs.current[index] = el)}
-                            src={video.video}
-                            className="w-full h-full object-cover md:object-contain max-h-screen"
-                            loop
-                            muted={isMuted}
-                            playsInline
-                            onClick={toggleMute}
-                            onTimeUpdate={(e) => handleVideoProgress(e, video.id.toString())}
-                        />
+              {localMedia.map((video, index) => (
+                <div
+                  key={video.id}
+                  id={`modal-video-${index}`}
+                  data-index={index}
+                  className="modal-video-item w-full h-full snap-center relative flex items-center justify-center bg-black"
+                >
+                  <video
+                    ref={(el) => (modalVideoRefs.current[index] = el)}
+                    src={video.video}
+                    className="w-full h-full object-cover md:object-contain max-h-screen"
+                    loop
+                    muted={isMuted}
+                    playsInline
+                    onClick={toggleMute}
+                    onTimeUpdate={(e) => handleVideoProgress(e, video.id.toString())}
+                  />
 
-                        {/* Overlays del Modal */}
-                        {!isMuted && activeModalIndex === index && (
-                            <div className="absolute bottom-8 left-4 flex h-16 items-end space-x-1 z-10 pointer-events-none">
-                                {generateAudioLevels().map((level, i) => (
-                                    <motion.div key={i} className="w-1 bg-gradient-to-t from-[#7000ff] to-[#00f0ff] rounded-full" initial={{ height: "10%" }} animate={{ height: `${level}%` }} transition={{ duration: 0.2, delay: i * 0.05, repeat: Infinity, repeatType: "reverse" }} />
-                                ))}
-                            </div>
-                        )}
-
-                        <div className="absolute bottom-20 left-4 z-10 max-w-[70%] text-left">
-                            <div className="flex items-center gap-2 mb-2">
-                                <h3 className="text-white font-bold text-lg drop-shadow-md">@{video.user_id?.username || user?.username}</h3>
-                                <div className="bg-[#00f0ff] p-0.5 rounded-full"><Sparkles size={8} className="text-black" /></div>
-                            </div>
-                            <p className="text-white/90 text-sm line-clamp-2 drop-shadow-md">
-                                {video.content || "Mira este increíble video... #viral #fyp"}
-                            </p>
-                        </div>
-
-                        {/* Barra de Progreso del Modal */}
-                        <div className="absolute bottom-0 left-0 right-0 z-20 px-0 h-1 hover:h-2 transition-all group">
-                            {(() => {
-                                const vidId = video.id.toString();
-                                const duration = videoDuration[vidId] || 1;
-                                const progress = videoProgress[vidId] || 0;
-                                const percentage = (progress / duration) * 100;
-                                return (
-                                    <div className="w-full h-full bg-gray-600/30 cursor-pointer">
-                                        <div className="h-full bg-gradient-to-r from-[#7000ff] to-[#00f0ff]" style={{ width: `${percentage}%` }} />
-                                        <input 
-                                            type="range" min="0" max={duration} value={progress} step="0.1"
-                                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                                            onClick={(e) => e.stopPropagation()}
-                                            onChange={(e) => handleSeek(vidId, parseFloat(e.target.value))}
-                                        />
-                                    </div>
-                                )
-                            })()}
-                        </div>
-
-                        {/* Botones Laterales del Modal */}
-                        <div className="absolute right-2 bottom-20 md:right-4 md:bottom-24 flex flex-col items-center gap-6 z-20">
-                            <div className="relative mb-2">
-                                <div className="w-12 h-12 rounded-full border-2 border-white overflow-hidden">
-                                    <img src={`http://127.0.0.1:8000${video.user_id?.profile_picture || user?.profile_picture}`} className="w-full h-full object-cover" alt="user" />
-                                </div>
-                                <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-[#ff0050] rounded-full p-0.5 w-5 h-5 flex items-center justify-center text-white text-xs font-bold">+</div>
-                            </div>
-
-                            <div className="flex flex-col items-center gap-1">
-                                <motion.button 
-                                    whileTap={{ scale: 0.8 }} 
-                                    onClick={(e) => { e.stopPropagation(); handleLikeClick(video.id.toString()); }}
-                                    className="bg-black/20 p-2 rounded-full backdrop-blur-sm relative"
-                                >
-                                    <Heart className={`w-8 h-8 drop-shadow-lg ${video.liked ? "fill-[#ff0050] text-[#ff0050]" : "text-white"}`} />
-                                    <AnimatePresence>
-                                        {showLikeAnimation[video.id] && (
-                                            [...Array(3)].map((_, i) => (
-                                                <motion.div
-                                                    key={i}
-                                                    initial={{ opacity: 1, y: 0, scale: 0.5 }}
-                                                    animate={{ opacity: 0, y: -60 - Math.random() * 40, x: (Math.random() - 0.5) * 30, scale: 1.2 }}
-                                                    className="absolute top-0 left-0 pointer-events-none"
-                                                >
-                                                    <Heart className="w-6 h-6 fill-[#ff0050] text-[#ff0050]" />
-                                                </motion.div>
-                                            ))
-                                        )}
-                                    </AnimatePresence>
-                                </motion.button>
-                                <span className="text-white text-xs font-bold drop-shadow-md">{video.likes_count || 0}</span>
-                            </div>
-
-                            <div className="flex flex-col items-center gap-1">
-                                <motion.button 
-                                    whileTap={{ scale: 0.8 }} 
-                                    onClick={(e) => { e.stopPropagation(); handleCommentClick(video); }}
-                                    className="bg-black/20 p-2 rounded-full backdrop-blur-sm"
-                                >
-                                    <MessageCircle className="w-8 h-8 text-white drop-shadow-lg" />
-                                </motion.button>
-                                <span className="text-white text-xs font-bold drop-shadow-md">{video.comments_count || 0}</span>
-                            </div>
-
-                            <div className="flex flex-col items-center gap-1">
-                                <div className="bg-black/20 p-2 rounded-full backdrop-blur-sm">
-                                    <Eye className="w-8 h-8 text-white drop-shadow-lg" />
-                                </div>
-                                <span className="text-white text-xs font-bold drop-shadow-md">{video.view_acount || 0}</span>
-                            </div>
-
-                            <div className="flex flex-col items-center gap-1">
-                                <motion.button whileTap={{ scale: 0.8 }} className="bg-black/20 p-2 rounded-full backdrop-blur-sm">
-                                    <Share2 className="w-8 h-8 text-white drop-shadow-lg" />
-                                </motion.button>
-                                <span className="text-white text-xs font-bold drop-shadow-md">Share</span>
-                            </div>
-                        </div>
+                  {/* Overlays del Modal */}
+                  {!isMuted && activeModalIndex === index && (
+                    <div className="absolute bottom-8 left-4 flex h-16 items-end space-x-1 z-10 pointer-events-none">
+                      {generateAudioLevels().map((level, i) => (
+                        <motion.div key={i} className="w-1 bg-gradient-to-t from-[#7000ff] to-[#00f0ff] rounded-full" initial={{ height: "10%" }} animate={{ height: `${level}%` }} transition={{ duration: 0.2, delay: i * 0.05, repeat: Infinity, repeatType: "reverse" }} />
+                      ))}
                     </div>
-                ))}
+                  )}
+
+                  <div className="absolute bottom-20 left-4 z-10 max-w-[70%] text-left">
+                    <div className="flex items-center gap-2 mb-2">
+                      <h3 className="text-white font-bold text-lg drop-shadow-md">@{video.user_id?.username || user?.username}</h3>
+                      <div className="bg-[#00f0ff] p-0.5 rounded-full"><Sparkles size={8} className="text-black" /></div>
+                    </div>
+                    <p className="text-white/90 text-sm line-clamp-2 drop-shadow-md">
+                      {video.content || "Mira este increíble video... #viral #fyp"}
+                    </p>
+                  </div>
+
+                  {/* Barra de Progreso del Modal */}
+                  <div className="absolute bottom-0 left-0 right-0 z-20 px-0 h-1 hover:h-2 transition-all group">
+                    {(() => {
+                      const vidId = video.id.toString();
+                      const duration = videoDuration[vidId] || 1;
+                      const progress = videoProgress[vidId] || 0;
+                      const percentage = (progress / duration) * 100;
+                      return (
+                        <div className="w-full h-full bg-gray-600/30 cursor-pointer">
+                          <div className="h-full bg-gradient-to-r from-[#7000ff] to-[#00f0ff]" style={{ width: `${percentage}%` }} />
+                          <input
+                            type="range" min="0" max={duration} value={progress} step="0.1"
+                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => handleSeek(vidId, parseFloat(e.target.value))}
+                          />
+                        </div>
+                      )
+                    })()}
+                  </div>
+
+                  {/* Botones Laterales del Modal */}
+                  <div className="absolute right-2 bottom-20 md:right-4 md:bottom-24 flex flex-col items-center gap-6 z-20">
+                    <div className="relative mb-2">
+                      <div className="w-12 h-12 rounded-full border-2 border-white overflow-hidden">
+                        <img src={`${getBaseUrl()}${video.user_id?.profile_picture || user?.profile_picture}`} className="w-full h-full object-cover" alt="user" />
+                      </div>
+                      <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-[#ff0050] rounded-full p-0.5 w-5 h-5 flex items-center justify-center text-white text-xs font-bold">+</div>
+                    </div>
+
+                    <div className="flex flex-col items-center gap-1">
+                      <motion.button
+                        whileTap={{ scale: 0.8 }}
+                        onClick={(e) => { e.stopPropagation(); handleLikeClick(video.id.toString()); }}
+                        className="bg-black/20 p-2 rounded-full backdrop-blur-sm relative"
+                      >
+                        <Heart className={`w-8 h-8 drop-shadow-lg ${video.liked ? "fill-[#ff0050] text-[#ff0050]" : "text-white"}`} />
+                        <AnimatePresence>
+                          {showLikeAnimation[video.id] && (
+                            [...Array(3)].map((_, i) => (
+                              <motion.div
+                                key={i}
+                                initial={{ opacity: 1, y: 0, scale: 0.5 }}
+                                animate={{ opacity: 0, y: -60 - Math.random() * 40, x: (Math.random() - 0.5) * 30, scale: 1.2 }}
+                                className="absolute top-0 left-0 pointer-events-none"
+                              >
+                                <Heart className="w-6 h-6 fill-[#ff0050] text-[#ff0050]" />
+                              </motion.div>
+                            ))
+                          )}
+                        </AnimatePresence>
+                      </motion.button>
+                      <span className="text-white text-xs font-bold drop-shadow-md">{video.likes_count || 0}</span>
+                    </div>
+
+                    <div className="flex flex-col items-center gap-1">
+                      <motion.button
+                        whileTap={{ scale: 0.8 }}
+                        onClick={(e) => { e.stopPropagation(); handleCommentClick(video); }}
+                        className="bg-black/20 p-2 rounded-full backdrop-blur-sm"
+                      >
+                        <MessageCircle className="w-8 h-8 text-white drop-shadow-lg" />
+                      </motion.button>
+                      <span className="text-white text-xs font-bold drop-shadow-md">{video.comments_count || 0}</span>
+                    </div>
+
+                    <div className="flex flex-col items-center gap-1">
+                      <div className="bg-black/20 p-2 rounded-full backdrop-blur-sm">
+                        <Eye className="w-8 h-8 text-white drop-shadow-lg" />
+                      </div>
+                      <span className="text-white text-xs font-bold drop-shadow-md">{video.view_acount || 0}</span>
+                    </div>
+
+                    <div className="flex flex-col items-center gap-1">
+                      <motion.button whileTap={{ scale: 0.8 }} className="bg-black/20 p-2 rounded-full backdrop-blur-sm">
+                        <Share2 className="w-8 h-8 text-white drop-shadow-lg" />
+                      </motion.button>
+                      <span className="text-white text-xs font-bold drop-shadow-md">Share</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           </motion.div>
         )}
@@ -699,46 +700,46 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: ProfileSecc
           <>
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 z-[70]" onClick={() => setShowCommentsModal(false)} />
             <motion.div
-                initial={{ y: "100%" }}
-                animate={{ y: 0 }}
-                exit={{ y: "100%" }}
-                transition={{ type: "spring", damping: 25, stiffness: 200 }}
-                className="fixed bottom-0 left-0 right-0 h-[60vh] z-[80] bg-[#0c1033] rounded-t-3xl flex flex-col border-t border-[#2a2f5e]"
-                onClick={(e) => e.stopPropagation()}
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 25, stiffness: 200 }}
+              className="fixed bottom-0 left-0 right-0 h-[60vh] z-[80] bg-[#0c1033] rounded-t-3xl flex flex-col border-t border-[#2a2f5e]"
+              onClick={(e) => e.stopPropagation()}
             >
-                <div className="flex items-center justify-between p-4 border-b border-[#2a2f5e]">
-                    <h3 className="text-white font-bold">Comentarios</h3>
-                    <button onClick={() => setShowCommentsModal(false)}><X className="text-gray-400" /></button>
-                </div>
-                <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                    {(!comments || comments.length === 0) ? (
-                         <div className="h-full flex items-center justify-center text-gray-500">Sé el primero en comentar.</div>
-                    ) : (
-                        comments.map((c, i) => (
-                            <div key={c.uuid || i} className="flex gap-3">
-                                <img src={`http://127.0.0.1:8000${c.user_id.profile_picture}`} className="w-8 h-8 rounded-full object-cover" alt="u" />
-                                <div>
-                                    <div className="flex items-baseline gap-2">
-                                        <span className="text-xs text-gray-400 font-bold">{c.user_id.username}</span>
-                                        <span className="text-xs text-gray-500">{c.create_at}</span>
-                                    </div>
-                                    <p className="text-sm text-white mt-0.5">{c.content}</p>
-                                </div>
-                            </div>
-                        ))
-                    )}
-                </div>
-                <div className="p-3 border-t border-[#2a2f5e] bg-[#050718] flex items-center gap-2 pb-6 md:pb-3">
-                    <img src={`http://127.0.0.1:8000${currentUser?.profile_picture}`} className="w-8 h-8 rounded-full" alt="me" />
-                    <input 
-                        className="flex-1 bg-[#1a1f3a] rounded-full px-4 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-[#00f0ff]"
-                        placeholder="Añadir comentario..."
-                        value={commentText}
-                        onChange={(e) => setCommentText(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && handlePostComment()}
-                    />
-                    <button onClick={handlePostComment} className="text-[#00f0ff] font-bold text-sm px-2">Publicar</button>
-                </div>
+              <div className="flex items-center justify-between p-4 border-b border-[#2a2f5e]">
+                <h3 className="text-white font-bold">Comentarios</h3>
+                <button onClick={() => setShowCommentsModal(false)}><X className="text-gray-400" /></button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                {(!comments || comments.length === 0) ? (
+                  <div className="h-full flex items-center justify-center text-gray-500">Sé el primero en comentar.</div>
+                ) : (
+                  comments.map((c, i) => (
+                    <div key={c.uuid || i} className="flex gap-3">
+                      <img src={`${getBaseUrl()}${c.user_id.profile_picture}`} className="w-8 h-8 rounded-full object-cover" alt="u" />
+                      <div>
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-xs text-gray-400 font-bold">{c.user_id.username}</span>
+                          <span className="text-xs text-gray-500">{c.create_at}</span>
+                        </div>
+                        <p className="text-sm text-white mt-0.5">{c.content}</p>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+              <div className="p-3 border-t border-[#2a2f5e] bg-[#050718] flex items-center gap-2 pb-6 md:pb-3">
+                <img src={`${getBaseUrl()}${currentUser?.profile_picture}`} className="w-8 h-8 rounded-full" alt="me" />
+                <input
+                  className="flex-1 bg-[#1a1f3a] rounded-full px-4 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-[#00f0ff]"
+                  placeholder="Añadir comentario..."
+                  value={commentText}
+                  onChange={(e) => setCommentText(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handlePostComment()}
+                />
+                <button onClick={handlePostComment} className="text-[#00f0ff] font-bold text-sm px-2">Publicar</button>
+              </div>
             </motion.div>
           </>
         )}
