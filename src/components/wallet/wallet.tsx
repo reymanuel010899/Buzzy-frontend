@@ -1,9 +1,10 @@
 "use client"
 
-import { useState, useEffect} from "react"
-import { motion, AnimatePresence } from "framer-motion"
-import { Wallet, Plus, ArrowDown, ArrowUp, Clock, DollarSign } from 'lucide-react';
+import { useState, useEffect } from "react"
+import { motion } from "framer-motion"
+import { Wallet, Plus, ArrowDown, ArrowUp, Clock } from 'lucide-react';
 import BottomNavbar from "../Layout/ButtonNavar"
+import WalletModal from "./WalletModal";
 import { createTransactions } from "../../redux/actions/createTransactions";
 import { useDispatch } from 'react-redux';
 import { IUser } from "../../interfaces/auth";
@@ -21,16 +22,16 @@ type WalletComponentProps = {
   getWallet: () => void;
   pass_code?: string;
   wallet_type?: string;
+  createDepositSession: (amount: number) => any;
+  withdrawFunds: (amount: number) => any;
 }
 
-const WalletComponent = ({ balances, getWallet, pass_code, wallet_type, user}: WalletComponentProps) => {
+const WalletComponent = ({ balances, getWallet, pass_code, wallet_type, user, createDepositSession, withdrawFunds }: WalletComponentProps) => {
   console.log(user)
-  const dispatch = useDispatch(); 
+  const dispatch = useDispatch();
   const [balance, setBalance] = useState(parseInt(balances?.toString() || "0"))
-  const [showAddFundsModal, setShowAddFundsModal] = useState(false)
-  const [showWithdrawModal, setShowWithdrawModal] = useState(false)
-  const [amount, setAmount] = useState("")
-  const [isLoading, setIsLoading] = useState(false)
+  const [isWalletModalOpen, setIsWalletModalOpen] = useState(false)
+  const [defaultTab, setDefaultTab] = useState<'deposit' | 'withdraw'>('deposit')
   const [activeFilter, setActiveFilter] = useState<"all" | "income" | "expense">("all")
   const [scrollPosition, setScrollPosition] = useState(0)
   // let count = useRef(0)
@@ -66,7 +67,7 @@ const WalletComponent = ({ balances, getWallet, pass_code, wallet_type, user}: W
       date: "2025-04-07",
     },
   ])
-  useEffect(()=>{
+  useEffect(() => {
     // if(count.current >= 1) return;
     // count.current += 1
     getWallet()
@@ -82,51 +83,23 @@ const WalletComponent = ({ balances, getWallet, pass_code, wallet_type, user}: W
     return () => window.removeEventListener("scroll", handleScroll)
   }, [])
 
-  const handleAddFunds = () => {
-    if (!amount || isNaN(Number(amount))) return
-    setIsLoading(true)
-   
-    // Simulate API call /wallet
-    setTimeout(() => {
-      createTransactions({
-      amount: Number(amount),
-      transaction_type: "deposit",
-      description: "Fondos agregados"
-    })(dispatch).then(()=> {
-      setAmount("")
-      setShowAddFundsModal(false)
-      setIsLoading(false)
-      getWallet()
-      setBalance(balances ? parseInt(balances.toString()) : 0)
-    })
-    }, 1500)
+  const handleAddFunds = (amount: number) => {
+    createDepositSession(amount)
+      .catch((err: any) => {
+        alert("Error al crear la sesión de depósito");
+      });
   }
 
-  const handleWithdraw = () => {
-    if (!amount || isNaN(Number(amount))) return
-    const amountNum = Number(amount)
-
-    if (amountNum > balance) {
-      alert("No tienes suficiente saldo")
-      return
-    }
-
-    setIsLoading(true)
-    // Simulate API call
-    setTimeout(() => {
-      createTransactions({
-      amount: Number(amount),
-      transaction_type: "withdrawal",
-      description: "Fondos retirados"
-    })(dispatch).then(()=> {
-
-      setAmount("")
-      setShowAddFundsModal(false)
-      setIsLoading(false)
-      getWallet()
-      setBalance(balances ? parseInt(balances.toString()) : 0)
-    })
-    }, 1500)
+  const handleWithdraw = (amount: number, details: string) => {
+    withdrawFunds(amount)
+      .then((res: any) => {
+        alert(res.message || "Solicitud de retiro enviada con éxito");
+        setIsWalletModalOpen(false);
+        getWallet();
+      })
+      .catch((err: any) => {
+        alert(err.error || "Error al solicitar retiro");
+      });
   }
 
   const filteredTransactions = transactions.filter((tx) => {
@@ -161,8 +134,8 @@ const WalletComponent = ({ balances, getWallet, pass_code, wallet_type, user}: W
             {/* Decorative elements */}
             <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-[#7000ff]/20 to-[#00f0ff]/20 rounded-full blur-xl -translate-y-1/2 translate-x-1/2"></div>
             <div className="absolute bottom-0 left-0 w-24 h-24 bg-gradient-to-tr from-[#7000ff]/20 to-[#00f0ff]/20 rounded-full blur-xl translate-y-1/2 -translate-x-1/2"></div>
-              <span className="wallet-badge">{wallet_type?.toUpperCase()}</span>
-           
+            <span className="wallet-badge">{wallet_type?.toUpperCase()}</span>
+
             <div className="flex flex-col items-center relative z-10">
               <motion.div
                 initial={{ scale: 0.8, opacity: 0 }}
@@ -203,29 +176,37 @@ const WalletComponent = ({ balances, getWallet, pass_code, wallet_type, user}: W
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: 0.5 }}
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => setShowAddFundsModal(true)}
-                  className="relative group"
+                  whileHover={{ scale: 1.05, translateY: -2 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => { setDefaultTab('deposit'); setIsWalletModalOpen(true); }}
+                  className="w-full relative group py-4 px-6 rounded-full bg-[#10b981] shadow-[0_0_25px_rgba(16,185,129,0.45)] hover:shadow-[0_0_35px_rgba(16,185,129,0.6)] transition-all duration-300 border border-white/20 overflow-hidden"
                 >
-                  <div className="absolute -inset-0.5 bg-gradient-to-r from-green-500 to-green-600 rounded-xl opacity-70 blur-sm group-hover:opacity-100 transition-opacity duration-300"></div>
-                  <div className="relative bg-green-500 hover:bg-green-600 text-white py-3 rounded-xl flex items-center justify-center gap-2 font-medium transition-colors">
-                    <Plus size={20} /> Agregar Fondos
+                  <div className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <div className="relative flex items-center justify-center gap-3">
+                    <Plus size={20} className="text-white" strokeWidth={3} />
+                    <span className="text-white font-black italic tracking-widest uppercase text-sm">
+                      Agregar Fondos
+                    </span>
                   </div>
+                  {/* Glowing line overlay */}
+                  <div className="absolute top-0 -inset-full h-full w-1/2 z-5 block transform -skew-x-12 bg-gradient-to-r from-transparent to-white/20 opacity-40 group-hover:animate-shine" />
                 </motion.button>
 
                 <motion.button
                   initial={{ opacity: 0, x: 20 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: 0.6 }}
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => setShowWithdrawModal(true)}
-                  className="relative group"
+                  whileHover={{ scale: 1.05, translateY: -2 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => { setDefaultTab('withdraw'); setIsWalletModalOpen(true); }}
+                  className="w-full relative group py-4 px-6 rounded-full bg-[#ef4444] shadow-[0_0_20px_rgba(239,68,68,0.35)] hover:shadow-[0_0_30px_rgba(239,68,68,0.5)] transition-all duration-300 border border-white/10 overflow-hidden opacity-90"
                 >
-                  <div className="absolute -inset-0.5 bg-gradient-to-r from-red-500 to-red-600 rounded-xl opacity-70 blur-sm group-hover:opacity-100 transition-opacity duration-300"></div>
-                  <div className="relative bg-red-500 hover:bg-red-600 text-white py-3 rounded-xl flex items-center justify-center gap-2 font-medium transition-colors">
-                    <ArrowDown size={20} /> Retirar
+                  <div className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <div className="relative flex items-center justify-center gap-3">
+                    <ArrowDown size={20} className="text-white" strokeWidth={3} />
+                    <span className="text-white font-black italic tracking-widest uppercase text-sm">
+                      Retirar
+                    </span>
                   </div>
                 </motion.button>
               </div>
@@ -249,31 +230,28 @@ const WalletComponent = ({ balances, getWallet, pass_code, wallet_type, user}: W
             <div className="flex gap-2">
               <button
                 onClick={() => setActiveFilter("all")}
-                className={`px-2 py-1 text-xs rounded-full transition-colors ${
-                  activeFilter === "all"
-                    ? "bg-gradient-to-r from-[#7000ff] to-[#00f0ff] text-white"
-                    : "bg-[#0c1033]/80 text-[#a2b0ff] hover:text-white"
-                }`}
+                className={`px-2 py-1 text-xs rounded-full transition-colors ${activeFilter === "all"
+                  ? "bg-gradient-to-r from-[#7000ff] to-[#00f0ff] text-white"
+                  : "bg-[#0c1033]/80 text-[#a2b0ff] hover:text-white"
+                  }`}
               >
                 Todos
               </button>
               <button
                 onClick={() => setActiveFilter("income")}
-                className={`px-2 py-1 text-xs rounded-full transition-colors ${
-                  activeFilter === "income"
-                    ? "bg-gradient-to-r from-green-500 to-green-600 text-white"
-                    : "bg-[#0c1033]/80 text-[#a2b0ff] hover:text-white"
-                }`}
+                className={`px-2 py-1 text-xs rounded-full transition-colors ${activeFilter === "income"
+                  ? "bg-gradient-to-r from-green-500 to-green-600 text-white"
+                  : "bg-[#0c1033]/80 text-[#a2b0ff] hover:text-white"
+                  }`}
               >
                 Ingresos
               </button>
               <button
                 onClick={() => setActiveFilter("expense")}
-                className={`px-2 py-1 text-xs rounded-full transition-colors ${
-                  activeFilter === "expense"
-                    ? "bg-gradient-to-r from-red-500 to-red-600 text-white"
-                    : "bg-[#0c1033]/80 text-[#a2b0ff] hover:text-white"
-                }`}
+                className={`px-2 py-1 text-xs rounded-full transition-colors ${activeFilter === "expense"
+                  ? "bg-gradient-to-r from-red-500 to-red-600 text-white"
+                  : "bg-[#0c1033]/80 text-[#a2b0ff] hover:text-white"
+                  }`}
               >
                 Gastos
               </button>
@@ -291,18 +269,16 @@ const WalletComponent = ({ balances, getWallet, pass_code, wallet_type, user}: W
                   className="relative group"
                 >
                   <div
-                    className={`absolute -inset-0.5 rounded-xl opacity-0 group-hover:opacity-50 blur-sm transition-opacity duration-300 ${
-                      tx.type === "income"
-                        ? "bg-gradient-to-r from-green-500 to-[#00f0ff]"
-                        : "bg-gradient-to-r from-red-500 to-[#ff00aa]"
-                    }`}
+                    className={`absolute -inset-0.5 rounded-xl opacity-0 group-hover:opacity-50 blur-sm transition-opacity duration-300 ${tx.type === "income"
+                      ? "bg-gradient-to-r from-green-500 to-[#00f0ff]"
+                      : "bg-gradient-to-r from-red-500 to-[#ff00aa]"
+                      }`}
                   ></div>
                   <div className="relative flex justify-between items-center bg-black p-4 rounded-xl border border-[#2a2f5e] group-hover:border-transparent transition-colors">
                     <div className="flex items-center gap-3">
                       <div
-                        className={`flex h-10 w-10 items-center justify-center rounded-full ${
-                          tx.type === "income" ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
-                        }`}
+                        className={`flex h-10 w-10 items-center justify-center rounded-full ${tx.type === "income" ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
+                          }`}
                       >
                         {tx.type === "income" ? <ArrowUp size={18} /> : <ArrowDown size={18} />}
                       </div>
@@ -335,136 +311,15 @@ const WalletComponent = ({ balances, getWallet, pass_code, wallet_type, user}: W
         </motion.div>
       </div>
 
-      {/* Add Funds Modal */}
-      <AnimatePresence>
-        {showAddFundsModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-            onClick={() => !isLoading && setShowAddFundsModal(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="relative w-full max-w-md"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="absolute -inset-1 bg-gradient-to-r from-[#7000ff] to-[#00f0ff] rounded-2xl opacity-50 blur-md"></div>
-              <div className="relative bg-black p-6 rounded-2xl border border-[#2a2f5e]">
-                <h3 className="text-xl font-bold text-white mb-4 text-center">Agregar Fondos</h3>
-
-                <div className="mb-6">
-                  <label className="block text-[#a2b0ff] mb-2 text-sm">Cantidad</label>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <DollarSign className="h-5 w-5 text-[#a2b0ff]" />
-                    </div>
-                    <input
-                      type="number"
-                      value={amount}
-                      onChange={(e) => setAmount(e.target.value)}
-                      placeholder="0.00"
-                      className="w-full bg-[#0c1033] border border-[#2a2f5e] rounded-xl py-3 pl-10 pr-3 text-white placeholder-[#a2b0ff]/50 focus:outline-none focus:border-[#00f0ff] transition-colors"
-                      disabled={isLoading}
-                    />
-                  </div>
-                </div>
-
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => !isLoading && setShowAddFundsModal(false)}
-                    disabled={isLoading}
-                    className="flex-1 bg-[#0c1033] hover:bg-[#161b4b] border border-[#2a2f5e] text-white py-3 rounded-xl transition-colors"
-                  >
-                    Cancelar
-                  </button>
-                  <button onClick={handleAddFunds} disabled={isLoading} className="relative flex-1 group">
-                    <div className="absolute -inset-0.5 bg-gradient-to-r from-green-500 to-green-600 rounded-xl opacity-70 blur-sm group-hover:opacity-100 transition-opacity duration-300"></div>
-                    <div className="relative bg-green-500 hover:bg-green-600 text-white py-3 rounded-xl flex items-center justify-center gap-2 transition-colors">
-                      {isLoading ? (
-                        <div className="h-5 w-5 rounded-full border-2 border-t-transparent border-white animate-spin"></div>
-                      ) : (
-                        <>
-                          <Plus size={18} /> Agregar
-                        </>
-                      )}
-                    </div>
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Withdraw Modal */}
-      <AnimatePresence>
-        {showWithdrawModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-            onClick={() => !isLoading && setShowWithdrawModal(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="relative w-full max-w-md"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="absolute -inset-1 bg-gradient-to-r from-[#7000ff] to-[#00f0ff] rounded-2xl opacity-50 blur-md"></div>
-              <div className="relative bg-black backdrop-blur-md p-6 rounded-2xl border border-[#2a2f5e]">
-                <h3 className="text-xl font-bold text-white mb-4 text-center">Retirar Fondos</h3>
-
-                <div className="mb-6">
-                  <label className="block text-[#a2b0ff] mb-2 text-sm">Cantidad</label>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <DollarSign className="h-5 w-5 text-[#a2b0ff]" />
-                    </div>
-                    <input
-                      type="number"
-                      value={amount}
-                      onChange={(e) => setAmount(e.target.value)}
-                      placeholder="0.00"
-                      className="w-full bg-[#0c1033] border border-[#2a2f5e] rounded-xl py-3 pl-10 pr-3 text-white placeholder-[#a2b0ff]/50 focus:outline-none focus:border-[#00f0ff] transition-colors"
-                      disabled={isLoading}
-                    />
-                  </div>
-                  <p className="text-xs text-[#a2b0ff] mt-2">Balance disponible: ${balance.toFixed(2)}</p>
-                </div>
-
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => !isLoading && setShowWithdrawModal(false)}
-                    disabled={isLoading}
-                    className="flex-1 bg-[#0c1033] hover:bg-[#161b4b] border border-[#2a2f5e] text-white py-3 rounded-xl transition-colors"
-                  >
-                    Cancelar
-                  </button>
-                  <button onClick={handleWithdraw} disabled={isLoading} className="relative flex-1 group">
-                    <div className="absolute -inset-0.5 bg-gradient-to-r from-red-500 to-red-600 rounded-xl opacity-70 blur-sm group-hover:opacity-100 transition-opacity duration-300"></div>
-                    <div className="relative bg-red-500 hover:bg-red-600 text-white py-3 rounded-xl flex items-center justify-center gap-2 transition-colors">
-                      {isLoading ? (
-                        <div className="h-5 w-5 rounded-full border-2 border-t-transparent border-white animate-spin"></div>
-                      ) : (
-                        <>
-                          <ArrowDown size={18} /> Retirar
-                        </>
-                      )}
-                    </div>
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Premium Wallet Modal */}
+      <WalletModal
+        isOpen={isWalletModalOpen}
+        onClose={() => setIsWalletModalOpen(false)}
+        balance={balance}
+        onAddFunds={handleAddFunds}
+        onWithdraw={handleWithdraw}
+        defaultTab={defaultTab}
+      />
 
       {/* Bottom navbar */}
       <BottomNavbar />

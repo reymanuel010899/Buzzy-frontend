@@ -26,7 +26,7 @@ const FullscreenMediaPreview: React.FC<FullscreenMediaPreviewProps> = ({ activeP
                         onClick={(e) => { e.stopPropagation(); onClose(); }}
                         className="absolute top-6 right-6 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white z-[110]"
                     >
-                        <X className="w-8 h-8" />
+                        <X className="w-5 h-5" />
                     </motion.button>
 
                     <motion.div

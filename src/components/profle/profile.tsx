@@ -14,6 +14,7 @@ import {
   Sparkles,
   Pause,
   Eye,
+  Video,
 } from "lucide-react"
 import { Button } from "../ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs"
@@ -28,6 +29,8 @@ import { createView } from "../../redux/actions/createView"
 import { getComment } from "../../redux/actions/getComment"
 import { createComment } from "../../redux/actions/createComment"
 import { getBaseUrl } from "../../redux/client/api-client"
+import SubscriptionModal from "./SubscriptionModal"
+import { getSubscriptionPlans, createCheckoutSession, startCall } from "../../redux/actions/subscriptionActions"
 
 const WS_URL = "ws://localhost:8001/ws"
 
@@ -65,7 +68,14 @@ interface VideoItem {
 
 interface Comment {
   uuid: string;
-  user_id: { username: string; profile_picture: string };
+  user_id: {
+    username: string;
+    profile_picture: string;
+    subscription_status?: {
+      plan_name: string;
+      is_active: boolean;
+    };
+  };
   content: string;
   create_at: string;
 }
@@ -75,12 +85,25 @@ interface ProfileSeccionProps {
   user: UserInterface | null
   getUserMedia: (username: string) => void
   media_user: VideoItem[]
+  getSubscriptionPlans: () => any
+  createCheckoutSession: (planId: number) => any
+  startCall: () => any
+  subscriptionPlans: any[]
 }
 
-function ProfileSeccion({ getUser, user, getUserMedia, media_user }: ProfileSeccionProps) {
-  const dispatch = useDispatch();
+function ProfileSeccion({
+  getUser,
+  user,
+  getUserMedia,
+  media_user,
+  getSubscriptionPlans,
+  createCheckoutSession,
+  startCall,
+  subscriptionPlans,
+}: ProfileSeccionProps) {
   const userParams = useParams<{ username?: string }>()
   const { username } = userParams
+  const dispatch = useDispatch()
 
   // --- Estados Generales ---
   const [isMuted, setIsMuted] = useState(true)
@@ -115,6 +138,11 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: ProfileSecc
   const [comments, setComments] = useState<Comment[] | null>(null)
   const [commentText, setCommentText] = useState("")
   const [currentVideoId, setCurrentVideoId] = useState<string | null>(null);
+
+  // Suscripciones
+  const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
+
+  // Wallet
 
   // --- 1. Sincronización y WebSocket ---
   useEffect(() => {
@@ -276,6 +304,24 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: ProfileSecc
       setCommentText("");
     }).catch(console.error);
   }
+
+  const handleOpenSubscriptionModal = () => {
+    getSubscriptionPlans();
+    setShowSubscriptionModal(true);
+  };
+
+  const handleSelectPlan = (planId: number) => {
+    createCheckoutSession(planId);
+  };
+
+  const handleStartCall = () => {
+    startCall().then((res: any) => {
+      alert(res.message);
+      // Here you would navigate to the call room if implemented
+    }).catch((err: string) => {
+      alert(err);
+    });
+  };
 
   // --- 5. Lógica Modal FullScreen ---
   const openModalAtIndex = (index: number) => {
@@ -454,9 +500,10 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: ProfileSecc
               className="flex items-center gap-3 pt-2 w-full max-w-xs justify-center"
             >
               <Button
+                onClick={handleOpenSubscriptionModal}
                 className="flex-1 bg-white text-black hover:bg-gray-200 font-semibold rounded-xl h-10 transition-transform active:scale-95"
               >
-                Seguir
+                Suscribirte
               </Button>
               <Button
                 variant="outline"
@@ -464,6 +511,17 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: ProfileSecc
               >
                 Mensaje
               </Button>
+
+              {currentUser?.username !== username && (
+                <Button
+                  onClick={handleStartCall}
+                  variant="ghost"
+                  size="icon"
+                  className="rounded-xl bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 border border-blue-500/30 h-10 w-10 flex-shrink-0"
+                >
+                  <Video size={18} />
+                </Button>
+              )}
 
               <div className="flex gap-2">
                 <Button variant="ghost" size="icon" className="rounded-xl bg-white/5 hover:bg-white/10 text-white border border-white/5 h-10 w-10">
@@ -548,211 +606,230 @@ function ProfileSeccion({ getUser, user, getUserMedia, media_user }: ProfileSecc
           </motion.div>
         </div>
         <BottomNavbar />
-      </div>
+      </div >
 
       {/* --- MODAL FULL SCREEN (Lógica Nueva + Estilo TikTok) --- */}
       <AnimatePresence>
-        {isModalOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black z-50 flex flex-col"
-          >
-            <div className="absolute top-4 right-4 z-[60]">
-              <motion.button onClick={closeModal} className="p-2 rounded-full bg-black/20 backdrop-blur-md text-white border border-white/10 hover:bg-white/10">
-                <X size={24} />
-              </motion.button>
-            </div>
-
-            <div
-              ref={modalContainerRef}
-              className="w-full h-full overflow-y-scroll snap-y snap-mandatory scroll-smooth no-scrollbar"
-              style={{ scrollbarWidth: 'none' }}
+        {
+          isModalOpen && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black z-50 flex flex-col"
             >
-              {localMedia.map((video, index) => (
-                <div
-                  key={video.id}
-                  id={`modal-video-${index}`}
-                  data-index={index}
-                  className="modal-video-item w-full h-full snap-center relative flex items-center justify-center bg-black"
-                >
-                  <video
-                    ref={(el) => (modalVideoRefs.current[index] = el)}
-                    src={video.video}
-                    className="w-full h-full object-cover md:object-contain max-h-screen"
-                    loop
-                    muted={isMuted}
-                    playsInline
-                    onClick={toggleMute}
-                    onTimeUpdate={(e) => handleVideoProgress(e, video.id.toString())}
-                  />
+              <div className="absolute top-4 right-4 z-[60]">
+                <motion.button onClick={closeModal} className="p-2 rounded-full bg-black/20 backdrop-blur-md text-white border border-white/10 hover:bg-white/10">
+                  <X size={24} />
+                </motion.button>
+              </div>
 
-                  {/* Overlays del Modal */}
-                  {!isMuted && activeModalIndex === index && (
-                    <div className="absolute bottom-8 left-4 flex h-16 items-end space-x-1 z-10 pointer-events-none">
-                      {generateAudioLevels().map((level, i) => (
-                        <motion.div key={i} className="w-1 bg-gradient-to-t from-[#7000ff] to-[#00f0ff] rounded-full" initial={{ height: "10%" }} animate={{ height: `${level}%` }} transition={{ duration: 0.2, delay: i * 0.05, repeat: Infinity, repeatType: "reverse" }} />
-                      ))}
+              <div
+                ref={modalContainerRef}
+                className="w-full h-full overflow-y-scroll snap-y snap-mandatory scroll-smooth no-scrollbar"
+                style={{ scrollbarWidth: 'none' }}
+              >
+                {localMedia.map((video, index) => (
+                  <div
+                    key={video.id}
+                    id={`modal-video-${index}`}
+                    data-index={index}
+                    className="modal-video-item w-full h-full snap-center relative flex items-center justify-center bg-black"
+                  >
+                    <video
+                      ref={(el) => (modalVideoRefs.current[index] = el)}
+                      src={video.video}
+                      className="w-full h-full object-cover md:object-contain max-h-screen"
+                      loop
+                      muted={isMuted}
+                      playsInline
+                      onClick={toggleMute}
+                      onTimeUpdate={(e) => handleVideoProgress(e, video.id.toString())}
+                    />
+
+                    {/* Overlays del Modal */}
+                    {!isMuted && activeModalIndex === index && (
+                      <div className="absolute bottom-8 left-4 flex h-16 items-end space-x-1 z-10 pointer-events-none">
+                        {generateAudioLevels().map((level, i) => (
+                          <motion.div key={i} className="w-1 bg-gradient-to-t from-[#7000ff] to-[#00f0ff] rounded-full" initial={{ height: "10%" }} animate={{ height: `${level}%` }} transition={{ duration: 0.2, delay: i * 0.05, repeat: Infinity, repeatType: "reverse" }} />
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="absolute bottom-20 left-4 z-10 max-w-[70%] text-left">
+                      <div className="flex items-center gap-2 mb-2">
+                        <h3 className="text-white font-bold text-lg drop-shadow-md">@{video.user_id?.username || user?.username}</h3>
+                        <div className="bg-[#00f0ff] p-0.5 rounded-full"><Sparkles size={8} className="text-black" /></div>
+                      </div>
+                      <p className="text-white/90 text-sm line-clamp-2 drop-shadow-md">
+                        {video.content || "Mira este increíble video... #viral #fyp"}
+                      </p>
                     </div>
-                  )}
 
-                  <div className="absolute bottom-20 left-4 z-10 max-w-[70%] text-left">
-                    <div className="flex items-center gap-2 mb-2">
-                      <h3 className="text-white font-bold text-lg drop-shadow-md">@{video.user_id?.username || user?.username}</h3>
-                      <div className="bg-[#00f0ff] p-0.5 rounded-full"><Sparkles size={8} className="text-black" /></div>
+                    {/* Barra de Progreso del Modal */}
+                    <div className="absolute bottom-0 left-0 right-0 z-20 px-0 h-1 hover:h-2 transition-all group">
+                      {(() => {
+                        const vidId = video.id.toString();
+                        const duration = videoDuration[vidId] || 1;
+                        const progress = videoProgress[vidId] || 0;
+                        const percentage = (progress / duration) * 100;
+                        return (
+                          <div className="w-full h-full bg-gray-600/30 cursor-pointer">
+                            <div className="h-full bg-gradient-to-r from-[#7000ff] to-[#00f0ff]" style={{ width: `${percentage}%` }} />
+                            <input
+                              type="range" min="0" max={duration} value={progress} step="0.1"
+                              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                              onClick={(e) => e.stopPropagation()}
+                              onChange={(e) => handleSeek(vidId, parseFloat(e.target.value))}
+                            />
+                          </div>
+                        )
+                      })()}
                     </div>
-                    <p className="text-white/90 text-sm line-clamp-2 drop-shadow-md">
-                      {video.content || "Mira este increíble video... #viral #fyp"}
-                    </p>
-                  </div>
 
-                  {/* Barra de Progreso del Modal */}
-                  <div className="absolute bottom-0 left-0 right-0 z-20 px-0 h-1 hover:h-2 transition-all group">
-                    {(() => {
-                      const vidId = video.id.toString();
-                      const duration = videoDuration[vidId] || 1;
-                      const progress = videoProgress[vidId] || 0;
-                      const percentage = (progress / duration) * 100;
-                      return (
-                        <div className="w-full h-full bg-gray-600/30 cursor-pointer">
-                          <div className="h-full bg-gradient-to-r from-[#7000ff] to-[#00f0ff]" style={{ width: `${percentage}%` }} />
-                          <input
-                            type="range" min="0" max={duration} value={progress} step="0.1"
-                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                            onClick={(e) => e.stopPropagation()}
-                            onChange={(e) => handleSeek(vidId, parseFloat(e.target.value))}
-                          />
+                    {/* Botones Laterales del Modal */}
+                    <div className="absolute right-2 bottom-20 md:right-4 md:bottom-24 flex flex-col items-center gap-6 z-20">
+                      <div className="relative mb-2">
+                        <div className="w-12 h-12 rounded-full border-2 border-white overflow-hidden">
+                          <img src={`${getBaseUrl()}${video.user_id?.profile_picture || user?.profile_picture}`} className="w-full h-full object-cover" alt="user" />
                         </div>
-                      )
-                    })()}
-                  </div>
-
-                  {/* Botones Laterales del Modal */}
-                  <div className="absolute right-2 bottom-20 md:right-4 md:bottom-24 flex flex-col items-center gap-6 z-20">
-                    <div className="relative mb-2">
-                      <div className="w-12 h-12 rounded-full border-2 border-white overflow-hidden">
-                        <img src={`${getBaseUrl()}${video.user_id?.profile_picture || user?.profile_picture}`} className="w-full h-full object-cover" alt="user" />
+                        <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-[#ff0050] rounded-full p-0.5 w-5 h-5 flex items-center justify-center text-white text-xs font-bold">+</div>
                       </div>
-                      <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-[#ff0050] rounded-full p-0.5 w-5 h-5 flex items-center justify-center text-white text-xs font-bold">+</div>
-                    </div>
 
-                    <div className="flex flex-col items-center gap-1">
-                      <motion.button
-                        whileTap={{ scale: 0.8 }}
-                        onClick={(e) => { e.stopPropagation(); handleLikeClick(video.id.toString()); }}
-                        className="bg-black/20 p-2 rounded-full backdrop-blur-sm relative"
-                      >
-                        <Heart className={`w-8 h-8 drop-shadow-lg ${video.liked ? "fill-[#ff0050] text-[#ff0050]" : "text-white"}`} />
-                        <AnimatePresence>
-                          {showLikeAnimation[video.id] && (
-                            [...Array(3)].map((_, i) => (
-                              <motion.div
-                                key={i}
-                                initial={{ opacity: 1, y: 0, scale: 0.5 }}
-                                animate={{ opacity: 0, y: -60 - Math.random() * 40, x: (Math.random() - 0.5) * 30, scale: 1.2 }}
-                                className="absolute top-0 left-0 pointer-events-none"
-                              >
-                                <Heart className="w-6 h-6 fill-[#ff0050] text-[#ff0050]" />
-                              </motion.div>
-                            ))
-                          )}
-                        </AnimatePresence>
-                      </motion.button>
-                      <span className="text-white text-xs font-bold drop-shadow-md">{video.likes_count || 0}</span>
-                    </div>
-
-                    <div className="flex flex-col items-center gap-1">
-                      <motion.button
-                        whileTap={{ scale: 0.8 }}
-                        onClick={(e) => { e.stopPropagation(); handleCommentClick(video); }}
-                        className="bg-black/20 p-2 rounded-full backdrop-blur-sm"
-                      >
-                        <MessageCircle className="w-8 h-8 text-white drop-shadow-lg" />
-                      </motion.button>
-                      <span className="text-white text-xs font-bold drop-shadow-md">{video.comments_count || 0}</span>
-                    </div>
-
-                    <div className="flex flex-col items-center gap-1">
-                      <div className="bg-black/20 p-2 rounded-full backdrop-blur-sm">
-                        <Eye className="w-8 h-8 text-white drop-shadow-lg" />
+                      <div className="flex flex-col items-center gap-1">
+                        <motion.button
+                          whileTap={{ scale: 0.8 }}
+                          onClick={(e) => { e.stopPropagation(); handleLikeClick(video.id.toString()); }}
+                          className="bg-black/20 p-2 rounded-full backdrop-blur-sm relative"
+                        >
+                          <Heart className={`w-8 h-8 drop-shadow-lg ${video.liked ? "fill-[#ff0050] text-[#ff0050]" : "text-white"}`} />
+                          <AnimatePresence>
+                            {showLikeAnimation[video.id] && (
+                              [...Array(3)].map((_, i) => (
+                                <motion.div
+                                  key={i}
+                                  initial={{ opacity: 1, y: 0, scale: 0.5 }}
+                                  animate={{ opacity: 0, y: -60 - Math.random() * 40, x: (Math.random() - 0.5) * 30, scale: 1.2 }}
+                                  className="absolute top-0 left-0 pointer-events-none"
+                                >
+                                  <Heart className="w-6 h-6 fill-[#ff0050] text-[#ff0050]" />
+                                </motion.div>
+                              ))
+                            )}
+                          </AnimatePresence>
+                        </motion.button>
+                        <span className="text-white text-xs font-bold drop-shadow-md">{video.likes_count || 0}</span>
                       </div>
-                      <span className="text-white text-xs font-bold drop-shadow-md">{video.view_acount || 0}</span>
-                    </div>
 
-                    <div className="flex flex-col items-center gap-1">
-                      <motion.button whileTap={{ scale: 0.8 }} className="bg-black/20 p-2 rounded-full backdrop-blur-sm">
-                        <Share2 className="w-8 h-8 text-white drop-shadow-lg" />
-                      </motion.button>
-                      <span className="text-white text-xs font-bold drop-shadow-md">Share</span>
+                      <div className="flex flex-col items-center gap-1">
+                        <motion.button
+                          whileTap={{ scale: 0.8 }}
+                          onClick={(e) => { e.stopPropagation(); handleCommentClick(video); }}
+                          className="bg-black/20 p-2 rounded-full backdrop-blur-sm"
+                        >
+                          <MessageCircle className="w-8 h-8 text-white drop-shadow-lg" />
+                        </motion.button>
+                        <span className="text-white text-xs font-bold drop-shadow-md">{video.comments_count || 0}</span>
+                      </div>
+
+                      <div className="flex flex-col items-center gap-1">
+                        <div className="bg-black/20 p-2 rounded-full backdrop-blur-sm">
+                          <Eye className="w-8 h-8 text-white drop-shadow-lg" />
+                        </div>
+                        <span className="text-white text-xs font-bold drop-shadow-md">{video.view_acount || 0}</span>
+                      </div>
+
+                      <div className="flex flex-col items-center gap-1">
+                        <motion.button whileTap={{ scale: 0.8 }} className="bg-black/20 p-2 rounded-full backdrop-blur-sm">
+                          <Share2 className="w-8 h-8 text-white drop-shadow-lg" />
+                        </motion.button>
+                        <span className="text-white text-xs font-bold drop-shadow-md">Share</span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+                ))}
+              </div>
+            </motion.div>
+          )
+        }
+      </AnimatePresence >
 
       {/* --- MODAL DE COMENTARIOS --- */}
       <AnimatePresence>
-        {showCommentsModal && (
-          <>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 z-[70]" onClick={() => setShowCommentsModal(false)} />
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 25, stiffness: 200 }}
-              className="fixed bottom-0 left-0 right-0 h-[60vh] z-[80] bg-[#0c1033] rounded-t-3xl flex flex-col border-t border-[#2a2f5e]"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between p-4 border-b border-[#2a2f5e]">
-                <h3 className="text-white font-bold">Comentarios</h3>
-                <button onClick={() => setShowCommentsModal(false)}><X className="text-gray-400" /></button>
-              </div>
-              <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                {(!comments || comments.length === 0) ? (
-                  <div className="h-full flex items-center justify-center text-gray-500">Sé el primero en comentar.</div>
-                ) : (
-                  comments.map((c, i) => (
-                    <div key={c.uuid || i} className="flex gap-3">
-                      <img src={`${getBaseUrl()}${c.user_id.profile_picture}`} className="w-8 h-8 rounded-full object-cover" alt="u" />
-                      <div>
-                        <div className="flex items-baseline gap-2">
-                          <span className="text-xs text-gray-400 font-bold">{c.user_id.username}</span>
-                          <span className="text-xs text-gray-500">{c.create_at}</span>
+        {
+          showCommentsModal && (
+            <>
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 z-[70]" onClick={() => setShowCommentsModal(false)} />
+              <motion.div
+                initial={{ y: "100%" }}
+                animate={{ y: 0 }}
+                exit={{ y: "100%" }}
+                transition={{ type: "spring", damping: 25, stiffness: 200 }}
+                className="fixed bottom-0 left-0 right-0 h-[60vh] z-[80] bg-[#0c1033] rounded-t-3xl flex flex-col border-t border-[#2a2f5e]"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between p-4 border-b border-[#2a2f5e]">
+                  <h3 className="text-white font-bold">Comentarios</h3>
+                  <button onClick={() => setShowCommentsModal(false)}><X className="text-gray-400" /></button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                  {(!comments || comments.length === 0) ? (
+                    <div className="h-full flex items-center justify-center text-gray-500">Sé el primero en comentar.</div>
+                  ) : (
+                    comments.map((c, i) => (
+                      <div key={c.uuid || i} className="flex gap-3">
+                        <div className={`relative p-[1.5px] rounded-full h-fit ${c.user_id.subscription_status?.is_active
+                          ? c.user_id.subscription_status.plan_name === 'VIP'
+                            ? 'bg-gradient-to-tr from-amber-300 via-amber-500 to-amber-200'
+                            : 'bg-gradient-to-tr from-blue-400 via-blue-600 to-blue-300'
+                          : 'bg-transparent'
+                          }`}>
+                          <img src={`${getBaseUrl()}${c.user_id.profile_picture}`} className="w-8 h-8 rounded-full object-cover border border-black" alt="u" />
                         </div>
-                        <p className="text-sm text-white mt-0.5">{c.content}</p>
+                        <div>
+                          <div className="flex items-baseline gap-2">
+                            <span className="text-xs text-gray-400 font-bold">{c.user_id.username}</span>
+                            <span className="text-xs text-gray-500">{c.create_at}</span>
+                          </div>
+                          <p className="text-sm text-white mt-0.5">{c.content}</p>
+                        </div>
                       </div>
-                    </div>
-                  ))
-                )}
-              </div>
-              <div className="p-3 border-t border-[#2a2f5e] bg-[#050718] flex items-center gap-2 pb-6 md:pb-3">
-                <img src={`${getBaseUrl()}${currentUser?.profile_picture}`} className="w-8 h-8 rounded-full" alt="me" />
-                <input
-                  className="flex-1 bg-[#1a1f3a] rounded-full px-4 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-[#00f0ff]"
-                  placeholder="Añadir comentario..."
-                  value={commentText}
-                  onChange={(e) => setCommentText(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handlePostComment()}
-                />
-                <button onClick={handlePostComment} className="text-[#00f0ff] font-bold text-sm px-2">Publicar</button>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+                    ))
+                  )}
+                </div>
+                <div className="p-3 border-t border-[#2a2f5e] bg-[#050718] flex items-center gap-2 pb-6 md:pb-3">
+                  <img src={`${getBaseUrl()}${currentUser?.profile_picture}`} className="w-8 h-8 rounded-full" alt="me" />
+                  <input
+                    className="flex-1 bg-[#1a1f3a] rounded-full px-4 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-[#00f0ff]"
+                    placeholder="Añadir comentario..."
+                    value={commentText}
+                    onChange={(e) => setCommentText(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handlePostComment()}
+                  />
+                  <button onClick={handlePostComment} className="text-[#00f0ff] font-bold text-sm px-2">Publicar</button>
+                </div>
+              </motion.div>
+            </>
+          )
+        }
+      </AnimatePresence >
+
+      <SubscriptionModal
+        isOpen={showSubscriptionModal}
+        onClose={() => setShowSubscriptionModal(false)}
+        plans={subscriptionPlans}
+        onSelectPlan={handleSelectPlan}
+      />
+
     </>
   )
 }
 
-const mapStateToProps = (state: RootState): ProfileSeccionProps => ({
+const mapStateToProps = (state: RootState): any => ({
   media_user: state.getMediaByUser.media_user,
   user: state.getUserDetail.user as UserInterface | null,
-  getUser,
-  getUserMedia,
+  subscriptionPlans: state.subscriptionReducer.plans,
+  
 })
 
-export default connect(mapStateToProps, { getUser, getUserMedia })(ProfileSeccion)
+export default connect(mapStateToProps, { getUser, getUserMedia, getSubscriptionPlans, createCheckoutSession, startCall })(ProfileSeccion)

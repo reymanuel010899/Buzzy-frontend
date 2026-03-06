@@ -33,7 +33,7 @@ export interface ChatListResponse {
 }
 
 // types/message.ts (o donde guardes tus interfaces)
-export type MessageType = 'text' | 'image' | 'video' | 'voice' | 'gif';  ;
+export type MessageType = 'text' | 'image' | 'video' | 'voice' | 'gif';;
 
 export interface Message {
   uuid: string;                    // ID único del mensaje (ej: "a1b2c3d4")
@@ -41,6 +41,7 @@ export interface Message {
   sender_username: string;         // @username del que envía (ej: "@ana_22")
   sender_avatar: string | null;     // URL completa de la foto de perfil o null
   created_at: string;              // Fecha ISO (ej: "2026-01-08T15:30:45.123456Z")
-  message_type: MessageType // Tipo de mensaje
+  message_type: MessageType; // Tipo de mensaje
+  reactions?: Record<string, string[]>;
 }
 

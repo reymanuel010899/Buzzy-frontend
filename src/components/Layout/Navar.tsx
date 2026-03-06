@@ -7,7 +7,7 @@ import typingSound from "../../assets/sounds/whatsapp-typing.mp3";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import {
   FileText, Image as ImageIcon, Camera, Headphones, User, BarChart2, Calendar, Smile,
-  Mic, Trash2, StopCircle, Search, Bell, X, Phone, Video, Plus, Send, Download, Play, Pause,
+  Mic, Trash2, StopCircle, Search, Bell, X, Phone, Video, Plus, Send, Download, Play, Pause, MessageCircleMore,
 } from "lucide-react"
 // import { Link } from "react-router-dom"
 import { motion, AnimatePresence, LayoutGroup } from "framer-motion"
@@ -61,9 +61,9 @@ const Navbar: React.FC = () => {
     { icon: <FileText className="text-indigo-400" />, label: "Documento", type: "file" },
     { icon: <Headphones className="text-orange-400" />, label: "Audio", type: "audio" },
     { icon: <User className="text-cyan-400" />, label: "Contacto", type: "contact" },
-    { icon: <BarChart2 className="text-yellow-400" />, label: "Encuesta", type: "poll" },
-    { icon: <Calendar className="text-rose-400" />, label: "Evento", type: "event" },
-    { icon: <Smile className="text-emerald-400" />, label: "Nuevo sticker", type: "sticker" },
+    { icon: <BarChart2 className="text-yellow-400" />, label: "Encuesta", type: "poll", enable: true },
+    { icon: <Calendar className="text-rose-400" />, label: "Evento", type: "event", enable: true },
+    { icon: <Smile className="text-emerald-400" />, label: "Nuevo sticker", type: "sticker", enable: true },
   ]
 
   const handleFileSelect = (type: string) => {
@@ -381,13 +381,23 @@ const Navbar: React.FC = () => {
       }
 
       case "reaction": {
-        // data.message_uuid, data.emoji, data.username
         if (data.message_uuid && data.emoji) {
           setReactionsMap(prev => {
             const msgReactions = { ...(prev[data.message_uuid] || {}) };
-            const users = [...(msgReactions[data.emoji] || [])];
-            if (!users.includes(data.username)) users.push(data.username);
-            msgReactions[data.emoji] = users;
+            let users = [...(msgReactions[data.emoji] || [])];
+
+            if (data.action === "removed") {
+              users = users.filter(u => u !== data.username);
+              if (users.length === 0) {
+                delete msgReactions[data.emoji];
+              } else {
+                msgReactions[data.emoji] = users;
+              }
+            } else {
+              if (!users.includes(data.username)) users.push(data.username);
+              msgReactions[data.emoji] = users;
+            }
+
             return { ...prev, [data.message_uuid]: msgReactions };
           });
         }
@@ -537,12 +547,22 @@ const Navbar: React.FC = () => {
       })
     )
 
-    // Optimistic update: add reaction immediately for the sender
+    console.log("****")
+    // Optimistic update for better UX
     setReactionsMap(prev => {
       const msgReactions = { ...(prev[messageUuid] || {}) };
-      const users = [...(msgReactions[emoji] || [])];
-      if (!users.includes(user.username)) users.push(user.username);
-      msgReactions[emoji] = users;
+      let users = [...(msgReactions[emoji] || [])];
+
+      if (users.includes(user.username)) {
+        // Optimistic remove
+        users = users.filter(u => u !== user.username);
+        if (users.length === 0) delete msgReactions[emoji];
+        else msgReactions[emoji] = users;
+      } else {
+        // Optimistic add
+        users.push(user.username);
+        msgReactions[emoji] = users;
+      }
       return { ...prev, [messageUuid]: msgReactions };
     });
 
@@ -1046,12 +1066,44 @@ const Navbar: React.FC = () => {
                                     src={msg.file?.startsWith('http') || msg.file?.startsWith('blob:') ? msg.file : `${getBaseUrl()}media/${msg.file}`}
                                     isMe={isMe}
                                   />
-                                  <p className={`text-[10px] mt-1 self-end ${isMe ? "text-purple-200/70" : "text-gray-500"}`}>
-                                    {new Date(msg.created_at).toLocaleTimeString("es-DO", {
-                                      hour: "2-digit",
-                                      minute: "2-digit",
-                                    })}
-                                  </p>
+                                  <div className="flex items-center justify-between w-full mt-1 gap-4">
+                                    <p className={`text-[10px] ${isMe ? "text-purple-200/70" : "text-gray-500"}`}>
+                                      {new Date(msg.created_at).toLocaleTimeString("es-DO", {
+                                        hour: "2-digit",
+                                        minute: "2-digit",
+                                      })}
+                                    </p>
+
+                                    {/* Reactions for voice messages */}
+                                    {reactionsMap[msg.uuid] && Object.keys(reactionsMap[msg.uuid]).length > 0 && (
+                                      <div className="flex items-center gap-1 z-10">
+                                        {Object.entries(reactionsMap[msg.uuid]).map(([emoji, users]) => {
+                                          const iMine = users.includes(user.username);
+                                          return (
+                                            <motion.button
+                                              key={emoji}
+                                              initial={{ scale: 0, opacity: 0 }}
+                                              animate={{ scale: 1, opacity: 1 }}
+                                              whileHover={{ scale: 1.25 }}
+                                              whileTap={{ scale: 0.9 }}
+                                              className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] shadow-lg border transition-all cursor-pointer
+                                                ${iMine
+                                                  ? 'bg-purple-600/30 border-purple-500/40 text-white'
+                                                  : 'bg-[#1e1e35]/90 border-white/10 text-gray-200'
+                                                }`}
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                sendReaction(msg.uuid, emoji);
+                                              }}
+                                            >
+                                              <span>{emoji}</span>
+                                              {users.length > 1 && <span className="font-semibold ml-0.5">{users.length}</span>}
+                                            </motion.button>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+                                  </div>
                                 </div>
                               ) : msg.message_type === "document" || msg.message_type === "file" ? (
                                 <div className="flex items-center gap-3 py-2 px-1 min-w-[200px] bg-gray-900/40 rounded-xl border border-white/5 hover:bg-gray-900/60 transition-all cursor-pointer">
@@ -1119,59 +1171,52 @@ const Navbar: React.FC = () => {
                               )}
 
                               {msg.message_type !== 'image' && msg.message_type !== 'video' && msg.message_type !== 'voice' && (
-                                <p
-                                  className={`text-xs mt-2 ${isMe ? "text-purple-200" : "text-gray-500"
-                                    }`}
+                                <div
+                                  className="flex items-center justify-between w-full mt-2 gap-4"
                                 >
-                                  {new Date(msg.created_at).toLocaleTimeString("es-DO", {
-                                    hour: "2-digit",
-                                    minute: "2-digit",
-                                  })}
-                                </p>
+                                  <p
+                                    className={`text-xs ${isMe ? "text-purple-200" : "text-gray-500"
+                                      }`}
+                                  >
+                                    {new Date(msg.created_at).toLocaleTimeString("es-DO", {
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    })}
+                                  </p>
+
+                                  {/* ── Reaction pills (inside) ── */}
+                                  {reactionsMap[msg.uuid] && Object.keys(reactionsMap[msg.uuid]).length > 0 && (
+                                    <div className="flex items-center gap-1 z-10">
+                                      {Object.entries(reactionsMap[msg.uuid]).map(([emoji, users]) => {
+                                        const iMine = users.includes(user.username);
+                                        return (
+                                          <motion.button
+                                            key={emoji}
+                                            initial={{ scale: 0, opacity: 0 }}
+                                            animate={{ scale: 1, opacity: 1 }}
+                                            whileHover={{ scale: 1.25 }}
+                                            whileTap={{ scale: 0.9 }}
+                                            title={users.join(', ')}
+                                            className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] shadow-lg border transition-all cursor-pointer
+                                              ${iMine
+                                                ? 'bg-purple-600/30 border-purple-500/40 text-white'
+                                                : 'bg-[#1e1e35]/90 border-white/10 text-gray-200'
+                                              }`}
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              sendReaction(msg.uuid, emoji);
+                                            }}
+                                          >
+                                            <span>{emoji}</span>
+                                            {users.length > 1 && <span className="font-semibold ml-0.5">{users.length}</span>}
+                                          </motion.button>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
                               )}
                             </div>
-
-                            {/* ── Reaction pills ── */}
-                            {reactionsMap[msg.uuid] && Object.keys(reactionsMap[msg.uuid]).length > 0 && (
-                              <div className={`absolute -bottom-5 ${isMe ? 'right-2' : 'left-2'} flex items-center gap-1 z-10`}>
-                                {Object.entries(reactionsMap[msg.uuid]).map(([emoji, users]) => {
-                                  const iMine = users.includes(user.username);
-                                  return (
-                                    <motion.button
-                                      key={emoji}
-                                      initial={{ scale: 0, opacity: 0 }}
-                                      animate={{ scale: 1, opacity: 1 }}
-                                      whileHover={{ scale: 1.25 }}
-                                      whileTap={{ scale: 0.9 }}
-                                      title={users.join(', ')}
-                                      className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs shadow-lg border transition-all cursor-pointer
-                                        ${iMine
-                                          ? 'bg-purple-600/30 border-purple-500/40 text-white'
-                                          : 'bg-[#1e1e35]/90 border-white/10 text-gray-200'
-                                        }`}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        if (iMine) {
-                                          // toggle off own reaction
-                                          setReactionsMap(prev => {
-                                            const msgR = { ...(prev[msg.uuid] || {}) };
-                                            const updated = (msgR[emoji] || []).filter(u => u !== user.username);
-                                            if (updated.length === 0) delete msgR[emoji];
-                                            else msgR[emoji] = updated;
-                                            return { ...prev, [msg.uuid]: msgR };
-                                          });
-                                        } else {
-                                          sendReaction(msg.uuid, emoji);
-                                        }
-                                      }}
-                                    >
-                                      <span>{emoji}</span>
-                                      {users.length > 1 && <span className="font-semibold ml-0.5">{users.length}</span>}
-                                    </motion.button>
-                                  );
-                                })}
-                              </div>
-                            )}
 
                             {/* Emoji trigger (derecha - yo) */}
                             {isMe && clickedMessage === msg.uuid && (
@@ -1335,15 +1380,16 @@ const Navbar: React.FC = () => {
                             <motion.button
                               key={idx}
                               type="button"
-                              whileHover={{ scale: 1.05, bg: "rgba(255,255,255,0.05)" }}
-                              whileTap={{ scale: 0.95 }}
-                              onClick={() => handleFileSelect(option.type)}
-                              className="flex flex-col items-center justify-center p-3 rounded-xl hover:bg-white/5 transition-colors gap-2"
+                              whileHover={option.enable ? {} : { scale: 1.05 }}
+                              whileTap={option.enable ? {} : { scale: 0.95 }}
+                              onClick={() => !option.enable && handleFileSelect(option.type)}
+                              className={`flex flex-col items-center justify-center p-3 rounded-xl transition-colors gap-2 ${option.enable ? 'cursor-not-allowed' : 'hover:bg-white/5'}`}
+                              disabled={option.enable}
                             >
-                              <div className="w-10 h-10 rounded-full bg-gray-800/50 flex items-center justify-center shadow-inner">
+                              <div className={`w-10 h-10 rounded-full flex items-center justify-center shadow-inner ${option.enable ? 'bg-gray-600' : 'bg-gray-800/50'}`}>
                                 {option.icon}
                               </div>
-                              <span className="text-[10px] text-gray-400 font-medium">{option.label}</span>
+                              <span className={`text-[10px] font-medium ${option.enable ? 'text-gray-500' : 'text-gray-400'}`}>{option.label}</span>
                             </motion.button>
                           ))}
                         </motion.div>
@@ -1358,7 +1404,7 @@ const Navbar: React.FC = () => {
                       accept="image/*,video/*"
                     />
 
-                    <div className="flex gap-3 items-center">
+                    <div className="flex gap-1 items-center">
                       {!isRecording && (
                         <motion.button
                           type="button"
@@ -1399,7 +1445,7 @@ const Navbar: React.FC = () => {
                           placeholder="Escribe un mensaje..."
                           value={messageText}
                           onChange={handleTyping}
-                          className="flex-1 bg-gray-800/60 backdrop-blur-md border border-gray-700/50 rounded-full px-5 py-3.5 text-white placeholder-gray-400 focus:outline-none focus:border-purple-500 transition-all"
+                          className="flex-1 bg-gray-800/60 backdrop-blur-md border border-gray-700/50 rounded-full px-3 py-3 text-white placeholder-gray-400 focus:outline-none focus:border-purple-500 transition-all"
                         />
                       )}
 

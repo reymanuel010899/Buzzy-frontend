@@ -1,6 +1,6 @@
 // import { rejects } from 'assert';
 import { apiClient } from '../../client/api-client';
-import { FAILED_SEND_GIFT_STORY, SUCCEES_SEND_GIFT_STORY } from '../../type';
+import { FAILED_SEND_GIFT_STORY, SUCCEES_SEND_GIFT_STORY, SUCCEES_GET_WALLET } from '../../type';
 
 
 type SendGiftBody = {
@@ -16,6 +16,15 @@ export const sendGift = (body: SendGiftBody) => async (dispatch: any) => {
         type: SUCCEES_SEND_GIFT_STORY,
         payload: response.data,
       });
+
+      // Update wallet balance if returned by the backend
+      if (response.data.wallet) {
+        dispatch({
+          type: SUCCEES_GET_WALLET,
+          payload: response.data.wallet
+        });
+      }
+
       return response.data
     }
 

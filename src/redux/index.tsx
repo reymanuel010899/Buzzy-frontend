@@ -28,6 +28,7 @@ import chatMessagesReducer from "./reducers/message/chatMeesage";
 import sendMessageReducer from "./reducers/message/sendMessage";
 import { searchReducer } from "./reducers/Search";
 import socialReducer from "./reducers/message/social";
+import subscriptionReducer from "./reducers/subscriptionReducer";
 
 export default combineReducers({
     register,
@@ -59,4 +60,5 @@ export default combineReducers({
     sendMessageReducer,
     searchReducer,
     socialReducer,
+    subscriptionReducer,
 })

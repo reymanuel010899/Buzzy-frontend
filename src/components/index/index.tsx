@@ -29,6 +29,12 @@ import { getBaseUrl } from "../../redux/client/api-client";
 import { useTypingUsers } from "../../context/useTyping";
 import typingSound from "../../assets/sounds/whatsapp-typing.mp3";
 import { useUnreadMessages } from "../../context/UnreadAcount";
+import VipGiftExperience from "../giftModal/modalGift";
+import TokenShopModal from "../giftModal/TokenShopModal";
+import InsufficientFundsModal from "../giftModal/InsufficientFundsModal";
+import TokenPurchaseSuccessModal from "../giftModal/TokenPurchaseSuccessModal";
+import { buyTokens } from "../../redux/actions/buyTokens";
+import { getWallet } from "../../redux/actions/getWallet";
 
 const WS_URL = "ws://localhost:8001/ws";
 interface StreamingUIProps {
@@ -40,6 +46,10 @@ export interface CommentData {
   user_id: {
     username: string;
     profile_picture: string;
+    subscription_status?: {
+      plan_name: string;
+      is_active: boolean;
+    };
   };
   content: string;
   create_at: string;
@@ -54,6 +64,13 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   // const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const { selectedChat } = useChat();
   const oneActiveGift = useSelector((state: any) => state.GetOneactiveGiftReducer?.gift);
+  const getWalletReducer = useSelector((state: any) => state.getWalletReducer);
+  const walletTokens = getWalletReducer?.tokens || 0;
+  const walletBalance = parseFloat(getWalletReducer?.balance || '0');
+  const [showTokenShopModal, setShowTokenShopModal] = useState(false);
+  const [showInsufficientFundsModal, setShowInsufficientFundsModal] = useState(false);
+  const [showTokenPurchaseSuccessModal, setShowTokenPurchaseSuccessModal] = useState(false);
+  const [purchasedTokenAmount, setPurchasedTokenAmount] = useState(0);
   const [activeVideo, setActiveVideo] = useState<number | null>(null)
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([])
   const [isMuted, setIsMuted] = useState(true)
@@ -143,6 +160,8 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   useEffect(() => {
     sendAudioRef.current = new Audio(sendMessageSound);
     typingAudioRef.current = new Audio(typingSound);
+    // Fetch wallet on mount so balance/tokens are always up to date
+    dispatch(getWallet() as any);
   }, []);
 
   const handleToggleDescription = (videoId: string | number) => {
@@ -1176,6 +1195,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       handleSendGift(giftType, amount);
     }
   }, [activeGifts, dispatch]);
+  let countSendGift = useRef(false)
   const handleSendGift = async (giftTypeOrGift: string | GiftI, amount?: number) => {
     let type: string | null = null;
     let giftId: string | null = null
@@ -1195,20 +1215,41 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     }
     console.log(sound)
     console.log(giftId)
+
+    if (cost !== null && cost !== undefined && walletTokens < Number(cost)) {
+      setShowFullGiftMenu(false);
+      setShowGiftMenu(false);
+      setShowTokenShopModal(true);
+      return;
+    }
+
     if (!currentStoryUuid) return;
     try {
+      if (countSendGift.current == true) {
+        setShowFullGiftMenu(false);
+        return
+      }
+      
+      countSendGift.current = true
       sendGift({ story_uuid: currentStoryUuid, gift_type: type })(dispatch).then(() => {
-        if (cost > 20) {
+        if (cost !== null && cost > 20) {
           setStoryPremiumStates(prev => ({ ...prev, [currentStoryUuid]: true }));
         }
-      }).catch(() => { })
+      }).catch((err: any) => {
+        console.error("Error sending gift:", err);
+        if (err?.response?.data?.insufficient_tokens) {
+          setShowFullGiftMenu(false);
+          setShowGiftMenu(false);
+          setShowTokenShopModal(true);
+        }
+      });
       // if (sound) sound.play();
       // El giftAnimation se establecerá cuando se reciba la respuesta del WebSocket
       // No establecer aquí porque no tenemos el video del regalo todavía
       // If high value (e.g., cost > 20), update premium
-      setShowFullGiftMenu(false);
+      
     } catch (error) {
-      console.error("Error sending gift:", error);
+      console.error("Error dispatching gift:", error);
     }
   };
   // Preload sounds
@@ -1300,7 +1341,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 animate={{ opacity: 1, x: 0 }}
                 className="flex flex-col items-center gap-1.5 min-w-[64px] cursor-pointer snap-start relative group"
                 onClick={handleAddHistory}
-                >
+              >
                 <div className="relative">
                   <div className={`relative h-[60px] w-[60px] rounded-full p-[2px] bg-[#0c1033] ${isUploadingStory ? 'animate-pulse' : ''}`}>
                     <img
@@ -1675,7 +1716,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                                   handleFollowClick(Number(data.user_id.id), data.user_id.id.toString(), "create");
                                 }}
                               >
-                                Suscribirse
+                                Seguir
                               </motion.button>
                             ) : (
                               <motion.button
@@ -1692,7 +1733,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                                   <path d="M4 12.6111L8.92308 17.5L20 6.5" stroke="#00f0ff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                                 </svg>
-                                Suscrito
+                                Siguiendo
                               </motion.button>
                             )}
                           </AnimatePresence>
@@ -2170,102 +2211,54 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 </>
               )}
             </AnimatePresence>
-            {/* Full Gift Menu Sub-Modal - 12 Gifts in 3x4 Grid, Floating Above Main */}
+            {/* Full Gift Menu Sub-Modal - Replacement with VipGiftExperience */}
+            {/* Token Shop Modal */}
+            <TokenShopModal
+              isOpen={showTokenShopModal}
+              onClose={() => setShowTokenShopModal(false)}
+              onPurchase={(tokens, cost) => {
+                // Client-side balance check first
+                if (walletBalance < cost) {
+                  setShowTokenShopModal(false);
+                  setShowInsufficientFundsModal(true);
+                  return;
+                }
+                buyTokens(tokens, cost)(dispatch)
+                  .then(() => {
+                    setShowTokenShopModal(false);
+                    setPurchasedTokenAmount(tokens);
+                    setShowTokenPurchaseSuccessModal(true);
+                  })
+                  .catch((err: any) => {
+                    console.error("Error purchasing tokens", err);
+                    setShowTokenShopModal(false);
+                    setShowInsufficientFundsModal(true);
+                  });
+              }}
+            />
+            {/* Insufficient Funds Modal */}
+            <InsufficientFundsModal
+              isOpen={showInsufficientFundsModal}
+              onClose={() => setShowInsufficientFundsModal(false)}
+            />
+            {/* Token Purchase Success Modal */}
+            <TokenPurchaseSuccessModal
+              isOpen={showTokenPurchaseSuccessModal}
+              onClose={() => setShowTokenPurchaseSuccessModal(false)}
+              purchasedAmount={purchasedTokenAmount}
+              newTotalBalance={walletTokens + purchasedTokenAmount}
+            />
             <AnimatePresence>
               {showFullGiftMenu && (
-                <>
-                  <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 0.6 }}
-                    exit={{ opacity: 0 }}
-                    className="fixed inset-0 bg-black z-70"
-                    onClick={() => setShowFullGiftMenu(false)}
-                  />
-                  <motion.div
-                    initial={{ y: 50, opacity: 0, scale: 0.95 }}
-                    animate={{ y: 0, opacity: 1, scale: 1 }}
-                    exit={{ y: 50, opacity: 0, scale: 0.95 }}
-                    transition={{ type: "spring", damping: 25, stiffness: 400 }}
-                    className="fixed bottom-60 left-1/2 transform -translate-x-1/2 z-80 bg-white/5 backdrop-blur-2xl rounded-3xl p-6 border border-white/30 w-[90vw] max-w-4xl  max-h-[70vh] overflow-hidden shadow-2xl shadow-[#ff0099]/30"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="font-bold text-white text-xl">✨ Regalos Especiales</h3>
-                      <motion.button
-                        whileTap={{ scale: 0.9 }}
-                        onClick={() => setShowFullGiftMenu(false)}
-                        className="text-white/70 hover:text-white transition-colors"
-                      >
-                        <X size={20} />
-                      </motion.button>
-                    </div>
-                    <div className="grid grid-cols-4 gap-4 max-h-[50vh] overflow-y-auto custom-scrollbar pb-4">
-                      {giftsLoading ? (
-                        <div className="col-span-4 flex items-center justify-center py-12">
-                          <Loader2 className="w-10 h-10 animate-spin text-white" />
-                        </div>
-                      ) : gifts.length === 0 ? (
-                        <p className="col-span-4 text-center text-gray-400 py-8">No hay regalos disponibles</p>
-                      ) : (
-                        gifts.map((gift: GiftI) => (
-                          <motion.button
-                            key={gift.slug}
-                            whileHover={{ scale: 1.08, y: -8 }}
-                            whileTap={{ scale: 0.95 }}
-                            onClick={() => handleSendGift(gift)}
-                            className="relative group rounded-2xl overflow-hidden bg-black/40 backdrop-blur-sm border border-white/10 shadow-2xl transition-all duration-300"
-                          >
-                            {/* Video Preview del Regalo */}
-                            <div className="relative aspect-square w-full">
-                              <video
-                                src={`${getBaseUrl()}${gift.video}`}
-                                autoPlay
-                                loop
-                                muted
-                                playsInline
-                                className="w-full h-full object-cover"
-                              // Opcional: efecto de brillo al hacer hover
-                              />
-                              {/* Overlay degradado para mejor legibilidad del texto */}
-                              <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
-
-                              {/* Brillo sutil al hacer hover */}
-                              <motion.div
-                                className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-                                initial={false}
-                              />
-                            </div>
-
-                            <div className="absolute bottom-0 left-0 right-0 p-3 text-center">
-                              {/* <p className="text-white font-bold text-sm drop-shadow-lg">
-            {gift.name}
-          </p> */}
-                              <p className="text-yellow-400 text-xs font-bold drop-shadow-md mt-1">
-                                {gift?.cost} tokens
-                              </p>
-                            </div>
-
-                            {/* Efecto de pulso en el borde al hover */}
-                            <motion.div
-                              className="absolute inset-0 rounded-2xl border-4 border-transparent group-hover:border-yellow-400/60 pointer-events-none"
-                              initial={false}
-                              animate={{
-                                boxShadow: [
-                                  "0 0 0 0 rgba(250, 204, 21, 0)",
-                                  "0 0 20px 4px rgba(250, 204, 21, 0.6)",
-                                  "0 0 0 0 rgba(250, 204, 21, 0)"
-                                ]
-                              }}
-                              transition={{ duration: 1.5, repeat: Infinity }}
-                            />
-                          </motion.button>
-                        ))
-                      )}
-                    </div>
-                  </motion.div>
-                </>
+                <VipGiftExperience
+                  onClose={() => setShowFullGiftMenu(false)}
+                  onSendGift={handleSendGift}
+                  gifts={Array.isArray(_fullGifts) ? _fullGifts : []}
+                  walletTokens={walletTokens}
+                />
               )}
             </AnimatePresence>
+
             {/* User Switch Overlay Animation */}
             <AnimatePresence>
               {isSwitchingUser && incomingUser && (
@@ -2319,247 +2312,251 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 </motion.div>
               )}
             </AnimatePresence>
-          </motion.div>
+          </motion.div >
         )}
-      </AnimatePresence>
+      </AnimatePresence >
       {/* Viewers Modal - Surprise: Flip-in avatars with holographic effect */}
       <AnimatePresence>
-        {showViewersModal && isOwner && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/70 z-60"
-              onClick={handleCloseViewers}
-            />
-            <motion.div
-              initial={{ y: "100%", scale: 0.9 }}
-              animate={{ y: 0, scale: 1 }}
-              exit={{ y: "100%", scale: 0.9 }}
-              transition={{ type: "spring", damping: 30, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 h-[50vh] z-70 bg-black backdrop-blur-xl rounded-t-3xl overflow-hidden border-t border-white/10"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex justify-center pt-4 pb-4 relative">
-                <div className="w-12 h-1.5 bg-gradient-to-r from-[#00f0ff] to-[#7000ff] rounded-full cursor-pointer" onClick={handleCloseViewers} />
-                {/* Holographic eye scan effect on top */}
-                <motion.div
-                  className="absolute inset-0"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: [0, 1, 0] }}
-                  transition={{ duration: 2, repeat: Infinity, repeatDelay: 3 }}
-                >
-                  <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-transparent via-[#00f0ff] to-transparent animate-scan" />
-                </motion.div>
-              </div>
-              <div className="px-6 pb-6 space-y-4  max-h-full custom-scrollbar">
-                <h2 className="text-center font-bold text-white text-lg">
-                  👁️ View by {realViewers.length} peaple{realViewers.length > 1 ? 's' : ''}
-                </h2>
-                <AnimatePresence>
-                  {realViewers.map((viewer, i) => (
-                    <motion.div
-                      key={viewer.id || i}
-                      onClick={() => showGiftRecived(viewer)}
-                      initial={{
-                        opacity: 0,
-                        rotateY: 180,
-                        y: 100,
-                        x: Math.sin(i) * 50 // Staggered entry from sides
-                      }}
-                      animate={{
-                        opacity: 1,
-                        rotateY: 0,
-                        y: 0,
-                        x: 0
-                      }}
-                      exit={{ opacity: 0, rotateY: -180, y: 100 }}
-                      transition={{
-                        delay: i * 0.1,
-                        duration: 0.6,
-                        type: "spring",
-                        stiffness: 200,
-                        damping: 15
-                      }}
-                      className={`flex items-center bg-white/5 backdrop-blur-md rounded-2xl border ${giftsSentByThisViewer(viewer) && giftsSentByThisViewer(viewer).length > 0 ? "border-pink-500" : " border-white/10"} shadow-2xl shadow-[#00f0ff]/10 hover:shadow-[#00f0ff]/20 transition-all pr-4 py-2 gap-2 pl-1`}
-                      whileHover={{
-                        scale: 1.02,
-                        rotateY: 5,
-                        boxShadow: "0 10px 30px rgba(0, 240, 255, 0.3)"
-                      }}
-
-                    >
-                      <motion.div
-                        className="relative w-12 h-12 rounded-full overflow-hidden"
-                        whileHover={{ scale: 1.1 }}
-                      >
-                        <img
-                          src={viewer.profile_picture?.startsWith('http') ? viewer.profile_picture : `${getBaseUrl()}${viewer.profile_picture}`}
-                          className="w-full h-full object-cover"
-                          alt={viewer.username}
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).src = `https://picsum.photos/48/48?random=${viewer.id || i}`;
-                          }}
-                        />
-                        {/* Holographic ring around avatar */}
-                        <motion.div
-                          className="absolute inset-0 rounded-full border-2 border-[#00f0ff]/30"
-                          animate={{
-                            scale: [1, 1.2, 1],
-                            borderColor: ["#00f0ff", "#7000ff", "#00f0ff"]
-                          }}
-                          transition={{ duration: 2, repeat: Infinity }}
-                        />
-                      </motion.div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-white truncate">@{viewer.username}</p>
-                        <p className="text-xs text-gray-400">{viewer.viewed_at || 'Recientemente'}</p>
-                      </div>
-                      {/* Surprise: Mini sparkles on hover */}
-                      <motion.div
-                        className="flex items-center justify-center w-8 h-8 rounded-full"
-                        whileHover={{
-                          scale: 1.2,
-                          backgroundColor: "#00f0ff"
-                        }}
-                      >
-                        <div className="flex items-center gap-3 pr-15">
-                          {viewer.user_liked && (
-                            <motion.div
-                              initial={{ scale: 0 }}
-                              animate={{
-                                scale: [1, 1.3, 1],
-                              }}
-                              transition={{
-                                duration: 1.2,
-                                repeat: Infinity,
-                                repeatType: "loop",
-                                ease: "easeInOut"
-                              }}
-                              className="text-red-500  drop-shadow-lg"
-                            >
-                              ❤️
-                            </motion.div>
-                          )}
-
-                          {(() => {
-                            // ¿Este viewer envió regalos?
-
-
-                            const hasGifts = giftsSentByThisViewer(viewer) && giftsSentByThisViewer(viewer).length > 0;
-                            const giftCount = giftsSentByThisViewer(viewer)?.length || 0;
-                            console.log(giftsSentByThisViewer(viewer), viewer, "9999999999999")
-                            return hasGifts ? (
-                              <div className="relative">
-                                <motion.div
-                                  className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-pink-600/40 to-purple-600/40 
-                                          rounded-full border border-pink-500/60 backdrop-blur-md shadow-lg shadow-pink-500/30"
-                                  whileHover={{ scale: 1.08 }}
-                                  whileTap={{ scale: 0.95 }}
-                                >
-                                  <svg width="18" height="18" viewBox="0 0 120 120" fill="none" className="drop-shadow">
-                                    <path d="M94 58H26V104H94V58Z" fill="#FF3366" />
-                                    <path d="M71.1842 58H48.5921V104H71.1842V58Z" fill="#FF99AA" />
-                                    <path d="M100 42.665H20V60H100V42.665Z" fill="#FF3366" />
-                                    <path d="M76.9491 42.665H42.8248V60H76.9491V42.665Z" fill="#FF99AA" />
-                                    <path d="M60 31C58 29 55 24 52 21 47 16 40 16 36 19 32 22 31 28 34 35 37 42 45 43 52 43 58 43 65 42 72 42L60 31ZM48 37C43 36 38 35 36 33 35 32 35 31 35 31 35 29 37 26 41 25 45 24 51 28 56 34 57 36 58 37 58 37 55 37 51 37 48 37ZM72 34C77 28 83 24 87 25 91 26 93 29 93 31 93 31 93 32 92 33 90 35 85 36 80 37 74 37 68 37 65 37 65 37 65 36 66 35 68 34ZM60 43C66 43 72 43 78 43 84 43 90 42 94 39 98 36 99 31 95 25 91 19 86 17 81 18 76 19 71 22 68 27 66 31 65 33 60 31" fill="url(#grad)" />
-                                    <defs>
-                                      <linearGradient id="grad" x1="60" y1="18" x2="60" y2="43">
-                                        <stop stopColor="#FF66CC" />
-                                        <stop offset="1" stopColor="#FF3366" />
-                                      </linearGradient>
-                                    </defs>
-                                  </svg>
-                                  <span className="text-pink-300 font-bold text-sm">+{giftCount}</span>
-                                </motion.div>
-
-                                {/* Puntito rosa parpadeante */}
-                                <div className="absolute -top-1 -right-1 w-3 h-3 bg-pink-500 rounded-full animate-ping" />
-                                <div className="absolute -top-1 -right-1 w-3 h-3 bg-pink-500 rounded-full" />
-                              </div>
-                            ) : null;
-                          })()}
-
-                          {/* Corazón solo si dio like */}
-
-                        </div>
-                      </motion.div>
-                    </motion.div>
-                  ))}
-                </AnimatePresence>
-                {realViewers.length === 0 && (
-                  <motion.p
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="text-center text-gray-400 italic"
+        {
+          showViewersModal && isOwner && (
+            <>
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 bg-black/70 z-60"
+                onClick={handleCloseViewers}
+              />
+              <motion.div
+                initial={{ y: "100%", scale: 0.9 }}
+                animate={{ y: 0, scale: 1 }}
+                exit={{ y: "100%", scale: 0.9 }}
+                transition={{ type: "spring", damping: 30, stiffness: 300 }}
+                className="fixed bottom-0 left-0 right-0 h-[50vh] z-70 bg-black backdrop-blur-xl rounded-t-3xl overflow-hidden border-t border-white/10"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex justify-center pt-4 pb-4 relative">
+                  <div className="w-12 h-1.5 bg-gradient-to-r from-[#00f0ff] to-[#7000ff] rounded-full cursor-pointer" onClick={handleCloseViewers} />
+                  {/* Holographic eye scan effect on top */}
+                  <motion.div
+                    className="absolute inset-0"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: [0, 1, 0] }}
+                    transition={{ duration: 2, repeat: Infinity, repeatDelay: 3 }}
                   >
-                    Nadie ha visto esta historia aún...
-                  </motion.p>
-                )}
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+                    <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-transparent via-[#00f0ff] to-transparent animate-scan" />
+                  </motion.div>
+                </div>
+                <div className="px-6 pb-6 space-y-4  max-h-full custom-scrollbar">
+                  <h2 className="text-center font-bold text-white text-lg">
+                    👁️ View by {realViewers.length} peaple{realViewers.length > 1 ? 's' : ''}
+                  </h2>
+                  <AnimatePresence>
+                    {realViewers.map((viewer, i) => (
+                      <motion.div
+                        key={viewer.id || i}
+                        onClick={() => showGiftRecived(viewer)}
+                        initial={{
+                          opacity: 0,
+                          rotateY: 180,
+                          y: 100,
+                          x: Math.sin(i) * 50 // Staggered entry from sides
+                        }}
+                        animate={{
+                          opacity: 1,
+                          rotateY: 0,
+                          y: 0,
+                          x: 0
+                        }}
+                        exit={{ opacity: 0, rotateY: -180, y: 100 }}
+                        transition={{
+                          delay: i * 0.1,
+                          duration: 0.6,
+                          type: "spring",
+                          stiffness: 200,
+                          damping: 15
+                        }}
+                        className={`flex items-center bg-white/5 backdrop-blur-md rounded-2xl border ${giftsSentByThisViewer(viewer) && giftsSentByThisViewer(viewer).length > 0 ? "border-pink-500" : " border-white/10"} shadow-2xl shadow-[#00f0ff]/10 hover:shadow-[#00f0ff]/20 transition-all pr-4 py-2 gap-2 pl-1`}
+                        whileHover={{
+                          scale: 1.02,
+                          rotateY: 5,
+                          boxShadow: "0 10px 30px rgba(0, 240, 255, 0.3)"
+                        }}
+
+                      >
+                        <motion.div
+                          className="relative w-12 h-12 rounded-full overflow-hidden"
+                          whileHover={{ scale: 1.1 }}
+                        >
+                          <img
+                            src={viewer.profile_picture?.startsWith('http') ? viewer.profile_picture : `${getBaseUrl()}${viewer.profile_picture}`}
+                            className="w-full h-full object-cover"
+                            alt={viewer.username}
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = `https://picsum.photos/48/48?random=${viewer.id || i}`;
+                            }}
+                          />
+                          {/* Holographic ring around avatar */}
+                          <motion.div
+                            className="absolute inset-0 rounded-full border-2 border-[#00f0ff]/30"
+                            animate={{
+                              scale: [1, 1.2, 1],
+                              borderColor: ["#00f0ff", "#7000ff", "#00f0ff"]
+                            }}
+                            transition={{ duration: 2, repeat: Infinity }}
+                          />
+                        </motion.div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-white truncate">@{viewer.username}</p>
+                          <p className="text-xs text-gray-400">{viewer.viewed_at || 'Recientemente'}</p>
+                        </div>
+                        {/* Surprise: Mini sparkles on hover */}
+                        <motion.div
+                          className="flex items-center justify-center w-8 h-8 rounded-full"
+                          whileHover={{
+                            scale: 1.2,
+                            backgroundColor: "#00f0ff"
+                          }}
+                        >
+                          <div className="flex items-center gap-3 pr-15">
+                            {viewer.user_liked && (
+                              <motion.div
+                                initial={{ scale: 0 }}
+                                animate={{
+                                  scale: [1, 1.3, 1],
+                                }}
+                                transition={{
+                                  duration: 1.2,
+                                  repeat: Infinity,
+                                  repeatType: "loop",
+                                  ease: "easeInOut"
+                                }}
+                                className="text-red-500  drop-shadow-lg"
+                              >
+                                ❤️
+                              </motion.div>
+                            )}
+
+                            {(() => {
+                              // ¿Este viewer envió regalos?
+
+
+                              const hasGifts = giftsSentByThisViewer(viewer) && giftsSentByThisViewer(viewer).length > 0;
+                              const giftCount = giftsSentByThisViewer(viewer)?.length || 0;
+                              console.log(giftsSentByThisViewer(viewer), viewer, "9999999999999")
+                              return hasGifts ? (
+                                <div className="relative">
+                                  <motion.div
+                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-pink-600/40 to-purple-600/40 
+                                          rounded-full border border-pink-500/60 backdrop-blur-md shadow-lg shadow-pink-500/30"
+                                    whileHover={{ scale: 1.08 }}
+                                    whileTap={{ scale: 0.95 }}
+                                  >
+                                    <svg width="18" height="18" viewBox="0 0 120 120" fill="none" className="drop-shadow">
+                                      <path d="M94 58H26V104H94V58Z" fill="#FF3366" />
+                                      <path d="M71.1842 58H48.5921V104H71.1842V58Z" fill="#FF99AA" />
+                                      <path d="M100 42.665H20V60H100V42.665Z" fill="#FF3366" />
+                                      <path d="M76.9491 42.665H42.8248V60H76.9491V42.665Z" fill="#FF99AA" />
+                                      <path d="M60 31C58 29 55 24 52 21 47 16 40 16 36 19 32 22 31 28 34 35 37 42 45 43 52 43 58 43 65 42 72 42L60 31ZM48 37C43 36 38 35 36 33 35 32 35 31 35 31 35 29 37 26 41 25 45 24 51 28 56 34 57 36 58 37 58 37 55 37 51 37 48 37ZM72 34C77 28 83 24 87 25 91 26 93 29 93 31 93 31 93 32 92 33 90 35 85 36 80 37 74 37 68 37 65 37 65 37 65 36 66 35 68 34ZM60 43C66 43 72 43 78 43 84 43 90 42 94 39 98 36 99 31 95 25 91 19 86 17 81 18 76 19 71 22 68 27 66 31 65 33 60 31" fill="url(#grad)" />
+                                      <defs>
+                                        <linearGradient id="grad" x1="60" y1="18" x2="60" y2="43">
+                                          <stop stopColor="#FF66CC" />
+                                          <stop offset="1" stopColor="#FF3366" />
+                                        </linearGradient>
+                                      </defs>
+                                    </svg>
+                                    <span className="text-pink-300 font-bold text-sm">+{giftCount}</span>
+                                  </motion.div>
+
+                                  {/* Puntito rosa parpadeante */}
+                                  <div className="absolute -top-1 -right-1 w-3 h-3 bg-pink-500 rounded-full animate-ping" />
+                                  <div className="absolute -top-1 -right-1 w-3 h-3 bg-pink-500 rounded-full" />
+                                </div>
+                              ) : null;
+                            })()}
+
+                            {/* Corazón solo si dio like */}
+
+                          </div>
+                        </motion.div>
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
+                  {realViewers.length === 0 && (
+                    <motion.p
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="text-center text-gray-400 italic"
+                    >
+                      Nadie ha visto esta historia aún...
+                    </motion.p>
+                  )}
+                </div>
+              </motion.div>
+            </>
+          )
+        }
+      </AnimatePresence >
       {/* Options Modal */}
       <AnimatePresence>
-        {showOptionsModal && viewingStoryUserIndex !== null && (
-          <React.Fragment>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/70 z-60"
-              onClick={() => setShowOptionsModal(false)}
-            />
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 30, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 h-auto z-70 bg-[#050718] rounded-t-3xl overflow-hidden max-h-[40vh]"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex justify-center pt-4 pb-4">
-                <div className="w-12 h-1.5 bg-white/30 rounded-full cursor-pointer" onClick={() => setShowOptionsModal(false)} />
-              </div>
-              <div className="px-6 pb-6 space-y-2">
-                <motion.button
-                  whileTap={{ scale: 0.98 }}
-                  className="w-full text-left text-red-400 font-medium py-3 rounded-lg hover:bg-red-500/10 transition-colors"
-                  onClick={handleReport}
-                >
-                  Report inappropriate
-                </motion.button>
-                <motion.button
-                  whileTap={{ scale: 0.98 }}
-                  className="w-full text-left text-white font-medium py-3 rounded-lg hover:bg-white/10 transition-colors"
-                  onClick={handleAboutAccount}
-                >
-                  About this account
-                </motion.button>
-                {isOwner && (
+        {
+          showOptionsModal && viewingStoryUserIndex !== null && (
+            <React.Fragment>
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 bg-black/70 z-60"
+                onClick={() => setShowOptionsModal(false)}
+              />
+              <motion.div
+                initial={{ y: "100%" }}
+                animate={{ y: 0 }}
+                exit={{ y: "100%" }}
+                transition={{ type: "spring", damping: 30, stiffness: 300 }}
+                className="fixed bottom-0 left-0 right-0 h-auto z-70 bg-[#050718] rounded-t-3xl overflow-hidden max-h-[40vh]"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex justify-center pt-4 pb-4">
+                  <div className="w-12 h-1.5 bg-white/30 rounded-full cursor-pointer" onClick={() => setShowOptionsModal(false)} />
+                </div>
+                <div className="px-6 pb-6 space-y-2">
                   <motion.button
                     whileTap={{ scale: 0.98 }}
                     className="w-full text-left text-red-400 font-medium py-3 rounded-lg hover:bg-red-500/10 transition-colors"
-                    onClick={handleDelete}
+                    onClick={handleReport}
                   >
-                    Delete
+                    Report inappropriate
                   </motion.button>
-                )}
-                <motion.button
-                  whileTap={{ scale: 0.98 }}
-                  className="w-full text-left text-gray-400 font-medium py-3 rounded-lg hover:bg-white/10 transition-colors"
-                  onClick={() => setShowOptionsModal(false)}
-                >
-                  Cancel
-                </motion.button>
-              </div>
-            </motion.div>
-          </React.Fragment>
-        )}
-      </AnimatePresence>
+                  <motion.button
+                    whileTap={{ scale: 0.98 }}
+                    className="w-full text-left text-white font-medium py-3 rounded-lg hover:bg-white/10 transition-colors"
+                    onClick={handleAboutAccount}
+                  >
+                    About this account
+                  </motion.button>
+                  {isOwner && (
+                    <motion.button
+                      whileTap={{ scale: 0.98 }}
+                      className="w-full text-left text-red-400 font-medium py-3 rounded-lg hover:bg-red-500/10 transition-colors"
+                      onClick={handleDelete}
+                    >
+                      Delete
+                    </motion.button>
+                  )}
+                  <motion.button
+                    whileTap={{ scale: 0.98 }}
+                    className="w-full text-left text-gray-400 font-medium py-3 rounded-lg hover:bg-white/10 transition-colors"
+                    onClick={() => setShowOptionsModal(false)}
+                  >
+                    Cancel
+                  </motion.button>
+                </div>
+              </motion.div>
+            </React.Fragment>
+          )
+        }
+      </AnimatePresence >
       <ShowComments showCommentsModal={showCommentsModal} setShowCommentsModal={setShowCommentsModal} comments={comments} user={user} commentText={commentText} setCommentText={setCommentText} handlePostComment={handlePostComment} />
       {/* <AnimatePresence>
         {showCommentsModal && (
@@ -2598,12 +2595,20 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                       exit={{ opacity: 0, height: 0 }}
                       className="flex items-start gap-3 py-3 border-b border-[#2a2f5e]/50 last:border-b-0"
                     >
-                      <img
-                        src={`${getBaseUrl()}media/${comment.user_id.profile_picture || 'profile_pics/avatar.webp'}`}
-                        onError={(e) => (e.target as HTMLImageElement).src = `https://picsum.photos/40/40?random=${comment.uuid}`}
-                        alt={comment.user_id.username}
-                        className="h-10 w-10 rounded-full object-cover border border-[#2a2f5e]"
-                      />
+                      <div className={`relative p-[2px] rounded-full ${
+                        comment.user_id.subscription_status?.is_active 
+                          ? comment.user_id.subscription_status.plan_name === 'VIP' 
+                            ? 'bg-gradient-to-tr from-amber-300 via-amber-500 to-amber-200 shadow-[0_0_10px_rgba(245,158,11,0.5)]'
+                            : 'bg-gradient-to-tr from-blue-400 via-blue-600 to-blue-300 shadow-[0_0_10px_rgba(37,99,235,0.5)]'
+                          : 'bg-[#2a2f5e]'
+                      }`}>
+                        <img
+                          src={`${getBaseUrl()}media/${comment.user_id.profile_picture || 'profile_pics/avatar.webp'}`}
+                          onError={(e) => (e.target as HTMLImageElement).src = `https://picsum.photos/40/40?random=${comment.uuid}`}
+                          alt={comment.user_id.username}
+                          className="h-10 w-10 rounded-full object-cover border-2 border-black"
+                        />
+                      </div>
                       <div className="flex-1">
                         <p className="text-sm">
                           <span className="font-semibold text-white mr-1">{comment.user_id.username}</span>
@@ -2654,9 +2659,10 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         )}
       </AnimatePresence> */}
 
-      {viewingStoryUserIndex !== null && groupedStories[viewingStoryUserIndex] || selectedChat
-        ? null
-        : <BottomNavbar />
+      {
+        viewingStoryUserIndex !== null && groupedStories[viewingStoryUserIndex] || selectedChat
+          ? null
+          : <BottomNavbar />
       }
 
       {/* CSS for premium effects - Dynamic styles based on color_premiun */}
@@ -2736,7 +2742,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
           border-radius: 2px;
         }
       `}</style>
-    </div>
+    </div >
   )
 }
 export default StreamingUI
