@@ -15,6 +15,13 @@ import {
   Pause,
   Eye,
   Video,
+  CreditCard,
+  UserCog,
+  Shield,
+  Bell,
+  Instagram,
+  Clock,
+  Power,
 } from "lucide-react"
 import { Button } from "../ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs"
@@ -31,6 +38,7 @@ import { createComment } from "../../redux/actions/createComment"
 import { getBaseUrl } from "../../redux/client/api-client"
 import SubscriptionModal from "./SubscriptionModal"
 import { getSubscriptionPlans, createCheckoutSession, startCall } from "../../redux/actions/subscriptionActions"
+import { FaFacebook, FaTiktok } from "react-icons/fa"
 
 const WS_URL = "ws://localhost:8001/ws"
 
@@ -143,7 +151,45 @@ function ProfileSeccion({
   const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
 
   // Wallet
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showConnectSocialModal, setShowConnectSocialModal] = useState(false);
+  // === NUEVOS ESTADOS PARA HORARIO DE DISPONIBILIDAD ===
+  const [showAvailabilityModal, setShowAvailabilityModal] = useState(false);
+  const [startTime, setStartTime] = useState("08:00");
+  const [endTime, setEndTime] = useState("20:00");
+  const [selectedDays, setSelectedDays] = useState<string[]>([
+    "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"
+  ]);
 
+  const weekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+  // Formatear hora 24h → 12h con AM/PM (igual que la imagen)
+  const formatTime12h = (time24: string) => {
+    if (!time24) return "08:00 AM";
+    const [hours, minutes] = time24.split(":").map(Number);
+    const period = hours >= 12 ? "PM" : "AM";
+    const hour12 = hours % 12 || 12;
+    return `${hour12.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")} ${period}`;
+  };
+
+  const toggleDay = (day: string) => {
+    setSelectedDays(prev =>
+      prev.includes(day)
+        ? prev.filter(d => d !== day)
+        : [...prev, day]
+    );
+  };
+
+  const handleSaveAvailability = () => {
+    const daysStr = selectedDays.length === 7
+      ? "Todos los días"
+      : selectedDays.join(", ");
+    
+    alert(`✅ Horario guardado correctamente!\n\nInicio: ${formatTime12h(startTime)}\nFin: ${formatTime12h(endTime)}\nDías: ${daysStr}`);
+    
+    // Aquí puedes enviar al backend con Redux o axios
+    setShowAvailabilityModal(false);
+  };
   // --- 1. Sincronización y WebSocket ---
   useEffect(() => {
     if (media_user) {
@@ -380,6 +426,21 @@ function ProfileSeccion({
   }, [isModalOpen, initialScrollIndex]);
 
   // --- RENDER ---
+  // === FUNCIONES DE LOS NUEVOS MODALES ===
+  const handleSaveBankAccount = () => {
+    alert("✅ Formulario de cuenta bancaria abierto (aquí iría tu input de IBAN/CLABE + banco)");
+    // Aquí puedes expandir a un sub-modal o formulario real
+  };
+
+  const handleEditOption = (option: string) => {
+    alert(`✏️ Opción seleccionada: ${option} (listo para conectar con tu backend)`);
+  };
+
+  const handleConnectSocial = (platform: string) => {
+    alert(`🔗 Conectando con ${platform}... (aquí iría OAuth real)`);
+    // Aquí puedes redirigir a la URL de login de cada red
+  };
+
   return (
     <>
       <div className="min-h-screen text-white flex flex-col items-center bg-[#050718] font-sans">
@@ -395,7 +456,7 @@ function ProfileSeccion({
         <div className="relative z-10 w-full max-w-3xl mx-auto flex flex-col items-center pb-24">
 
           {/* Banner Curvo */}
-          <div className="w-full h-40 md:h-52 relative overflow-hidden rounded-b-[2.5rem] shadow-2xl shadow-[#7000ff]/20">
+          <div className="w-full h-30 md:h-52 relative overflow-hidden rounded-b-[2.5rem] shadow-2xl shadow-[#7000ff]/20">
             <div className="absolute inset-0 bg-gradient-to-r from-[#7000ff] via-[#4c1d95] to-[#00f0ff] opacity-90"></div>
             <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20"></div>
           </div>
@@ -445,7 +506,7 @@ function ProfileSeccion({
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.2 }}
-              className="flex items-center justify-center gap-8 md:gap-12 py-4 px-8 rounded-2xl bg-white/5 backdrop-blur-md border border-white/10 w-full max-w-sm mt-4 shadow-xl"
+              className="flex items-center justify-center gap-8 md:gap-12 py-1 px-6 rounded-2xl bg-white/5 backdrop-blur-md border border-white/10 w-full max-w-sm mt-4 shadow-xl"
             >
               <div className="flex flex-col items-center cursor-pointer group">
                 <span className="text-xl md:text-2xl font-bold text-white group-hover:text-[#00f0ff] transition-colors duration-300">
@@ -527,7 +588,7 @@ function ProfileSeccion({
                 <Button variant="ghost" size="icon" className="rounded-xl bg-white/5 hover:bg-white/10 text-white border border-white/5 h-10 w-10">
                   <Share size={18} />
                 </Button>
-                <Button variant="ghost" size="icon" className="rounded-xl bg-white/5 hover:bg-white/10 text-white border border-white/5 h-10 w-10">
+                <Button onClick={() => setShowSettingsModal(true)} variant="ghost" size="icon" className="rounded-xl bg-white/5 hover:bg-white/10 text-white border border-white/5 h-10 w-10">
                   <Settings size={18} />
                 </Button>
               </div>
@@ -607,6 +668,354 @@ function ProfileSeccion({
         </div>
         <BottomNavbar />
       </div >
+
+      {/* ===================== MODAL CONFIGURACIÓN (SETTINGS) ===================== */}
+      <AnimatePresence>
+        {showSettingsModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-xl p-4"
+            onClick={() => setShowSettingsModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.88, y: 30, opacity: 0 }}
+              animate={{ scale: 1, y: 0, opacity: 1 }}
+              exit={{ scale: 0.88, y: 30, opacity: 0 }}
+              transition={{ type: "spring", bounce: 0.3 }}
+              className="bg-[#0c1033] border border-white/10 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-white/10">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 bg-gradient-to-br from-[#7000ff] to-[#00f0ff] rounded-2xl flex items-center justify-center">
+                    <Settings className="w-5 h-5 text-white" />
+                  </div>
+                  <h2 className="text-2xl font-bold text-white">Configuración</h2>
+                </div>
+                <button
+                  onClick={() => setShowSettingsModal(false)}
+                  className="w-9 h-9 flex items-center justify-center text-white/70 hover:text-white hover:bg-white/10 rounded-full transition-all"
+                >
+                  <X size={22} />
+                </button>
+              </div>
+
+              {/* Lista de opciones */}
+                <div className="p-3">
+                {/* 1. Cuenta Bancaria (especial) */}
+                <div
+                  onClick={handleSaveBankAccount}
+                  className="group flex items-center gap-4 px-5 py-4 rounded-2xl hover:bg-white/5 cursor-pointer transition-all active:scale-[0.985]"
+                >
+                  <div className="w-11 h-11 bg-emerald-500/10 text-emerald-400 rounded-2xl flex items-center justify-center">
+                  <CreditCard size={26} />
+                  </div>
+                  <div className="flex-1">
+                  <p className="font-semibold text-lg text-white group-hover:text-emerald-400 transition-colors">Cuenta Bancaria</p>
+                  <p className="text-xs text-gray-400">Donde recibirás el dinero de tu wallet</p>
+                  </div>
+                  <div className="text-emerald-400">
+                  <span className="text-xs font-medium">AGREGAR</span>
+                  </div>
+                </div>
+
+                {/* Otras opciones de edición */}
+                <div
+                  onClick={() => handleEditOption("Editar perfil")}
+                  className="group flex items-center gap-4 px-5 py-4 rounded-2xl hover:bg-white/5 cursor-pointer transition-all active:scale-[0.985]"
+                >
+                  <div className="w-11 h-11 bg-[#7000ff]/10 text-[#7000ff] rounded-2xl flex items-center justify-center">
+                  <UserCog size={26} />
+                  </div>
+                  <div className="flex-1">
+                  <p className="font-semibold text-white group-hover:text-[#7000ff]">Editar perfil</p>
+                  </div>
+                </div>
+
+                <div
+                  onClick={() => handleEditOption("Privacidad y seguridad")}
+                  className="group flex items-center gap-4 px-5 py-4 rounded-2xl hover:bg-white/5 cursor-pointer transition-all active:scale-[0.985]"
+                >
+                  <div className="w-11 h-11 bg-amber-500/10 text-amber-400 rounded-2xl flex items-center justify-center">
+                  <Shield size={26} />
+                  </div>
+                  <div className="flex-1">
+                  <p className="font-semibold text-white group-hover:text-amber-400">Privacidad y seguridad</p>
+                  </div>
+                </div>
+
+                <div
+                  onClick={() => handleEditOption("Notificaciones")}
+                  className="group flex items-center gap-4 px-5 py-4 rounded-2xl hover:bg-white/5 cursor-pointer transition-all active:scale-[0.985]"
+                >
+                  <div className="w-11 h-11 bg-sky-500/10 text-sky-400 rounded-2xl flex items-center justify-center">
+                  <Bell size={26} />
+                  </div>
+                  <div className="flex-1">
+                  <p className="font-semibold text-white group-hover:text-sky-400">Notificaciones</p>
+                  </div>
+                </div>
+
+                {/* Nueva opción: Horario de disponibilidad para llamadas */}
+                <div
+                  onClick={() => {
+                  const horario = prompt(
+                    "Ingresa tus horarios disponibles para recibir llamadas de tus suscriptores.\nEjemplo: Lun 10:00-12:00; Mie 16:00-18:00"
+                  );
+                  if (horario === null) return; // usuario canceló
+                  if (!horario.trim()) {
+                    alert("No se guardó: el horario está vacío.");
+                    return;
+                  }
+                  // Aquí puedes reemplazar el alert por una llamada al backend/Redux
+                  alert("Horario guardado: " + horario);
+                  }}
+                  className="group flex items-center gap-4 px-5 py-4 rounded-2xl hover:bg-white/5 cursor-pointer transition-all active:scale-[0.985] mt-2"
+                >
+                  <div className="w-11 h-11 bg-violet-500/10 text-violet-400 rounded-2xl flex items-center justify-center">
+                  <UserCog size={26} />
+                  </div>
+                  <div className="flex-1" onClick={() => {
+                    setShowSettingsModal(false);
+                    setTimeout(() => setShowAvailabilityModal(true), 280);
+                  }}>
+                  <p className="font-semibold text-white group-hover:text-violet-400">Horario de disponibilidad</p>
+                  <p className="text-xs text-gray-400">Define cuándo pueden agendarte llamadas tus suscriptores</p>
+                  </div>
+                  <div className="text-violet-400">
+                  <span className="text-xs font-medium">EDITAR</span>
+                  </div>
+                </div>
+
+                {/* ===================== BOTÓN CONECTAR REDES (item de abajo) ===================== */}
+                <div
+                  onClick={() => {
+                  setShowSettingsModal(false);
+                  setTimeout(() => setShowConnectSocialModal(true), 300);
+                  }}
+                  className="mt-6 mx-auto flex items-center justify-center gap-3 bg-gradient-to-r from-[#7000ff] via-[#a855f7] to-[#00f0ff] text-white font-semibold py-4 px-8 rounded-3xl shadow-xl shadow-[#7000ff]/30 hover:scale-105 active:scale-95 transition-all cursor-pointer"
+                >
+                  <Share2 size={20} />
+                  CONECTAR REDES SOCIALES
+                </div>
+                </div>
+
+              <div className="px-6 py-6 text-center text-[10px] text-white/40">
+                Versión 1.4.2 • Soporte wallet activa
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+        {/* ===================== NUEVO MODAL HORARIO DE DISPONIBILIDAD (ESTILO IDÉNTICO A TU APP) ===================== */}
+      <AnimatePresence>
+        {showAvailabilityModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[70] flex items-center justify-center bg-black/90 backdrop-blur-xl p-4"
+            onClick={() => setShowAvailabilityModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.88, y: 30, opacity: 0 }}
+              animate={{ scale: 1, y: 0, opacity: 1 }}
+              exit={{ scale: 0.88, y: 30, opacity: 0 }}
+              transition={{ type: "spring", bounce: 0.3 }}
+              className="bg-[#0c1033] border border-white/10 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-white/10">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 bg-gradient-to-br from-violet-500 to-[#00f0ff] rounded-2xl flex items-center justify-center">
+                    <Clock className="w-5 h-5 text-white" />
+                  </div>
+                  <h2 className="text-2xl font-bold text-white">Disponibilidad</h2>
+                </div>
+                <button
+                  onClick={() => setShowAvailabilityModal(false)}
+                  className="w-9 h-9 flex items-center justify-center text-white/70 hover:text-white hover:bg-white/10 rounded-full transition-all"
+                >
+                  <X size={22} />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-8">
+                {/* START TIME */}
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-7 h-7 bg-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center">
+                      <Power size={18} />
+                    </div>
+                    <p className="font-semibold text-emerald-400">Hora de inicio</p>
+                  </div>
+                  <div className="flex items-center gap-4 bg-white/5 border border-white/10 rounded-2xl px-5 py-4">
+                    <input
+                      type="time"
+                      value={startTime}
+                      onChange={(e) => setStartTime(e.target.value)}
+                      className="bg-transparent text-4xl font-light text-white focus:outline-none w-full"
+                    />
+                    <div className="text-right">
+                      <div className="text-xs text-white/60">AM / PM</div>
+                      <div className="text-lg font-medium text-emerald-400">{formatTime12h(startTime).split(" ")[1]}</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* STOP TIME */}
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-7 h-7 bg-red-500/20 text-red-400 rounded-full flex items-center justify-center">
+                      <Power size={18} />
+                    </div>
+                    <p className="font-semibold text-red-400">Hora de fin</p>
+                  </div>
+                  <div className="flex items-center gap-4 bg-white/5 border border-white/10 rounded-2xl px-5 py-4">
+                    <input
+                      type="time"
+                      value={endTime}
+                      onChange={(e) => setEndTime(e.target.value)}
+                      className="bg-transparent text-4xl font-light text-white focus:outline-none w-full"
+                    />
+                    <div className="text-right">
+                      <div className="text-xs text-white/60">AM / PM</div>
+                      <div className="text-lg font-medium text-red-400">{formatTime12h(endTime).split(" ")[1]}</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* DÍAS DE LA SEMANA */}
+                <div>
+                  <p className="text-white/70 text-sm mb-3">Disponible cada:</p>
+                  <div className="grid grid-cols-7 gap-2">
+                    {weekDays.map((day) => (
+                      <button
+                        key={day}
+                        onClick={() => toggleDay(day)}
+                        className={`py-2.5 text-xs font-medium rounded-2xl transition-all ${
+                          selectedDays.includes(day)
+                            ? "bg-[#00f0ff] text-[#050718] shadow-lg shadow-[#00f0ff]/40"
+                            : "bg-white/5 text-white/70 hover:bg-white/10"
+                        }`}
+                      >
+                        {day}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Botón Guardar */}
+              <div className="px-6 pb-8">
+                <Button
+                  onClick={handleSaveAvailability}
+                  className="w-full bg-gradient-to-r from-[#7000ff] to-[#00f0ff] text-white font-semibold py-4 rounded-3xl shadow-xl shadow-[#7000ff]/40 hover:scale-105 active:scale-95 transition-all"
+                >
+                  GUARDAR HORARIO
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      {/* ===================== MODAL CONECTAR REDES SOCIALES ===================== */}
+      <AnimatePresence>
+        {showConnectSocialModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[70] flex items-center justify-center bg-black/90 backdrop-blur-xl p-4"
+            onClick={() => setShowConnectSocialModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.88, y: 40, opacity: 0 }}
+              animate={{ scale: 1, y: 0, opacity: 1 }}
+              exit={{ scale: 0.88, y: 40, opacity: 0 }}
+              className="bg-[#0c1033] border border-white/10 rounded-3xl w-full max-w-md overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="px-6 pt-6 pb-3 flex items-center justify-between">
+                <h3 className="text-2xl font-bold text-white">Conectar redes</h3>
+                <button
+                  onClick={() => setShowConnectSocialModal(false)}
+                  className="text-white/60 hover:text-white"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+
+              <div className="px-6 pb-8 space-y-4">
+                {/* Instagram */}
+                <div className="flex items-center justify-between bg-white/5 hover:bg-white/10 p-5 rounded-2xl transition-all group">
+                  <div className="flex items-center gap-4">
+                    <div className="w-14 h-14 bg-gradient-to-br from-[#f56040] via-[#c13584] to-[#833ab4] rounded-2xl flex items-center justify-center">
+                      <Instagram className="w-8 h-8 text-white" />
+                    </div>
+                    <div>
+                      <p className="font-bold text-xl text-white">Instagram</p>
+                      <p className="text-xs text-white/50">@tuusuario</p>
+                    </div>
+                  </div>
+                  <Button
+                    onClick={() => handleConnectSocial("Instagram")}
+                    className="bg-white text-black hover:bg-gray-200 font-semibold px-8 rounded-2xl"
+                  >
+                    Conectar
+                  </Button>
+                </div>
+
+                {/* TikTok */}
+                <div className="flex items-center justify-between bg-white/5 hover:bg-white/10 p-5 rounded-2xl transition-all group">
+                  <div className="flex items-center gap-4">
+                    <div className="w-14 h-14 bg-black rounded-2xl flex items-center justify-center">
+                      <FaTiktok className="w-8 h-8 text-white" />
+                    </div>
+                    <div>
+                      <p className="font-bold text-xl text-white">TikTok</p>
+                      <p className="text-xs text-white/50">@tuusuario</p>
+                    </div>
+                  </div>
+                  <Button
+                    onClick={() => handleConnectSocial("TikTok")}
+                    className="bg-white text-black hover:bg-gray-200 font-semibold px-8 rounded-2xl"
+                  >
+                    Conectar
+                  </Button>
+                </div>
+
+                {/* Facebook */}
+                <div className="flex items-center justify-between bg-white/5 hover:bg-white/10 p-5 rounded-2xl transition-all group">
+                  <div className="flex items-center gap-4">
+                    <div className="w-14 h-14 bg-[#1877f2] rounded-2xl flex items-center justify-center">
+                      <FaFacebook className="w-8 h-8 text-white" />
+                    </div>
+                    <div>
+                      <p className="font-bold text-xl text-white">Facebook</p>
+                      <p className="text-xs text-white/50">@tuusuario</p>
+                    </div>
+                  </div>
+                  <Button
+                    onClick={() => handleConnectSocial("Facebook")}
+                    className="bg-white text-black hover:bg-gray-200 font-semibold px-8 rounded-2xl"
+                  >
+                    Conectar
+                  </Button>
+                </div>
+              </div>
+
+              <div className="px-6 py-6 text-center text-xs text-white/40 border-t border-white/10">
+                Conecta tus cuentas para mostrar tus perfiles en tu bio y recibir más seguidores
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* --- MODAL FULL SCREEN (Lógica Nueva + Estilo TikTok) --- */}
       <AnimatePresence>
