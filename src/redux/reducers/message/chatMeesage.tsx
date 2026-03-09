@@ -14,8 +14,8 @@ export interface Message {
   sender_username: string;
   sender_avatar: string | null;
   created_at: string;  // ISO string
-  message_type: 'text' | 'image' | 'video' | 'voice' | 'gif' | 'file' | 'document' | 'audio' | 'contact' | 'poll' | 'event' | 'sticker';
   file?: string | null;
+  reactions?: Record<string, string[]>;
 }
 
 // 1. **Estado del Reducer**

@@ -36,5 +36,6 @@ export const useChat = () => {
   if (!context) {
     throw new Error("useChat debe usarse dentro de un ChatProvider");
   }
+  console.log("----------------", context)
   return context;
 };

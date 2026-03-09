@@ -7,10 +7,12 @@ import typingSound from "../../assets/sounds/whatsapp-typing.mp3";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import {
   FileText, Image as ImageIcon, Camera, Headphones, User, BarChart2, Calendar, Smile,
-  Mic, Trash2, StopCircle, Search, Bell, X, Phone, Video, Plus, Send, Download, Play, Pause, MessageCircleMore,
+  Mic, Trash2, StopCircle, Search, Bell, X, Phone, Video, Plus, Send, Download, Play, MessageCircleMore,
+  Sparkles,
 } from "lucide-react"
 // import { Link } from "react-router-dom"
 import { motion, AnimatePresence, LayoutGroup } from "framer-motion"
+import { useNavigate } from "react-router-dom"
 import FluidSearch from "./fluid-search"
 import { useChat } from "../../context/ChatContext"
 import { getSocialConnections } from "../../redux/actions/message/social"
@@ -22,6 +24,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { listChatRooms } from "../../redux/actions/message/listChatRoom"
 import { RootState } from "../../store"
 import { loadChatMessages } from "../../redux/actions/message/chatMeesage"
+import { getAvailabilityStatus } from "../../redux/actions/saveAvailability"
 import { sendMessage } from "../../redux/actions/message/sendMessage"
 import { useWebSocket } from "../../hooks/useWebSocket"
 import { allEmojis } from "../comments/emojis";
@@ -32,13 +35,23 @@ import { getBaseUrl } from "../../redux/client/api-client";
 const WS_URL = "ws://localhost:8001/ws/chat/";
 const Navbar: React.FC = () => {
   const [search, setSearch] = useState("")
-  const total = useUnreadMessages((state) => state.getTotalUnread());
+  const [chatSearchTerm, setChatSearchTerm] = useState("")
+  const navigate = useNavigate()
+  // const total = useUnreadMessages((state) => state.getTotalUnread());
   const [showSearch, setShowSearch] = useState(false)
   const [scrollPosition, setScrollPosition] = useState(0)
   const [showNotifications, setShowNotifications] = useState(false)
   const [realtimeMessages, setRealtimeMessages] = useState<any[]>([])
   const chatSocketActiveRef = useRef(false);
   const { selectedChat, setSelectedChat, showMessages, setShowMessages } = useChat()
+  const [chatAvailability, setChatAvailability] = useState<{
+    is_available: boolean;
+    can_voice: boolean;
+    can_video: boolean;
+    remaining_calls: number;
+    plan_name: string;
+    upgrade_required: boolean;
+  } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const unreadCounts = useUnreadMessages((state) => state.unreadCounts);
   const [clickedMessage, setClickedMessage] = useState<string | null>(null)
@@ -297,6 +310,16 @@ const Navbar: React.FC = () => {
 
   const user = JSON.parse(localStorage.getItem("user") || "{}")
   const currentBackendChat = backendChats?.chats.find(c => c.uuid === selectedChat) || null
+
+  useEffect(() => {
+    if (selectedChat && currentBackendChat?.other_user?.username) {
+      getAvailabilityStatus(currentBackendChat.other_user.username)().then((data: any) => {
+        setChatAvailability(data);
+      }).catch(console.error);
+    } else {
+      setChatAvailability(null);
+    }
+  }, [selectedChat, currentBackendChat]);
   const sendAudioRef = useRef<HTMLAudioElement | null>(null);
   const typingAudioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -783,6 +806,21 @@ const Navbar: React.FC = () => {
                     </motion.button>
                   </div>
 
+                  <div className="px-2 pb-2 pt-2 ">
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <Search className="h-4 w-4 text-gray-400" />
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="Buscar chat..."
+                        value={chatSearchTerm}
+                        onChange={(e) => setChatSearchTerm(e.target.value)}
+                        className="block w-full pl-10 pr-3 py-2 border border-gray-700/50 rounded-xl leading-5 bg-[#0c1033] text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-[#00f0ff]/50 focus:border-[#00f0ff]/50 sm:text-sm transition-all shadow-inner"
+                      />
+                    </div>
+                  </div>
+
                   <div className="max-h-[70vh] overflow-y-auto">
                     {loading ? (
                       // Skeleton loader
@@ -821,45 +859,166 @@ const Navbar: React.FC = () => {
                     ) : (
                       // Lista real de chats desde el backend
                       <ul>
-                        {backendChats?.chats.map((chat) => (
-                          <motion.li
-                            key={chat.uuid}
-                            layoutId={`chat-${chat.uuid}`}
-                            onClick={() => setSelectedChat(chat.uuid)}
-                            className="p-4 hover:bg-gray-800/50 transition-colors cursor-pointer flex items-center gap-3 border-b border-gray-700/30 last:border-b-0"
-                            whileTap={{ scale: 0.98 }}
-                          >
-                            <div className="relative">
-                              <img
-                                src={`${getBaseUrl()}${chat.other_user.avatar || "/profile_pics/avatar.webp"}`}
-                                alt={chat.other_user.name}
-                                className="w-12 h-12 rounded-full object-cover"
-                              />
-                              {chat.other_user_online.is_online && (
-                                <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-gray-900 rounded-full" />
-                              )}
-                            </div>
+                        {backendChats?.chats
+                          .filter(chat => chat.other_user.username.toLowerCase().includes(chatSearchTerm.toLowerCase()) || chat.other_user.name?.toLowerCase().includes(chatSearchTerm.toLowerCase()))
+                          .sort((a, b) => {
+                            const planOrder: { [key: string]: number } = {
+                              'FRIEND': 0,
+                              'PLUS': 1,
+                              'VIP': 2,
+                              'NONE': 3
+                            };
+                            const aPlan = a.other_user.subscription_status?.plan?.name?.toUpperCase() || 'NONE';
+                            const bPlan = b.other_user.subscription_status?.plan?.name?.toUpperCase() || 'NONE';
+                            return (planOrder[aPlan as keyof typeof planOrder] ?? 4) - (planOrder[bPlan as keyof typeof planOrder] ?? 4);
+                          })
+                          .map((chat) => {
+                            const planName = chat.other_user.subscription_status?.plan?.name?.toUpperCase();
+                            let borderColor = "border-gray-700/30";
+                            let glowColor = "";
+                            let itemBg = "hover:bg-white/5";
 
-                            <div className="flex-1 min-w-0">
-                              <div className="flex justify-between items-baseline">
-                                <p className="text-white font-medium truncate">{chat.other_user.username}</p>
-                                <span className="text-xs text-gray-500 ml-2">
-                                  {new Date(chat.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                </span>
-                              </div>
-                              <p className="text-sm text-gray-400 truncate">
-                                {typingContest(chat)}
-                              </p>
-                            </div>
+                            if (planName === 'FRIEND') {
+                              borderColor = "border-[#00f0ff] shadow-[0_0_20px_rgba(0,240,255,0.3)]";
+                              glowColor = "shadow-[#00f0ff]/50";
+                              itemBg = "bg-[#00f0ff]/5 hover:bg-[#00f0ff]/10";
+                            } else if (planName === 'PLUS') {
+                              borderColor = "border-purple-400/40 shadow-[0_0_15px_rgba(168,85,247,0.2)]";
+                              glowColor = "shadow-purple-400/20";
+                              itemBg = "bg-purple-800/5 hover:bg-purple-800/10";
+                            } else if (planName === 'VIP') {
+                              borderColor = "border-amber-400/40 shadow-[0_0_15px_rgba(251,191,36,0.15)]";
+                              glowColor = "shadow-amber-400/30";
+                              itemBg = "bg-amber-400/5 hover:bg-amber-400/10";
+                            }
 
-                            {chat.unread_count > 0 && total > 0 && (
-                              <div className="w-6 h-6 bg-purple-500 rounded-full flex items-center justify-center text-xs text-white font-bold">
-                                {getUnreadAcount(chat.uuid)}
-                                {/* {total  || chat.unread_count} */}
-                              </div>
-                            )}
-                          </motion.li>
-                        ))}
+                            return (
+                              <motion.li
+                                key={chat.uuid}
+                                layoutId={`chat-${chat.uuid}`}
+                                onClick={() => setSelectedChat(chat.uuid)}
+                                className={`p-4 mx-2 my-1 rounded-2xl transition-all cursor-pointer flex items-center gap-3 border border-white/5 last:border-b-0 group relative overflow-hidden ${itemBg}`}
+                                whileTap={{ scale: 0.98 }}
+                              >
+                                {planName === 'FRIEND' && (
+                                  <>
+                                    {/* Refractive Light Beam Animation */}
+                                    <motion.div
+                                      initial={{ x: '-100%', opacity: 0 }}
+                                      animate={{
+                                        x: '200%',
+                                        opacity: [0, 0.5, 0]
+                                      }}
+                                      transition={{
+                                        duration: 3,
+                                        repeat: Infinity,
+                                        repeatDelay: 2,
+                                        ease: "easeInOut"
+                                      }}
+                                      className="absolute inset-0 z-0 bg-gradient-to-r from-transparent via-cyan-400/20 to-transparent skew-x-12 pointer-events-none"
+                                    />
+                                    {/* Subtle Edge Glow */}
+                                    <div className="absolute inset-0 border border-cyan-400/20 rounded-2xl z-0" />
+                                  </>
+                                )}
+                                {planName === 'PLUS' && (
+                                  <>
+                                    {/* Refractive Light Beam Animation */}
+                                    <motion.div
+                                      initial={{ x: '-100%', opacity: 0 }}
+                                      animate={{
+                                        x: '200%',
+                                        opacity: [0, 0.5, 0]
+                                      }}
+                                      transition={{
+                                        duration: 3,
+                                        repeat: Infinity,
+                                        repeatDelay: 2,
+                                        ease: "easeInOut"
+                                      }}
+                                      className="absolute inset-0 z-0 bg-gradient-to-r from-transparent via-cyan-400/20 to-transparent skew-x-12 pointer-events-none"
+                                    />
+                                    {/* Subtle Edge Glow */}
+                                    <div className="absolute inset-0 border border-cyan-400/20 rounded-2xl z-0" />
+                                  </>
+                                )}
+                                {planName === 'VIP' && (
+                                  <>
+                                    {/* Refractive Light Beam Animation */}
+                                    <motion.div
+                                      initial={{ x: '-100%', opacity: 0 }}
+                                      animate={{
+                                        x: '200%',
+                                        opacity: [0, 0.5, 0]
+                                      }}
+                                      transition={{
+                                        duration: 3,
+                                        repeat: Infinity,
+                                        repeatDelay: 2,
+                                        ease: "easeInOut"
+                                      }}
+                                      className="absolute inset-0 z-0 bg-gradient-to-r from-transparent via-cyan-400/20 to-transparent skew-x-12 pointer-events-none"
+                                    />
+                                    {/* Subtle Edge Glow */}
+                                    <div className="absolute inset-0 border border-cyan-400/20 rounded-2xl z-0" />
+                                  </>
+                                )}
+                                <div className="relative">
+                                  <div
+                                    className={`relative p-[1.5px] rounded-full transition-transform group-hover:scale-105 cursor-pointer ${planName === 'FRIEND' ? 'bg-gradient-to-tr from-[#00f0ff] via-white to-[#00f0ff] shadow-[0_0_10px_rgba(0,240,255,0.4)]' : planName === 'VIP' ? 'bg-gradient-to-tr from-amber-300 via-amber-500 to-amber-200' : planName === 'PLUS' ? 'bg-gradient-to-tr from-purple-400 to-pink-500' : ''}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setShowMessages(false);
+                                      navigate(`/profile/${chat.other_user.username}`);
+                                    }}
+                                  >
+                                    <img
+                                      src={`${getBaseUrl()}${chat.other_user.avatar || "/profile_pics/avatar.webp"}`}
+                                      alt={chat.other_user.username}
+                                      className={`w-12 h-12 rounded-full object-cover border-2 ${planName === 'FRIEND' ? 'border-[#0c1033]' : planName === 'VIP' ? 'border-[#0c1033]' : planName === 'PLUS' ? 'border-[#0c1033]' : 'border-[#0c1033]'}`}
+                                    />
+                                  </div>
+                                  {chat.other_user_online.is_online && (
+                                    <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 border-2 border-[#0c1033] rounded-full shadow-lg" />
+                                  )}
+                                </div>
+
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex justify-between items-baseline">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <p className={`font-semibold truncate ${planName === 'FRIEND' ? 'text-cyan-400' : planName === 'VIP' ? 'text-amber-100' : 'text-white'}`}>{chat.other_user.username}</p>
+
+                                      {planName === 'FRIEND' && (
+                                        <span className="text-[8px] bg-white/10 backdrop-blur-md text-cyan-300 px-2 py-0.5 rounded-full font-bold uppercase tracking-widest border border-cyan-400/30 shadow-[0_0_10px_rgba(0,240,255,0.2)] flex items-center gap-1 group-hover:bg-cyan-400/20 transition-colors">
+                                          <Sparkles size={7} fill="currentColor" /> DIAMOND
+                                        </span>
+                                      )}
+                                      {planName === 'PLUS' && (
+                                        <span className="text-[9px] bg-gradient-to-r from-purple-400 to-pink-500 text-white px-1.5 py-0.5 rounded-md font-bold uppercase tracking-tighter">PLUS</span>
+                                      )}
+                                      {planName === 'VIP' && (
+                                        <span className="text-[9px] bg-gradient-to-r from-amber-400 to-amber-600 text-black px-1.5 py-0.5 rounded-md font-bold uppercase tracking-tighter shadow-sm">VIP</span>
+                                      )}
+
+                                      <span className="text-[10px] text-gray-500 ml-auto font-medium">
+                                        {new Date(chat.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="flex justify-between items-center mt-1">
+                                    <p className="text-sm text-gray-400 truncate group-hover:text-gray-300 transition-colors">
+                                      {typingContest(chat)}
+                                    </p>
+                                    {chat.unread_count > 0 && (
+                                      <div className="w-5 h-5 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center text-[10px] text-white font-bold shadow-lg shadow-purple-500/20">
+                                        {getUnreadAcount(chat.uuid)}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </motion.li>
+                            );
+                          })}
                       </ul>
                     )}
                   </div>
@@ -897,30 +1056,117 @@ const Navbar: React.FC = () => {
                   <div className="flex items-center justify-between px-5 py-4 border-b border-gray-700/50">
                     <div className="flex items-center gap-3">
                       <button onClick={() => setSelectedChat(null)} className="text-gray-300 hover:text-white text-2xl">←</button>
-                      <div className="relative">
-                        <img
-                          src={`${getBaseUrl()}${currentBackendChat.other_user.avatar || "/profile_pics/avatar.webp"}`}
-                          alt={currentBackendChat.other_user.name}
-                          className="w-10 h-10 rounded-full object-cover"
-                        />
+                      <div className="relative group">
+                        <div
+                          className={`relative p-[1.5px] rounded-full cursor-pointer transition-transform duration-500 group-hover:scale-110 ${currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND'
+                            ? 'bg-gradient-to-tr from-[#00f0ff] via-white to-[#00f0ff] animate-pulse shadow-[0_0_15px_rgba(0,240,255,0.4)]'
+                            : currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'PLUS'
+                              ? 'bg-gradient-to-tr from-purple-400 to-pink-500 border border-purple-400/30 shadow-[0_0_15px_rgba(168,85,247,0.3)]'
+                              : currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'VIP'
+                                ? 'bg-gradient-to-tr from-amber-300 via-white to-amber-200 shadow-[0_0_15px_rgba(251,191,36,0.3)]'
+                                : ''
+                            }`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedChat(null);
+                            setShowMessages(false);
+                            navigate(`/profile/${currentBackendChat.other_user.username}`);
+                          }}
+                        >
+                          <img
+                            src={`${getBaseUrl()}${currentBackendChat.other_user.avatar || "/profile_pics/avatar.webp"}`}
+                            alt={currentBackendChat.other_user.name}
+                            className="w-12 h-12 rounded-full object-cover border-2 border-[#0c1033]"
+                          />
+
+                          {/* Delicate Diamond/Premium Badge Overlay */}
+                          <div className="absolute -top-1.5 -right-2 z-10 scale-90">
+                            {currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND' && (
+                              <motion.span
+                                initial={{ scale: 0.5, opacity: 0 }}
+                                animate={{ scale: 1, opacity: 1 }}
+                                className="text-[7px] bg-white/10 backdrop-blur-md text-cyan-300 px-2 py-0.5 rounded-full font-bold uppercase tracking-widest border border-cyan-400/30 shadow-[0_0_10px_rgba(0,240,255,0.4)] flex items-center gap-1"
+                              >
+                                <Sparkles size={6} fill="currentColor" /> DIAMOND
+                              </motion.span>
+                            )}
+                            {currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'PLUS' && (
+                              <motion.span
+                                initial={{ scale: 0.5, opacity: 0 }}
+                                animate={{ scale: 1, opacity: 1 }}
+                                className="text-[7px] bg-white/10 backdrop-blur-md text-purple-300 px-2 py-0.5 rounded-full font-bold uppercase tracking-widest border border-purple-400/30"
+                              >
+                                PLUS
+                              </motion.span>
+                            )}
+                            {currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'VIP' && (
+                              <motion.span
+                                initial={{ scale: 0.5, opacity: 0 }}
+                                animate={{ scale: 1, opacity: 1 }}
+                                className="text-[7px] bg-white/10 backdrop-blur-md text-amber-300 px-2 py-0.5 rounded-full font-bold uppercase tracking-widest border border-amber-400/30"
+                              >
+                                VIP
+                              </motion.span>
+                            )}
+                          </div>
+                        </div>
                         {currentBackendChat.other_user_online.is_online && (
-                          <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-3 border-gray-900 rounded-full ring-2 ring-gray-900" />
+                          <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 border-2 border-[#0c1033] rounded-full shadow-lg" />
+                        )}
+
+                        {/* Luxury Refractive Beam for the Header Avatar Area */}
+                        {currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() !== 'NONE' && (
+                          <motion.div
+                            initial={{ x: '-100%', opacity: 0 }}
+                            animate={{ x: '200%', opacity: [0, 0.4, 0] }}
+                            transition={{ duration: 4, repeat: Infinity, repeatDelay: 2 }}
+                            className="absolute inset-0 z-0 bg-gradient-to-r from-transparent via-white/10 to-transparent skew-x-12 pointer-events-none rounded-full"
+                          />
                         )}
                       </div>
                       <div>
-                        <p className="text-white font-semibold">{currentBackendChat.other_user.name}</p>
-                        <p className="text-xs text-gray-400">
-                          {currentBackendChat.other_user_online.is_online ? "En línea" : "Desconectado"}
-                        </p>
+                        <div className="flex flex-col">
+                          <p className={`font-bold text-lg leading-tight ${currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND' ? 'text-cyan-400' :
+                            currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'PLUS' ? 'text-purple-400' :
+                              currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'VIP' ? 'text-amber-400' : 'text-white'
+                            }`}>
+                            {currentBackendChat.other_user.name}
+                          </p>
+                          <p className="text-xs text-gray-400">
+                            {currentBackendChat.other_user_online.is_online ? "En línea" : "Desconectado"}
+                          </p>
+                        </div>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-3">
-                      <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} className="p-2 rounded-full bg-gray-800/50 hover:bg-purple-600/30">
-                        <Phone className="w-5 h-5 text-purple-400" />
+                    <div className="flex items-center gap-3 relative">
+                      <motion.button
+                        whileHover={{ scale: 1.1 }}
+                        whileTap={{ scale: 0.9 }}
+                        disabled={!chatAvailability?.can_voice}
+                        className={`p-2 rounded-full transition-all ${chatAvailability?.can_voice
+                          ? "bg-green-300/20 hover:bg-green-600/40 text-green-400 border border-green-500/30"
+                          : "bg-gray-600/50 text-gray-500 opacity-50 cursor-not-allowed"
+                          }`}
+                      >
+                        <Phone className="w-5 h-5" />
+                        {chatAvailability?.is_available && (
+                          <div className="absolute top-1 right-1 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-gray-900 animate-pulse"></div>
+                        )}
                       </motion.button>
-                      <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} className="p-2 rounded-full bg-gray-800/50 hover:bg-purple-600/30">
-                        <Video className="w-5 h-5 text-purple-400" />
+                      <motion.button
+                        whileHover={{ scale: 1.1 }}
+                        whileTap={{ scale: 0.9 }}
+                        disabled={!chatAvailability?.can_video}
+                        className={`p-2 rounded-full transition-all ${chatAvailability?.can_video
+                          ? "bg-blue-300/20 hover:bg-blue-600/40 text-blue-400 border border-blue-500/30"
+                          : "bg-gray-600/50 text-gray-500 opacity-50 cursor-not-allowed"
+                          }`}
+                      >
+                        <Video className="w-5 h-5" />
+                        {chatAvailability?.is_available && (
+                          <div className="absolute top-1 right-1 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-gray-900 animate-pulse"></div>
+                        )}
                       </motion.button>
                       <motion.button whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }} onClick={() => { setSelectedChat(null); setShowMessages(false); }}>
                         <X className="w-6 h-6 text-gray-400" />
@@ -964,15 +1210,20 @@ const Navbar: React.FC = () => {
                         >
                           {/* Avatar */}
                           {!isMe && (
-                            <img
-                              src={
-                                msg.sender_avatar
-                                  ? `${getBaseUrl()}media/${msg.sender_avatar}`
-                                  : "/profile_pics/avatar.webp"
-                              }
-                              alt={msg.sender_username}
-                              className="w-8 h-8 rounded-full object-cover flex-shrink-0"
-                            />
+                            <div className={`relative p-[1px] rounded-full flex-shrink-0 ${currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND' ? 'bg-gradient-to-tr from-[#00f0ff] via-white to-[#00f0ff] animate-pulse shadow-[0_0_10px_rgba(0,240,255,0.4)]' :
+                              currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'VIP' ? 'bg-gradient-to-tr from-amber-300 via-amber-500 to-amber-200 animate-pulse shadow-[0_0_8px_rgba(251,191,36,0.2)]' :
+                                currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'PLUS' ? 'bg-gradient-to-tr from-purple-400 to-pink-500 border border-purple-500/30' : ''
+                              }`}>
+                              <img
+                                src={
+                                  msg.sender_avatar
+                                    ? `${getBaseUrl()}media/${msg.sender_avatar}`
+                                    : "/profile_pics/avatar.webp"
+                                }
+                                alt={msg.sender_username}
+                                className="w-8 h-8 rounded-full object-cover border border-[#0c1033]"
+                              />
+                            </div>
                           )}
 
                           {/* Bubble + Emoji */}
@@ -999,10 +1250,18 @@ const Navbar: React.FC = () => {
                             <div
                               className={`max-w-xs ${msg.message_type === 'text' ? 'px-4 py-3' : 'p-[1px]'} rounded-2xl shadow-xl transition-all duration-300 ${isMe
                                 ? msg.message_type === 'text'
-                                  ? "bg-gradient-to-br from-purple-600 via-purple-700 to-indigo-800 text-white rounded-br-none"
-                                  : "backdrop-blur-lg  text-white rounded-br-none"
+                                  ? user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND'
+                                    ? "bg-gradient-to-br from-cyan-500 via-blue-600 to-indigo-800 text-white rounded-br-none shadow-[0_0_15px_rgba(0,240,255,0.2)]"
+                                    : user.subscription_status?.plan?.name?.toUpperCase() === 'VIP'
+                                      ? "bg-gradient-to-br from-amber-400 via-amber-500 to-orange-600 text-black font-medium rounded-br-none shadow-[0_0_15px_rgba(251,191,36,0.3)]"
+                                      : "bg-gradient-to-br from-purple-600 via-purple-700 to-indigo-800 text-white rounded-br-none"
+                                  : "backdrop-blur-lg text-white rounded-br-none"
                                 : msg.message_type === 'text'
-                                  ? "bg-[#23233b] text-gray-100 rounded-bl-none border border-white/5 shadow-inner"
+                                  ? currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND'
+                                    ? "bg-[#1a1a2e]/90 text-cyan-50 border border-cyan-400/30 rounded-bl-none shadow-[0_0_10px_rgba(0,240,255,0.1)]"
+                                    : currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'VIP'
+                                      ? "bg-[#1f1a10]/90 text-amber-50 border border-amber-400/30 rounded-bl-none shadow-[0_0_10px_rgba(251,191,36,0.1)]"
+                                      : "bg-[#23233b] text-gray-100 rounded-bl-none border border-white/5 shadow-inner"
                                   : "backdrop-blur-lg text-gray-100 rounded-bl-none"
                                 }`}
                             >
@@ -1065,6 +1324,7 @@ const Navbar: React.FC = () => {
                                   <CustomAudioPlayer
                                     src={msg.file?.startsWith('http') || msg.file?.startsWith('blob:') ? msg.file : `${getBaseUrl()}media/${msg.file}`}
                                     isMe={isMe}
+                                    planName={isMe ? user.subscription_status?.plan?.name?.toUpperCase() : currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase()}
                                   />
                                   <div className="flex items-center justify-between w-full mt-1 gap-4">
                                     <p className={`text-[10px] ${isMe ? "text-purple-200/70" : "text-gray-500"}`}>
@@ -1106,9 +1366,23 @@ const Navbar: React.FC = () => {
                                   </div>
                                 </div>
                               ) : msg.message_type === "document" || msg.message_type === "file" ? (
-                                <div className="flex items-center gap-3 py-2 px-1 min-w-[200px] bg-gray-900/40 rounded-xl border border-white/5 hover:bg-gray-900/60 transition-all cursor-pointer">
-                                  <div className={`p-2 rounded-lg ${isMe ? 'bg-purple-600/20' : 'bg-gray-700/50'}`}>
-                                    <FileText className={`w-5 h-5 ${isMe ? 'text-purple-400' : 'text-gray-300'}`} />
+                                <div className={`flex items-center gap-3 py-2 px-1 min-w-[200px] rounded-xl border transition-all cursor-pointer ${isMe
+                                  ? user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND' ? 'bg-gradient-to-br from-cyan-500/30 to-blue-600/30 border-cyan-500/30 hover:bg-cyan-500/40 text-white' :
+                                    user.subscription_status?.plan?.name?.toUpperCase() === 'VIP' ? 'bg-gradient-to-br from-amber-400/30 to-orange-600/30 border-amber-500/30 hover:bg-amber-400/40 text-white' :
+                                      'bg-purple-600/20 border-purple-500/20 hover:bg-purple-600/30 text-white border'
+                                  : currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND' ? 'bg-[#1a1a2e]/90 border-cyan-400/30 hover:bg-[#1a1a2e] border' :
+                                    currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'VIP' ? 'bg-[#1f1a10]/90 border-amber-400/30 hover:bg-[#1f1a10] border' :
+                                      'bg-[#23233b] hover:bg-[#23233b]/80 border-transparent'
+                                  }`}>
+                                  <div className={`p-2 rounded-lg ${isMe
+                                    ? user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND' ? 'bg-cyan-400 text-black' :
+                                      user.subscription_status?.plan?.name?.toUpperCase() === 'VIP' ? 'bg-amber-400 text-black' :
+                                        'bg-purple-600/40 text-purple-100'
+                                    : currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND' ? 'bg-cyan-500/20 text-cyan-400' :
+                                      currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'VIP' ? 'bg-amber-500/20 text-amber-400' :
+                                        'bg-[#1a1a2e] text-gray-300'
+                                    }`}>
+                                    <FileText className={`w-5 h-5`} />
                                   </div>
                                   <div className="flex-1 overflow-hidden">
                                     <p className="text-xs font-medium truncate text-gray-200">
@@ -1128,7 +1402,14 @@ const Navbar: React.FC = () => {
                                   </a>
                                 </div>
                               ) : msg.message_type === "contact" ? (
-                                <div className="bg-gray-900/40 rounded-xl p-3 border border-white/5 flex flex-col gap-3 min-w-[200px]">
+                                <div className={`rounded-xl p-3 flex flex-col gap-3 min-w-[200px] ${isMe
+                                  ? user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND' ? 'bg-gradient-to-br from-cyan-500/20 to-blue-600/20 border-cyan-500/30 border' :
+                                    user.subscription_status?.plan?.name?.toUpperCase() === 'VIP' ? 'bg-gradient-to-br from-amber-400/20 to-orange-600/20 border-amber-500/30 border' :
+                                      'bg-purple-600/20 border-purple-500/20 border'
+                                  : currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND' ? 'bg-[#1a1a2e]/90 border-cyan-400/30 shadow-[0_0_10px_rgba(0,240,255,0.1)] border' :
+                                    currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'VIP' ? 'bg-[#1f1a10]/90 border-amber-400/30 shadow-[0_0_10px_rgba(251,191,36,0.1)] border' :
+                                      'bg-[#23233b] border-transparent'
+                                  }`}>
                                   <div className="flex items-center gap-3">
                                     {(() => {
                                       try {
@@ -1152,7 +1433,14 @@ const Navbar: React.FC = () => {
                                     })()}
                                   </div>
                                   <button
-                                    className="w-full py-2 bg-purple-600/10 hover:bg-purple-600/20 text-purple-400 text-xs font-semibold rounded-lg transition-colors border border-purple-600/10"
+                                    className={`w-full py-2 text-xs font-semibold rounded-lg transition-colors border ${isMe
+                                      ? user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND' ? 'bg-cyan-400/20 hover:bg-cyan-400/30 text-cyan-100 border-cyan-400/20' :
+                                        user.subscription_status?.plan?.name?.toUpperCase() === 'VIP' ? 'bg-amber-400/20 hover:bg-amber-400/30 text-amber-100 border-amber-400/20' :
+                                          'bg-white/10 hover:bg-white/20 text-white border-white/10'
+                                      : currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND' ? 'bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border-cyan-500/20' :
+                                        currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'VIP' ? 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border-amber-500/20' :
+                                          'bg-white/5 hover:bg-white/10 text-gray-300 border-transparent'
+                                      }`}
                                     onClick={() => {
                                       try {
                                         const contact = JSON.parse(msg.content);
@@ -1416,42 +1704,52 @@ const Navbar: React.FC = () => {
                         </motion.button>
                       )}
 
-                      {isRecording ? (
-                        <div className="flex-1 flex items-center gap-4 bg-gray-800/60 backdrop-blur-md border border-red-500/30 rounded-full px-4 py-2">
-                          <motion.button
-                            type="button"
-                            whileHover={{ scale: 1.1, color: "#ef4444" }}
-                            onClick={cancelRecording}
-                            className="text-gray-400 p-2"
-                          >
-                            <Trash2 className="w-5 h-5" />
-                          </motion.button>
+                      <div className={`flex-1 flex items-center relative rounded-full p-[1.5px] transition-all duration-300 ${currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND' ? 'bg-gradient-to-r from-cyan-500/50 via-white/50 to-cyan-500/50 shadow-[0_0_15px_rgba(0,240,255,0.2)]' :
+                        currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'PLUS' ? 'bg-gradient-to-r from-purple-500/50 via-white/50 to-purple-500/50' :
+                          currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'VIP' ? 'bg-gradient-to-r from-amber-400/50 via-white/50 to-amber-400/50' :
+                            'bg-gray-700/50'
+                        }`}>
+                        {isRecording ? (
+                          <div className="flex-1 flex items-center gap-4 bg-gray-900/90 backdrop-blur-md rounded-full px-4 py-2.5">
+                            <motion.button
+                              type="button"
+                              whileHover={{ scale: 1.1, color: "#ef4444" }}
+                              onClick={cancelRecording}
+                              className="text-gray-400 p-2"
+                            >
+                              <Trash2 className="w-5 h-5" />
+                            </motion.button>
 
-                          <div className="flex-1 flex items-center gap-2">
-                            <motion.div
-                              animate={{ opacity: [1, 0.5, 1] }}
-                              transition={{ repeat: Infinity, duration: 1 }}
-                              className="w-2.5 h-2.5 bg-red-500 rounded-full"
-                            />
-                            <span className="text-white font-mono text-sm">{formatTime(recordingTime)}</span>
+                            <div className="flex-1 flex items-center gap-2">
+                              <motion.div
+                                animate={{ opacity: [1, 0.5, 1] }}
+                                transition={{ repeat: Infinity, duration: 1 }}
+                                className="w-2.5 h-2.5 bg-red-500 rounded-full"
+                              />
+                              <span className="text-white font-mono text-sm">{formatTime(recordingTime)}</span>
+                            </div>
+
+                            <span className="text-xs text-gray-400 animate-pulse">Grabando...</span>
                           </div>
-
-                          <span className="text-xs text-gray-400 animate-pulse">Grabando...</span>
-                        </div>
-                      ) : (
-                        <input
-                          ref={inputRef}
-                          type="text"
-                          placeholder="Escribe un mensaje..."
-                          value={messageText}
-                          onChange={handleTyping}
-                          className="flex-1 bg-gray-800/60 backdrop-blur-md border border-gray-700/50 rounded-full px-3 py-3 text-white placeholder-gray-400 focus:outline-none focus:border-purple-500 transition-all"
-                        />
-                      )}
+                        ) : (
+                          <input
+                            ref={inputRef}
+                            type="text"
+                            placeholder="Escribe un mensaje..."
+                            value={messageText}
+                            onChange={handleTyping}
+                            className={`flex-1 bg-gray-900/90 backdrop-blur-md rounded-full px-4 py-3 text-white placeholder-gray-400 focus:outline-none transition-all ${currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND' ? 'focus:ring-1 focus:ring-cyan-400/50' :
+                              currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'PLUS' ? 'focus:ring-1 focus:ring-purple-400/50' :
+                                currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'VIP' ? 'focus:ring-1 focus:ring-amber-400/50' :
+                                  'focus:border-purple-500'
+                              }`}
+                          />
+                        )}
+                      </div>
 
                       <motion.button
-                        whileHover={{ scale: 1.1 }}
-                        whileTap={{ scale: 0.9 }}
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
                         type={messageText.trim() ? "submit" : "button"}
                         onClick={() => {
                           if (isRecording) {
@@ -1460,17 +1758,19 @@ const Navbar: React.FC = () => {
                             startRecording();
                           }
                         }}
-                        className={`p-3.5 rounded-full shadow-lg ${isRecording
-                          ? "bg-red-500 hover:bg-red-600"
-                          : "bg-gradient-to-r from-purple-600 to-indigo-600"
+                        className={`p-3.5 rounded-full shadow-xl transition-all duration-300 ${isRecording ? "bg-red-500 hover:bg-red-600 shadow-red-500/20" :
+                          currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND' ? "bg-gradient-to-br from-cyan-400 to-blue-600 shadow-cyan-500/40" :
+                            currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'PLUS' ? "bg-gradient-to-br from-purple-500 to-pink-600 shadow-purple-500/40" :
+                              currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'VIP' ? "bg-gradient-to-br from-amber-400 to-orange-600 shadow-amber-500/40 text-black" :
+                                "bg-gradient-to-r from-purple-600 to-indigo-600"
                           }`}
                       >
                         {isRecording ? (
                           <StopCircle className="w-5 h-5 text-white" />
                         ) : messageText.trim() ? (
-                          <Send className="w-5 h-5 text-white" />
+                          <Send className={`w-5 h-5 ${currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'VIP' ? 'text-black' : 'text-white'}`} />
                         ) : (
-                          <Mic className="w-5 h-5 text-white" />
+                          <Mic className={`w-5 h-5 ${currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'VIP' ? 'text-black' : 'text-white'}`} />
                         )}
                       </motion.button>
                     </div>

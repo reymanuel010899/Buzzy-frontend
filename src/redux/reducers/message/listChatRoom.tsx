@@ -8,6 +8,7 @@ export interface OtherUser {
   username: string;
   name: string;
   avatar: string | null;
+  subscription_status?: any;
 }
 
 export interface OtherUserOnline {

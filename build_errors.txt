@@ -1,0 +1,21 @@
+src/components/Layout/Navar.tsx(877,33): error TS6133: 'borderColor' is declared but its value is never read.
+src/components/Layout/Navar.tsx(878,33): error TS6133: 'glowColor' is declared but its value is never read.
+src/components/giftModal/TokenPurchaseSuccessModal.tsx(4,1): error TS6133: 'useNavigate' is declared but its value is never read.
+src/components/index/index.tsx(139,10): error TS6133: 'giftsLoading' is declared but its value is never read.
+src/components/index/index.tsx(1005,10): error TS6133: 'gifts' is declared but its value is never read.
+src/components/profle/BankAccountModal.tsx(3,39): error TS6133: 'Check' is declared but its value is never read.
+src/components/profle/BankAccountModal.tsx(16,32): error TS6133: 'error' is declared but its value is never read.
+src/components/profle/profile.tsx(203,11): error TS6133: 'setSelectedChat' is declared but its value is never read.
+src/components/profle/profile.tsx(216,9): error TS6133: 'weekDays' is declared but its value is never read.
+src/components/profle/profile.tsx(598,26): error TS2339: Property 'profile_video' does not exist on type 'UserInterface'.
+src/components/profle/profile.tsx(601,51): error TS2339: Property 'profile_video' does not exist on type 'UserInterface'.
+src/components/profle/profile.tsx(1501,68): error TS2339: Property 'plan' does not exist on type '{ plan_name: string; is_active: boolean; }'.
+src/components/profle/profile.tsx(1502,68): error TS2339: Property 'plan' does not exist on type '{ plan_name: string; is_active: boolean; }'.
+src/components/profle/profile.tsx(1506,73): error TS2339: Property 'plan' does not exist on type '{ plan_name: string; is_active: boolean; }'.
+src/components/profle/profile.tsx(1552,89): error TS2551: Property 'created_at' does not exist on type 'Comment'. Did you mean 'create_at'?
+src/components/profle/profile.tsx(1642,22): error TS2339: Property 'profile_video' does not exist on type 'UserInterface'.
+src/components/profle/profile.tsx(1645,47): error TS2339: Property 'profile_video' does not exist on type 'UserInterface'.
+src/components/wallet/wallet.tsx(8,1): error TS6133: 'createTransactions' is declared but its value is never read.
+src/components/wallet/wallet.tsx(31,9): error TS6133: 'dispatch' is declared but its value is never read.
+src/components/wallet/wallet.tsx(88,15): error TS6133: 'err' is declared but its value is never read.
+src/components/wallet/wallet.tsx(93,43): error TS6133: 'details' is declared but its value is never read.

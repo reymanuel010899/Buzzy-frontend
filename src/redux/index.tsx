@@ -29,6 +29,10 @@ import sendMessageReducer from "./reducers/message/sendMessage";
 import { searchReducer } from "./reducers/Search";
 import socialReducer from "./reducers/message/social";
 import subscriptionReducer from "./reducers/subscriptionReducer";
+import availabilityReducer from "./reducers/availabilityReducer";
+import socialAccountsReducer from "./reducers/socialAccountsReducer";
+import bankReducer from "./reducers/bankReducer";
+import updateProfileReducer from "./reducers/updateProfileReducer";
 
 export default combineReducers({
     register,
@@ -61,4 +65,8 @@ export default combineReducers({
     searchReducer,
     socialReducer,
     subscriptionReducer,
+    availabilityReducer,
+    socialAccountsReducer,
+    bankReducer,
+    updateProfileReducer,
 })

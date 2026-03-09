@@ -3,7 +3,7 @@ import ProfileSection from "../../components/profle/profile"
 const Profile = () => {
 
     return (<>
-        <ProfileSection/>
+        <ProfileSection {...({} as any)} />
     </>)
 }
 

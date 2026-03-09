@@ -5,6 +5,7 @@ export interface OtherUser {
   username: string;
   name: string;           // Nombre completo o username si no tiene
   avatar: string | null;  // URL completa de la foto de perfil o null
+  subscription_status?: any;
 }
 
 export interface OtherUserOnline {

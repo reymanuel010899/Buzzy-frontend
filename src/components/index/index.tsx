@@ -1229,7 +1229,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         setShowFullGiftMenu(false);
         return
       }
-      
+
       countSendGift.current = true
       sendGift({ story_uuid: currentStoryUuid, gift_type: type })(dispatch).then(() => {
         if (cost !== null && cost > 20) {
@@ -1247,7 +1247,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       // El giftAnimation se establecerá cuando se reciba la respuesta del WebSocket
       // No establecer aquí porque no tenemos el video del regalo todavía
       // If high value (e.g., cost > 20), update premium
-      
+
     } catch (error) {
       console.error("Error dispatching gift:", error);
     }
@@ -1984,7 +1984,13 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
               </div>
               {/* User Info */}
               <div className="flex items-center justify-between px-1">
-                <div className="flex items-center gap-3">
+                <div
+                  className="flex items-center gap-3 cursor-pointer"
+                  onClick={() => {
+                    closeStoryViewer();
+                    navigate(`/profile/${groupedStories[viewingStoryUserIndex].user.username}`);
+                  }}
+                >
                   <div className="w-10 h-10 rounded-full p-[1.5px] bg-gradient-to-tr from-[#7000ff] to-[#00f0ff]" style={{
                     background: `linear-gradient(to top right #00f0ff)`
                   }}>
