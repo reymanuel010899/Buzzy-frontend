@@ -55,6 +55,7 @@ const WS_URL = "ws://localhost:8001/ws"
 
 // --- Interfaces ---
 interface UserInterface {
+  chat_uuid?: string
   bio: string
   birthdate: string | null
   email: string
@@ -201,7 +202,7 @@ function ProfileSeccion({
   const [availabilitySaveSuccess, setAvailabilitySaveSuccess] = useState(false);
   const [showEditProfileModal, setShowEditProfileModal] = useState(false);
   const [showBankAccountModal, setShowBankAccountModal] = useState(false);
-  const { setShowMessages } = useChat();
+  const { setShowMessages, setSelectedChat } = useChat();
   const [showProfileMediaOptions, setShowProfileMediaOptions] = useState(false);
   const [showFullProfileMedia, setShowFullProfileMedia] = useState(false);
   const [showFollowPrompt, setShowFollowPrompt] = useState(false);
@@ -346,7 +347,8 @@ function ProfileSeccion({
       }, 300);
     }
   };
-
+      // setLocalMedia(media_user);e
+console.log(user, "**********")
   const handleGridVideoToggle = (videoId: string, videoElement: HTMLVideoElement | null) => {
     if (!videoElement) return;
     const currentlyPlaying = isGridVideoPlaying[videoId] || false;
@@ -545,14 +547,20 @@ function ProfileSeccion({
 
     // If we follow them or it's our profile or there is no clear state, just try to open chat
     setShowMessages(true);
+    setSelectedChat(user?.chat_uuid)
+    navigate("/")
   };
 
   const handleFollowAndMessage = () => {
     if (user?.id) {
-      createFollower({ follower_user_id: user.id.toString() })(dispatch).then(() => {
+      createFollower({ follower_user_id: user.id.toString() })(dispatch).then((res) => {
         setShowFollowPrompt(false);
         // Force opening messages after following
+        
         setShowMessages(true);
+        setSelectedChat(res?.data.chat_uuid)
+        navigate("/")
+
         // We could theoretically set user.is_following = true locally to prevent prompt next time
         if (user) {
           user.is_following = true;

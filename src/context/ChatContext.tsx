@@ -33,9 +33,13 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
 // Hook personalizado para usarlo fácil en cualquier componente
 export const useChat = () => {
   const context = useContext(ChatContext);
+
   if (!context) {
     throw new Error("useChat debe usarse dentro de un ChatProvider");
   }
+  // if (context && chat_uuid && !context.selectedChat) {
+    
+  // }
   console.log("----------------", context)
   return context;
 };

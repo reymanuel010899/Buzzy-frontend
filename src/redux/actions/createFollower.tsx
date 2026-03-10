@@ -14,6 +14,7 @@ export const createFollower = (body: CreateLikeBody) => async (dispatch: any) =>
         payload: response.data,
       });
     }
+    return response
 
   } catch {
     dispatch({

@@ -221,7 +221,7 @@ export const ShowComments = ({
                     >
                         <div className="flex justify-center p-3 "><div className="w-12 h-1.5 bg-[#00f0ff] rounded-full cursor-pointer"></div></div>
 
-                        <h2 className="text-center font-bold text-white pb-2">Comentarios</h2>
+                        <h2 className="text-center font-bold text-white pb-2">Comentarios ---</h2>
 
                         <div className="flex-1 overflow-y-auto px-4 pb-24 custom-scrollbar">
                             {!commentsTree.length ? (
