@@ -1,4 +1,4 @@
-import { SUCCEES_BUY_TOKENS, FAILED_BUY_TOKENS } from '../type'
+import { SUCCEES_BUY_TOKENS, FAILED_BUY_TOKENS, SUCCESS_GET_TOKEN_PACKAGES, FAILED_GET_TOKEN_PACKAGES } from '../type'
 import { apiClient } from '../client/api-client';
 
 export const buyTokens = (tokens: number, cost: number) => async (dispatch: any) => {
@@ -17,6 +17,24 @@ export const buyTokens = (tokens: number, cost: number) => async (dispatch: any)
     } catch (error: any) {
         dispatch({
             type: FAILED_BUY_TOKENS,
+            payload: error.response?.data || error.message
+        });
+        throw error;
+    }
+};
+export const getTokenPackages = () => async (dispatch: any) => {
+    try {
+        const response = await apiClient.get(`/api/wallet/token-packages/`);
+        if (response.status === 200) {
+            dispatch({
+                type: SUCCESS_GET_TOKEN_PACKAGES,
+                payload: response.data,
+            });
+            return response.data;
+        }
+    } catch (error: any) {
+        dispatch({
+            type: FAILED_GET_TOKEN_PACKAGES,
             payload: error.response?.data || error.message
         });
         throw error;

@@ -10,9 +10,71 @@ interface VipGiftExperienceProps {
     onSendGift: (gift: GiftI | any) => void;
     gifts?: GiftI[] | any[];
     walletTokens: number;
+    subscriptionStatus?: {
+        is_active: boolean;
+        plan?: {
+            name: string;
+        } | string;
+        plan_name?: string;
+    } | null;
 }
 
 // --- Sub-components ---
+
+const getPlanTheme = (subscriptionStatus: VipGiftExperienceProps['subscriptionStatus']) => {
+    const plan = (subscriptionStatus?.plan_name || (typeof subscriptionStatus?.plan === 'string' ? subscriptionStatus?.plan : subscriptionStatus?.plan?.name) || 'NONE').toUpperCase();
+
+    switch (plan) {
+        case 'VIP':
+            return {
+                name: 'VIP',
+                primaryColor: 'text-amber-400',
+                glowColor: 'rgba(251,191,36,0.3)',
+                borderColor: 'border-amber-400',
+                bgGradient: 'from-amber-700 via-amber-600 to-amber-800',
+                buttonBorder: 'border-amber-400/20',
+                tokenColor: 'text-amber-500',
+                icon: <Crown className="text-amber-400" size={36} />,
+                powerText: 'EL PODER (VIP)'
+            };
+        case 'PLUS':
+            return {
+                name: 'PLUS',
+                primaryColor: 'text-purple-400',
+                glowColor: 'rgba(168,85,247,0.3)',
+                borderColor: 'border-purple-400',
+                bgGradient: 'from-purple-700 via-purple-600 to-purple-800',
+                buttonBorder: 'border-purple-400/20',
+                tokenColor: 'text-purple-500',
+                icon: <Zap className="text-purple-400" size={36} />,
+                powerText: 'EL PODER (PLUS)'
+            };
+        case 'FRIEND':
+            return {
+                name: 'FRIEND',
+                primaryColor: 'text-cyan-400',
+                glowColor: 'rgba(0,240,255,0.3)',
+                borderColor: 'border-cyan-400',
+                bgGradient: 'from-cyan-700 via-cyan-600 to-cyan-800',
+                buttonBorder: 'border-cyan-400/20',
+                tokenColor: 'text-cyan-500',
+                icon: <Star className="text-cyan-400" size={36} />,
+                powerText: 'EL PODER (FRIEND)'
+            };
+        default:
+            return {
+                name: 'DEFAULT',
+                primaryColor: 'text-yellow-400',
+                glowColor: 'rgba(234,179,8,0.3)',
+                borderColor: 'border-yellow-400/80',
+                bgGradient: 'from-yellow-700 via-yellow-600 to-yellow-800',
+                buttonBorder: 'border-yellow-400/20',
+                tokenColor: 'text-yellow-500',
+                icon: <Crown className="text-yellow-400" size={36} />,
+                powerText: 'EL PODER (VIP)'
+            };
+    }
+};
 
 const SpaceBackground: React.FC = () => (
     <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
@@ -61,7 +123,8 @@ const GiftCarousel: React.FC<{
     displayGifts: GiftI[];
     selectedIndex: number;
     setSelectedIndex: (index: number) => void;
-}> = ({ displayGifts, selectedIndex, setSelectedIndex }) => {
+    theme: any;
+}> = ({ displayGifts, selectedIndex, setSelectedIndex, theme }) => {
     const nextGift = () => setSelectedIndex((selectedIndex + 1) % displayGifts.length);
     const prevGift = () => setSelectedIndex((selectedIndex - 1 + displayGifts.length) % displayGifts.length);
 
@@ -96,16 +159,19 @@ const GiftCarousel: React.FC<{
                             {isSelected && (
                                 <motion.div
                                     layoutId="glow"
-                                    className="absolute -inset-6 bg-yellow-500/20 rounded-full blur-2xl"
+                                    className={`absolute -inset-6 rounded-full blur-2xl`}
+                                    style={{ backgroundColor: theme.glowColor }}
                                     animate={{ opacity: [0.2, 0.4, 0.2] }}
                                     transition={{ duration: 2, repeat: Infinity }}
                                 />
                             )}
 
                             <div className={`relative rounded-full p-1.5 transition-all duration-500 ${isSelected
-                                ? 'border-2 border-yellow-400/80 shadow-[0_0_40px_rgba(234,179,8,0.3)]'
+                                ? `border-2 ${theme.borderColor}`
                                 : 'border border-white/10 opacity-60'
-                                }`}>
+                                }`}
+                                style={isSelected ? { boxShadow: `0 0 40px ${theme.glowColor}` } : {}}
+                            >
                                 <div className="w-20 h-20 md:w-28 md:h-28 flex items-center justify-center bg-black/40 rounded-full backdrop-blur-sm relative overflow-hidden">
                                     {gift.video ? (
                                         <video
@@ -121,11 +187,13 @@ const GiftCarousel: React.FC<{
                                 </div>
                                 {isSelected && (
                                     <div className="absolute -top-1/4 left-1/2 -translate-x-1/2">
-                                        <Crown className="text-yellow-400 drop-shadow-[0_0_10px_rgba(234,179,8,0.8)]" size={36} />
+                                        {React.cloneElement(theme.icon as React.ReactElement, {
+                                            className: `${theme.primaryColor} drop-shadow-[0_0_10px_${theme.glowColor}]`
+                                        })}
                                     </div>
                                 )}
                             </div>
-                            <span className={`mt-5 text-[10px] font-bold uppercase tracking-[0.3em] ${isSelected ? 'text-yellow-400' : 'text-gray-500'
+                            <span className={`mt-5 text-[10px] font-bold uppercase tracking-[0.3em] ${isSelected ? theme.primaryColor : 'text-gray-500'
                                 }`}>
                                 {gift.name}
                             </span>
@@ -146,9 +214,10 @@ const GiftPanel: React.FC<{
     setMessage: (msg: string) => void;
     cost: number;
     walletTokens: number;
-}> = ({ message, setMessage, cost, walletTokens }) => (
+    theme: any;
+}> = ({ message, setMessage, cost, walletTokens, theme }) => (
     <div className="relative w-full max-w-2xl bg-white/5 backdrop-blur-2xl border border-white/10 rounded-[2rem] p-5 md:p-6 shadow-2xl z-10 mx-4">
-        <h2 className="text-lg md:text-2xl font-black text-center mb-6 text-yellow-100/90 tracking-[0.4em] uppercase drop-shadow-lg">
+        <h2 className="text-lg md:text-2xl font-black text-center mb-6 text-gray-100/90 tracking-[0.4em] uppercase drop-shadow-lg">
             Gift Presential
         </h2>
 
@@ -159,14 +228,14 @@ const GiftPanel: React.FC<{
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
                     placeholder="ESCRIBE AQUÍ TU DEDICATORIA DE PODER"
-                    className="w-full bg-transparent text-white font-bold placeholder:text-gray-600 focus:outline-none transition-all resize-none h-16 text-xs md:text-sm tracking-widest uppercase italic"
+                    className={`w-full bg-transparent text-white font-bold placeholder:text-gray-600 focus:outline-none transition-all resize-none h-16 text-xs md:text-sm tracking-widest uppercase italic`}
                 />
             </div>
 
             <div className="flex gap-4">
                 <div className="flex-1 flex flex-col justify-center items-center bg-black/30 rounded-xl border border-white/5 p-4 shadow-inner">
                     <span className="text-gray-500 uppercase text-[9px] font-black tracking-[0.2em] mb-1.5 text-center">Costo de Regalo:</span>
-                    <span className="text-xl md:text-2xl font-black text-yellow-500 drop-shadow-[0_0_10px_rgba(234,179,8,0.5)] uppercase">
+                    <span className={`text-xl md:text-2xl font-black ${theme.tokenColor} drop-shadow-[0_0_10px_${theme.glowColor}] uppercase`}>
                         {cost} TOKENS
                     </span>
                 </div>
@@ -189,7 +258,8 @@ const VipPowerButton: React.FC<{
     isPressing: boolean;
     onPressStart: () => void;
     onPressEnd: () => void;
-}> = ({ progress, isPressing, onPressStart, onPressEnd }) => (
+    theme: any;
+}> = ({ progress, isPressing, onPressStart, onPressEnd, theme }) => (
     <div className="mt-6 flex justify-center w-full">
         <button
             onMouseDown={onPressStart}
@@ -199,23 +269,27 @@ const VipPowerButton: React.FC<{
             onTouchEnd={onPressEnd}
             className="relative w-full max-w-md group cursor-pointer select-none active:scale-[0.98] transition-transform"
         >
-            <div className="relative bg-gradient-to-r from-yellow-700 via-yellow-600 to-yellow-800 p-[1.5px] rounded-2xl shadow-[0_0_30px_rgba(234,179,8,0.2)] overflow-hidden">
-                <div className="relative bg-[#080808] rounded-xl p-4 overflow-hidden border border-yellow-400/20">
+            <div className={`relative bg-gradient-to-r ${theme.bgGradient} p-[1.5px] rounded-2xl overflow-hidden`} style={{ boxShadow: `0 0 30px ${theme.glowColor}` }}>
+                <div className={`relative bg-[#080808] rounded-xl p-4 overflow-hidden border ${theme.buttonBorder}`}>
                     {/* Progress Fill Overlay */}
                     <motion.div
-                        className="absolute left-0 top-0 bottom-0 bg-yellow-500/15 pointer-events-none"
-                        style={{ width: `${progress}%` }}
+                        className={`absolute left-0 top-0 bottom-0 pointer-events-none opacity-20`}
+                        style={{ width: `${progress}%`, backgroundColor: theme.glowColor }}
                     />
 
                     <div className="relative flex items-center justify-between gap-5">
                         {/* V Diamond Icon */}
                         <div className="relative flex-shrink-0">
-                            <div className="relative w-12 h-12 bg-[#1a1a1a] border-[3px] border-yellow-500/80 rounded-xl rotate-45 flex items-center justify-center overflow-hidden shadow-[0_0_12px_rgba(234,179,8,0.4)]">
-                                <span className="text-2xl font-black text-yellow-500 -rotate-45">V</span>
+                            <div className={`relative w-12 h-12 bg-[#1a1a1a] border-[3px] rounded-xl rotate-45 flex items-center justify-center overflow-hidden transition-all duration-300`}
+                                style={{ borderColor: theme.primaryColor.replace('text-', ''), boxShadow: `0 0 12px ${theme.glowColor}` }}>
+                                <span className={`text-2xl font-black -rotate-45 ${theme.primaryColor}`}>
+                                    {theme.name === 'VIP' ? 'V' : theme.name === 'PLUS' ? 'P' : 'F'}
+                                </span>
                             </div>
                             {isPressing && (
                                 <motion.div
-                                    className="absolute -inset-1.5 border-2 border-yellow-400 rounded-xl rotate-45"
+                                    className={`absolute -inset-1.5 border-2 rounded-xl rotate-45`}
+                                    style={{ borderColor: theme.primaryColor.replace('text-', '') }}
                                     animate={{ scale: [1, 1.25], opacity: [0.4, 0] }}
                                     transition={{ duration: 0.6, repeat: Infinity }}
                                 />
@@ -224,17 +298,17 @@ const VipPowerButton: React.FC<{
 
                         {/* Text Context */}
                         <div className="flex-1 text-left flex flex-col justify-center">
-                            <p className="text-[9px] font-black uppercase tracking-[0.2em] text-yellow-500/70">Presiona para liberar</p>
-                            <p className="text-base md:text-lg font-black uppercase text-white tracking-widest mt-0.5">El Poder (VIP)</p>
+                            <p className={`text-[9px] font-black uppercase tracking-[0.2em] ${theme.primaryColor} opacity-70`}>Presiona para liberar</p>
+                            <p className="text-base md:text-lg font-black uppercase text-white tracking-widest mt-0.5">{theme.powerText}</p>
                         </div>
 
                         {/* Time & Mini Progress */}
                         <div className="flex flex-col items-end justify-center min-w-[50px]">
-                            <span className="text-lg font-black text-yellow-500 italic">2s</span>
+                            <span className={`text-lg font-black italic ${theme.primaryColor}`}>2s</span>
                             <div className="w-12 h-1 bg-white/10 rounded-full mt-1.5 overflow-hidden">
                                 <motion.div
-                                    className="h-full bg-yellow-500"
-                                    style={{ width: `${progress}%` }}
+                                    className={`h-full`}
+                                    style={{ width: `${progress}%`, backgroundColor: theme.primaryColor.replace('text-', '') }}
                                 />
                             </div>
                         </div>
@@ -246,7 +320,7 @@ const VipPowerButton: React.FC<{
                             {[...Array(6)].map((_, i) => (
                                 <motion.div
                                     key={i}
-                                    className="absolute w-[1px] h-2.5 bg-yellow-100"
+                                    className="absolute w-[1px] h-2.5 bg-white"
                                     animate={{
                                         x: [Math.random() * 300, Math.random() * 300],
                                         y: [0, 80],
@@ -264,7 +338,7 @@ const VipPowerButton: React.FC<{
     </div>
 );
 
-const SuccessOverlay: React.FC<{ onClose: () => void }> = ({ onClose }) => (
+const SuccessOverlay: React.FC<{ onClose: () => void; theme: any }> = ({ onClose, theme }) => (
     <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
@@ -276,14 +350,15 @@ const SuccessOverlay: React.FC<{ onClose: () => void }> = ({ onClose }) => (
                 <motion.div
                     animate={{ scale: [1, 1.4, 1], opacity: [0.4, 0.8, 0.4] }}
                     transition={{ duration: 2, repeat: Infinity }}
-                    className="absolute inset-0 bg-yellow-400 blur-2xl rounded-full"
+                    className="absolute inset-0 blur-2xl rounded-full"
+                    style={{ backgroundColor: theme.primaryColor.replace('text-', '') }}
                 />
-                <Zap size={100} className="text-white relative z-10 fill-yellow-400 drop-shadow-[0_0_30px_rgba(234,179,8,0.8)]" />
+                <Zap size={100} className="text-white relative z-10 fill-current drop-shadow-[0_0_30px_rgba(255,255,255,0.5)]" />
             </div>
             <h2 className="text-4xl md:text-6xl font-black italic text-white tracking-tighter uppercase drop-shadow-xl">
                 ENVÍO COMPLETADO
             </h2>
-            <p className="text-yellow-400 text-lg font-black tracking-[0.5em] mt-4 uppercase drop-shadow-md">
+            <p className={`${theme.primaryColor} text-lg font-black tracking-[0.5em] mt-4 uppercase drop-shadow-md`}>
                 Tu prestigio se eleva
             </p>
 
@@ -291,7 +366,8 @@ const SuccessOverlay: React.FC<{ onClose: () => void }> = ({ onClose }) => (
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
                 onClick={onClose}
-                className="mt-12 px-10 py-3.5 bg-gradient-to-r from-yellow-600 to-yellow-800 rounded-full font-black text-white tracking-[0.2em] shadow-xl hover:shadow-yellow-500/40 transition-all uppercase border-2 border-yellow-400 text-xs"
+                className={`mt-12 px-10 py-3.5 bg-gradient-to-r ${theme.bgGradient} rounded-full font-black text-white tracking-[0.2em] shadow-xl transition-all uppercase border-2 shadow-inner text-xs`}
+                style={{ borderColor: theme.primaryColor.replace('text-', '') }}
             >
                 Volver al Nexo
             </motion.button>
@@ -301,12 +377,14 @@ const SuccessOverlay: React.FC<{ onClose: () => void }> = ({ onClose }) => (
 
 // --- Main Component ---
 
-const VipGiftExperience: React.FC<VipGiftExperienceProps> = ({ onClose, onSendGift, gifts: parentGifts, walletTokens }) => {
+const VipGiftExperience: React.FC<VipGiftExperienceProps> = ({ onClose, onSendGift, gifts: parentGifts, walletTokens, subscriptionStatus }) => {
     const [isPressing, setIsPressing] = useState(false);
     const [progress, setProgress] = useState(0);
     const [isSent, setIsSent] = useState(false);
     const [selectedIndex, setSelectedIndex] = useState(2);
     const [message, setMessage] = useState("");
+
+    const theme = getPlanTheme(subscriptionStatus);
 
     const displayGifts = parentGifts && parentGifts.length > 0 ? parentGifts : [
         { id: '1', name: 'Tokens', token_price: 100, slug: '1', emoji: '🪙', video: null, is_active: true, created_at: '' },
@@ -336,6 +414,8 @@ const VipGiftExperience: React.FC<VipGiftExperienceProps> = ({ onClose, onSendGi
         setIsSent(true);
         onSendGift(selectedGift);
         setIsPressing(false);
+        // Automatically close the modal so animations can render
+        setTimeout(onClose, 100);
     };
 
     return (
@@ -348,6 +428,7 @@ const VipGiftExperience: React.FC<VipGiftExperienceProps> = ({ onClose, onSendGi
                     displayGifts={displayGifts}
                     selectedIndex={selectedIndex}
                     setSelectedIndex={setSelectedIndex}
+                    theme={theme}
                 />
 
                 <div className="w-full flex flex-col items-center gap-4">
@@ -356,6 +437,7 @@ const VipGiftExperience: React.FC<VipGiftExperienceProps> = ({ onClose, onSendGi
                         setMessage={setMessage}
                         cost={selectedGift.token_price || 0}
                         walletTokens={walletTokens}
+                        theme={theme}
                     />
 
                     <VipPowerButton
@@ -363,13 +445,10 @@ const VipGiftExperience: React.FC<VipGiftExperienceProps> = ({ onClose, onSendGi
                         isPressing={isPressing}
                         onPressStart={() => setIsPressing(true)}
                         onPressEnd={() => setIsPressing(false)}
+                        theme={theme}
                     />
                 </div>
             </div>
-
-            <AnimatePresence>
-                {isSent && <SuccessOverlay onClose={onClose} />}
-            </AnimatePresence>
         </div>
     );
 };

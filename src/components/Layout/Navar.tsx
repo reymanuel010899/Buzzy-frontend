@@ -816,12 +816,12 @@ const Navbar: React.FC = () => {
                         placeholder="Buscar chat..."
                         value={chatSearchTerm}
                         onChange={(e) => setChatSearchTerm(e.target.value)}
-                        className="block w-full pl-10 pr-3 py-2 border border-gray-700/50 rounded-xl leading-5 bg-[#0c1033] text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-[#00f0ff]/50 focus:border-[#00f0ff]/50 sm:text-sm transition-all shadow-inner"
+                        className="block w-full pl-10 pr-3 py-2 border border-gray-700/50 rounded-xl leading-5 bg-[#0c2033] text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-[#00f0ff]/50 focus:border-[#00f0ff]/50 sm:text-sm transition-all shadow-inner"
                       />
                     </div>
                   </div>
 
-                  <div className="max-h-[70vh] overflow-y-auto">
+                  <div className="max-h-[70vh] overflow-y-auto pb-3">
                     {loading ? (
                       // Skeleton loader
                       <div className="p-4 space-y-4">
@@ -999,22 +999,24 @@ const Navbar: React.FC = () => {
                                       {planName === 'VIP' && (
                                         <span className="text-[9px] bg-gradient-to-r from-amber-400 to-amber-600 text-black px-1.5 py-0.5 rounded-md font-bold uppercase tracking-tighter shadow-sm">VIP</span>
                                       )}
-
-                                      <span className="text-[10px] text-gray-500 ml-auto font-medium">
+                                    </div>
+                                    <div className="flex flex-col items-end gap-1.5 ml-2">
+                                      <span className="text-[10px] text-gray-500 font-medium whitespace-nowrap">
                                         {new Date(chat.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                       </span>
+                                      {chat.unread_count > 0 && (
+                                        <div className={`w-5 h-5 flex items-center justify-center text-[10px] text-white font-bold rounded-full shadow-lg ${planName === 'FRIEND' ? 'bg-gradient-to-br from-[#00f0ff] to-blue-600 shadow-[0_0_10px_rgba(0,240,255,0.3)]' :
+                                          planName === 'VIP' ? 'bg-gradient-to-br from-amber-400 to-orange-600 shadow-[0_0_10px_rgba(251,191,36,0.3)]' :
+                                            'bg-gradient-to-br from-purple-500 to-pink-500 shadow-[0_0_10px_rgba(168,85,247,0.3)]'
+                                          }`}>
+                                          {getUnreadAcount(chat.uuid)}
+                                        </div>
+                                      )}
                                     </div>
                                   </div>
-                                  <div className="flex justify-between items-center mt-1">
-                                    <p className="text-sm text-gray-400 truncate group-hover:text-gray-300 transition-colors">
-                                      {typingContest(chat)}
-                                    </p>
-                                    {chat.unread_count > 0 && (
-                                      <div className="w-5 h-5 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center text-[10px] text-white font-bold shadow-lg shadow-purple-500/20">
-                                        {getUnreadAcount(chat.uuid)}
-                                      </div>
-                                    )}
-                                  </div>
+                                  <p className="text-sm text-gray-400 truncate group-hover:text-gray-300 transition-colors pr-2">
+                                    {typingContest(chat)}
+                                  </p>
                                 </div>
                               </motion.li>
                             );
@@ -1080,7 +1082,7 @@ const Navbar: React.FC = () => {
                           />
 
                           {/* Delicate Diamond/Premium Badge Overlay */}
-                          <div className="absolute -top-1.5 -right-2 z-10 scale-90">
+                          <div className="absolute top-12.5 -right-3 z-10 scale-90">
                             {currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND' && (
                               <motion.span
                                 initial={{ scale: 0.5, opacity: 0 }}
@@ -1094,7 +1096,7 @@ const Navbar: React.FC = () => {
                               <motion.span
                                 initial={{ scale: 0.5, opacity: 0 }}
                                 animate={{ scale: 1, opacity: 1 }}
-                                className="text-[7px] bg-white/10 backdrop-blur-md text-purple-300 px-2 py-0.5 rounded-full font-bold uppercase tracking-widest border border-purple-400/30"
+                                className="text-[7px] bg-white/10 backdrop-blur-md text-purple-300 px-2 py-0.5 rounded-full font-bold uppercase tracking-widest border border-purple-400/30 shadow-[0_0_10px_rgba(0,240,255,0.4)] flex items-center gap-1"
                               >
                                 PLUS
                               </motion.span>
@@ -1103,7 +1105,7 @@ const Navbar: React.FC = () => {
                               <motion.span
                                 initial={{ scale: 0.5, opacity: 0 }}
                                 animate={{ scale: 1, opacity: 1 }}
-                                className="text-[7px] bg-white/10 backdrop-blur-md text-amber-300 px-2 py-0.5 rounded-full font-bold uppercase tracking-widest border border-amber-400/30"
+                                className="text-[7px] bg-white/10 backdrop-blur-md text-amber-300 px-2 py-0.5 rounded-full font-bold uppercase tracking-widest border border-amber-400/30 shadow-[0_0_10px_rgba(0,240,255,0.4)] flex items-center gap-1"
                               >
                                 VIP
                               </motion.span>
@@ -1251,17 +1253,21 @@ const Navbar: React.FC = () => {
                               className={`max-w-xs ${msg.message_type === 'text' ? 'px-4 py-3' : 'p-[1px]'} rounded-2xl shadow-xl transition-all duration-300 ${isMe
                                 ? msg.message_type === 'text'
                                   ? user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND'
-                                    ? "bg-gradient-to-br from-cyan-500 via-blue-600 to-indigo-800 text-white rounded-br-none shadow-[0_0_15px_rgba(0,240,255,0.2)]"
+                                    ? "bg-gradient-to-br from-cyan-500 via-blue-600 to-indigo-800 text-white rounded-br-none shadow-[0_0_20px_rgba(0,240,255,0.3)] border border-cyan-400/30"
                                     : user.subscription_status?.plan?.name?.toUpperCase() === 'VIP'
-                                      ? "bg-gradient-to-br from-amber-400 via-amber-500 to-orange-600 text-black font-medium rounded-br-none shadow-[0_0_15px_rgba(251,191,36,0.3)]"
-                                      : "bg-gradient-to-br from-purple-600 via-purple-700 to-indigo-800 text-white rounded-br-none"
+                                      ? "bg-gradient-to-br from-amber-400 via-amber-500 to-orange-600 text-black font-bold rounded-br-none shadow-[0_0_20px_rgba(251,191,36,0.4)] border border-amber-300/50"
+                                      : user.subscription_status?.plan?.name?.toUpperCase() === 'PLUS'
+                                        ? "bg-gradient-to-br from-purple-600 via-pink-600 to-purple-800 text-white rounded-br-none shadow-[0_0_15px_rgba(168,85,247,0.3)] border border-purple-400/20"
+                                        : "bg-gradient-to-br from-gray-700 via-gray-800 to-gray-900 text-white rounded-br-none shadow-lg border border-white/5"
                                   : "backdrop-blur-lg text-white rounded-br-none"
                                 : msg.message_type === 'text'
                                   ? currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND'
-                                    ? "bg-[#1a1a2e]/90 text-cyan-50 border border-cyan-400/30 rounded-bl-none shadow-[0_0_10px_rgba(0,240,255,0.1)]"
+                                    ? "bg-[#0c1a2e]/90 text-cyan-50 border border-cyan-400/40 rounded-bl-none shadow-[0_0_15px_rgba(0,240,255,0.15)]"
                                     : currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'VIP'
-                                      ? "bg-[#1f1a10]/90 text-amber-50 border border-amber-400/30 rounded-bl-none shadow-[0_0_10px_rgba(251,191,36,0.1)]"
-                                      : "bg-[#23233b] text-gray-100 rounded-bl-none border border-white/5 shadow-inner"
+                                      ? "bg-[#1f1a10]/95 text-amber-50 border border-amber-400/40 rounded-bl-none shadow-[0_0_15px_rgba(251,191,36,0.15)]"
+                                      : currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'PLUS'
+                                        ? "bg-[#1e0f2e]/90 text-purple-50 border border-purple-500/30 rounded-bl-none shadow-[0_0_10px_rgba(168,85,247,0.1)]"
+                                        : "bg-[#1a1a1a] text-gray-100 rounded-bl-none border border-white/10 shadow-inner"
                                   : "backdrop-blur-lg text-gray-100 rounded-bl-none"
                                 }`}
                             >

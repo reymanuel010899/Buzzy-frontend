@@ -19,6 +19,7 @@ import { getStoryViewers } from "../../redux/actions/history/getHIstoryViewers"
 import { likeStory } from "../../redux/actions/history/likeHistory"
 import { sendGift } from "../../redux/actions/gift/sendGift"
 import { getActiveGift } from "../../redux/actions/gift/listGiftActive"
+import { sendVideoGift } from "../../redux/actions/gift/sendVideoGift"
 import { getRecivedGift } from "../../redux/actions/gift/listGiftRecived"
 import { getOneActiveGift } from "../../redux/actions/gift/getGiftActive"
 import { getRecivedGiftByUser } from "../../redux/actions/gift/getGiftsByUser"
@@ -137,6 +138,11 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const audioRefs = useRef<Record<string, HTMLAudioElement | null>>({});
   const [_fullGifts, setFullGifts] = useState<GiftI[] | GiftI | []>([]);
   const [giftsLoading, setGiftsLoading] = useState(true);
+  const [showVideoGiftModal, setShowVideoGiftModal] = useState(false);
+  const [selectedVideoForGift, setSelectedVideoForGift] = useState<string | number | null>(null);
+
+  const [isBlackout, setIsBlackout] = useState(false);
+
   // --- R3F Scope for Gift3D ---
   // Memoizar función para evitar recreaciones
   const isVideoContent = useCallback((file: string) => /\.(mp4|webm|ogg|mov)$/i.test(file), []);
@@ -468,10 +474,10 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
           gift: data.gift_video,
         });
 
-        // Si el regalo es grande (>20), activar modo premium en esa story
-        if (data.amount > 20) {
-          setStoryPremiumStatesSee(prev => ({ ...prev, [data.story_uuid]: true }));
-        }
+        // // Si el regalo es grande (>20), activar modo premium en esa story
+        // if (data.amount > 20) {
+        //   setStoryPremiumStatesSee(prev => ({ ...prev, [data.story_uuid]: true }));
+        // }
       }
 
       // Cerrar modal de viewers si está abierto
@@ -1050,6 +1056,10 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
   const handleGiftClick = () => {
     if (currentStoryUuid) {
+      setIsStoryPaused(true);
+      if (storyVideoRef.current && !storyVideoRef.current.paused) {
+        storyVideoRef.current.pause();
+      }
       setShowGiftMenu(true);
     }
   };
@@ -1242,6 +1252,8 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
           setShowGiftMenu(false);
           setShowTokenShopModal(true);
         }
+      }).finally(() => {
+        countSendGift.current = false;
       });
       // if (sound) sound.play();
       // El giftAnimation se establecerá cuando se reciba la respuesta del WebSocket
@@ -1250,6 +1262,41 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
     } catch (error) {
       console.error("Error dispatching gift:", error);
+    }
+  };
+
+  const handleVideoGiftClick = (videoId: string | number) => {
+    setSelectedVideoForGift(videoId);
+    // Pause the video in the feed
+    const index = mediaVideo?.findIndex(v => v.id?.toString() === videoId?.toString());
+    if (index !== undefined && index !== -1) {
+      const videoElement = videoRefs.current[index];
+      if (videoElement && !videoElement.paused) {
+        videoElement.pause();
+        setIsGridVideoPlaying(prev => ({ ...prev, [videoId.toString()]: false }));
+      }
+    }
+    setShowVideoGiftModal(true);
+    console.log("==============")
+  };
+  const sendVideoGiftCount = useRef(false)
+  const handleSendVideoGift = async (giftTypeOrGift: string | GiftI, amount?: number) => {
+    let type = typeof giftTypeOrGift === 'string' ? giftTypeOrGift : (giftTypeOrGift.slug || giftTypeOrGift.name);
+    const cost = amount || (typeof giftTypeOrGift !== 'string' ? giftTypeOrGift.token_price : 0);
+
+    if (walletTokens < cost) {
+      setShowTokenShopModal(true);
+      return;
+    }
+
+    if (!selectedVideoForGift) return;
+    if (sendVideoGiftCount.current) return;
+    try {
+      sendVideoGiftCount.current = true
+      await sendVideoGift({ video_id: Number(selectedVideoForGift), gift_type: type })(dispatch);
+      setShowVideoGiftModal(false);
+    } catch (error) {
+      console.error("Error dispatching video gift:", error);
     }
   };
   // Preload sounds
@@ -1681,7 +1728,10 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                             </motion.button>
 
                             <motion.button
-                              onClick={handleGiftClick}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleVideoGiftClick(data.id);
+                              }}
                               className="flex flex-col items-center gap-1"
                               whileHover={{ scale: 1.1 }}
                               whileTap={{ scale: 0.95 }}
@@ -1900,7 +1950,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: 400, scale: 0.7 }}
                   transition={{ type: "tween", duration: 0.4, ease: "easeInOut" }}
-                  className={`fixed bottom-15 left-1/2 -translate-x-1/2 z-50 pointer-events-none w-[700px] max-w-lg  py-15`}
+                  className={`fixed bottom-15 left-1/2 -translate-x-1/2 z-60 pointer-events-none w-[700px] max-w-lg  py-15`}
                 >
                   <video
                     key={giftAnimation.giftId}
@@ -1919,11 +1969,22 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                       WebkitMaskComposite: "destination-in",
                       maskComposite: "intersect"
                     }}
+                    onTimeUpdate={(e) => {
+                      // Blackout effect for Space gift ("🪐" or "Space")
+                      const video = e.currentTarget;
+                      if (giftAnimation.type === 'Space' || giftAnimation.type === '🪐') {
+                        if (video.currentTime >= 4.0 && video.currentTime < 6.0) {
+                          if (!isBlackout) setIsBlackout(true);
+                        } else if (video.currentTime >= 6.0 && isBlackout) {
+                          setIsBlackout(false);
+                        }
+                      }
+                    }}
                     onPlay={() => {
                       // Asegurar que el estado premium esté activo cuando el video comience
                       const storyUuidToActivate = giftAnimation?.storyUuid || currentStoryUuid;
                       if (storyUuidToActivate && giftAnimation?.amount && giftAnimation.amount > 20) {
-                        setStoryPremiumStatesSee(prev => ({ ...prev, [storyUuidToActivate]: true }));
+                        // setStoryPremiumStatesSee(prev => ({ ...prev, [storyUuidToActivate]: true }));
                         // Guardar el color premium si viene en el regalo
                         if (giftAnimation?.color_premiun) {
                           setStoryPremiumColors(prev => ({ ...prev, [storyUuidToActivate]: giftAnimation.color_premiun! }));
@@ -1931,6 +1992,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                       }
                     }}
                     onEnded={() => {
+                      setIsBlackout(false); // Ensure blackout is cleared
                       // Obtener el storyUuid del regalo antes de limpiar la animación
                       const storyUuidToClean = giftAnimation?.storyUuid || currentStoryUuid;
 
@@ -1991,9 +2053,12 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                     navigate(`/profile/${groupedStories[viewingStoryUserIndex].user.username}`);
                   }}
                 >
-                  <div className="w-10 h-10 rounded-full p-[1.5px] bg-gradient-to-tr from-[#7000ff] to-[#00f0ff]" style={{
-                    background: `linear-gradient(to top right #00f0ff)`
-                  }}>
+                  <div className={`w-10 h-10 rounded-full p-[1.5px] ${groupedStories[viewingStoryUserIndex]?.user?.subscription_status?.is_active
+                    ? groupedStories[viewingStoryUserIndex].user.subscription_status.plan_name === 'VIP'
+                      ? 'bg-gradient-to-tr from-amber-300 via-amber-500 to-amber-200 shadow-[0_0_10px_rgba(245,158,11,0.5)]'
+                      : 'bg-gradient-to-tr from-[#7000ff] to-[#00f0ff] shadow-[0_0_10px_rgba(112,0,255,0.5)]'
+                    : 'bg-[#2a2f5e]'
+                    }`}>
                     <img
                       src={`${getBaseUrl()}media/${groupedStories[viewingStoryUserIndex]?.user.profile_picture}`}
                       className="w-full h-full rounded-full object-cover border-2 border-[#050718]"
@@ -2027,6 +2092,20 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                   </button>
                 </div>
               </div>
+
+              {/* Blackout Overlay */}
+              <AnimatePresence>
+                {isBlackout && (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                    className="fixed inset-0 z-[9999] bg-black pointer-events-none"
+                  />
+                )}
+              </AnimatePresence>
+
             </div>
             {/* Story Main Content - With slide animation during user switch */}
             <motion.div
@@ -2217,43 +2296,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 </>
               )}
             </AnimatePresence>
-            {/* Full Gift Menu Sub-Modal - Replacement with VipGiftExperience */}
-            {/* Token Shop Modal */}
-            <TokenShopModal
-              isOpen={showTokenShopModal}
-              onClose={() => setShowTokenShopModal(false)}
-              onPurchase={(tokens, cost) => {
-                // Client-side balance check first
-                if (walletBalance < cost) {
-                  setShowTokenShopModal(false);
-                  setShowInsufficientFundsModal(true);
-                  return;
-                }
-                buyTokens(tokens, cost)(dispatch)
-                  .then(() => {
-                    setShowTokenShopModal(false);
-                    setPurchasedTokenAmount(tokens);
-                    setShowTokenPurchaseSuccessModal(true);
-                  })
-                  .catch((err: any) => {
-                    console.error("Error purchasing tokens", err);
-                    setShowTokenShopModal(false);
-                    setShowInsufficientFundsModal(true);
-                  });
-              }}
-            />
-            {/* Insufficient Funds Modal */}
-            <InsufficientFundsModal
-              isOpen={showInsufficientFundsModal}
-              onClose={() => setShowInsufficientFundsModal(false)}
-            />
-            {/* Token Purchase Success Modal */}
-            <TokenPurchaseSuccessModal
-              isOpen={showTokenPurchaseSuccessModal}
-              onClose={() => setShowTokenPurchaseSuccessModal(false)}
-              purchasedAmount={purchasedTokenAmount}
-              newTotalBalance={walletTokens + purchasedTokenAmount}
-            />
             <AnimatePresence>
               {showFullGiftMenu && (
                 <VipGiftExperience
@@ -2261,6 +2303,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                   onSendGift={handleSendGift}
                   gifts={Array.isArray(_fullGifts) ? _fullGifts : []}
                   walletTokens={walletTokens}
+                  subscriptionStatus={groupedStories[viewingStoryUserIndex]?.user?.subscription_status}
                 />
               )}
             </AnimatePresence>
@@ -2670,6 +2713,55 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
           ? null
           : <BottomNavbar />
       }
+
+      {/* Token Shop Modal */}
+      <TokenShopModal
+        isOpen={showTokenShopModal}
+        onClose={() => setShowTokenShopModal(false)}
+        onPurchase={(tokens, cost) => {
+          if (walletBalance < cost) {
+            setShowTokenShopModal(false);
+            setShowInsufficientFundsModal(true);
+            return;
+          }
+          buyTokens(tokens, cost)(dispatch)
+            .then(() => {
+              setShowTokenShopModal(false);
+              setPurchasedTokenAmount(tokens);
+              setShowTokenPurchaseSuccessModal(true);
+            })
+            .catch((err: any) => {
+              console.error("Error purchasing tokens", err);
+              setShowTokenShopModal(false);
+              setShowInsufficientFundsModal(true);
+            });
+        }}
+      />
+      {/* Insufficient Funds Modal */}
+      <InsufficientFundsModal
+        isOpen={showInsufficientFundsModal}
+        onClose={() => setShowInsufficientFundsModal(false)}
+      />
+      {/* Token Purchase Success Modal */}
+      <TokenPurchaseSuccessModal
+        isOpen={showTokenPurchaseSuccessModal}
+        onClose={() => setShowTokenPurchaseSuccessModal(false)}
+        purchasedAmount={purchasedTokenAmount}
+        newTotalBalance={walletTokens + purchasedTokenAmount}
+      />
+      <AnimatePresence>
+        {showVideoGiftModal && (
+          <VipGiftExperience
+            onClose={() => setShowVideoGiftModal(false)}
+            onSendGift={handleSendVideoGift}
+            gifts={Array.isArray(_fullGifts) ? _fullGifts : []}
+            walletTokens={walletTokens}
+            subscriptionStatus={
+              mediaVideo?.find(v => v.id == selectedVideoForGift)?.user_id?.subscription_status
+            }
+          />
+        )}
+      </AnimatePresence>
 
       {/* CSS for premium effects - Dynamic styles based on color_premiun */}
       <style>{`

@@ -63,6 +63,40 @@ export const ShowComments = ({
             }
         });
 
+        const planOrder: { [key: string]: number } = {
+            'FRIEND': 0,
+            'PLUS': 1,
+            'VIP': 2,
+            'NONE': 3
+        };
+
+        const sortFn = (a: CommentWithReply, b: CommentWithReply) => {
+            const aPlan = a.user_id.subscription_status?.plan?.name?.toUpperCase() || 'NONE';
+            const bPlan = b.user_id.subscription_status?.plan?.name?.toUpperCase() || 'NONE';
+
+            const aPriority = planOrder[aPlan] ?? 4;
+            const bPriority = planOrder[bPlan] ?? 4;
+
+            if (aPriority !== bPriority) {
+                return aPriority - bPriority;
+            }
+
+            // Si tienen la misma prioridad, por fecha (más nuevos primero)
+            return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        };
+
+        // Ordenar raíces
+        roots.sort(sortFn);
+
+        // Ordenar respuestas de cada comentario recursivamente
+        const sortReplies = (comment: CommentWithReply) => {
+            if (comment.replies && comment.replies.length > 0) {
+                comment.replies.sort(sortFn);
+                comment.replies.forEach(sortReplies);
+            }
+        };
+        roots.forEach(sortReplies);
+
         return roots;
     };
     console.log(comments, "*-")
@@ -133,6 +167,30 @@ export const ShowComments = ({
     const renderComment = (comment: CommentWithReply, depth = 0) => {
         const hasReplies = comment.replies && comment.replies.length > 0
         const isOpen = openReplies[comment.uuid]
+        const sub = comment.user_id.subscription_status
+        const planName = sub?.plan?.name?.toUpperCase() || 'NONE'
+
+       let itemClasses = `py-4 px-3 rounded-2xl transition-all duration-300 ${depth > 0 ? "ml-10 border-l border-white/10 pl-4 mt-1" : "mb-2 border border-transparent"}`
+        let avatarBorder = "border-2 border-black"
+        let nameColor = "text-white"
+        let bgEffect = ""
+
+        if (planName === 'FRIEND') {
+            itemClasses += " bg-gradient-to-r from-cyan-500/10 via-blue-600/5 to-transparent border-cyan-400/20 shadow-[0_4px_15px_rgba(0,240,255,0.1)]"
+            avatarBorder = "border-2 border-[#00f0ff]"
+            nameColor = "text-cyan-400"
+            bgEffect = "DIAMOND"
+        } else if (planName === 'PLUS') {
+            itemClasses += " bg-gradient-to-r from-purple-500/10 via-pink-600/5 to-transparent border-purple-400/20"
+            avatarBorder = "border-2 border-purple-500"
+            nameColor = "text-purple-400"
+            bgEffect = "PLUS"
+        } else if (planName === 'VIP') {
+            itemClasses += " bg-gradient-to-r from-amber-400/10 via-orange-500/5 to-transparent border-amber-400/20"
+            avatarBorder = "border-2 border-amber-400"
+            nameColor = "text-amber-400"
+            bgEffect = "VIP"
+        }
 
         return (
             <motion.div
@@ -143,21 +201,46 @@ export const ShowComments = ({
                 className={`py-3 ${depth > 0 ? "ml-12 border-l border-white/10 pl-4" : "border-b border-white/5"}`}
             >
                 <div className="flex items-start gap-3">
-                    <img
-                        src={`${getBaseUrl()}media/${comment.user_id.profile_picture || "profile_pics/avatar.webp"}`}
-                        alt={comment.user_id.username}
-                        className="h-10 w-10 rounded-full object-cover border border-white/10 flex-shrink-0"
-                    />
+                    <div className="relative flex-shrink-0 group">
+                        <div className={`p-[1.5px] rounded-full transition-transform duration-500 group-hover:scale-110 ${planName === 'FRIEND' ? 'bg-gradient-to-tr from-[#00f0ff] via-white to-[#00f0ff] shadow-[0_0_10px_rgba(0,240,255,0.4)]' :
+                            planName === 'VIP' ? 'bg-gradient-to-tr from-amber-300 via-white to-amber-200 shadow-[0_0_10px_rgba(251,191,36,0.3)]' :
+                                planName === 'PLUS' ? 'bg-gradient-to-tr from-purple-400 to-pink-500 shadow-[0_0_10px_rgba(168,85,247,0.3)]' : 'bg-white/10'
+                            }`}>
+                            <img
+                                src={`${getBaseUrl()}media/${comment.user_id.profile_picture || "profile_pics/avatar.webp"}`}
+                                alt={comment.user_id.username}
+                                className={`h-11 w-11 rounded-full object-cover ${avatarBorder}`}
+                            />
+                        </div>
 
-                    <div className="flex-1 min-w-0">
-                        <p className="text-sm leading-tight break-words">
-                            <span className="font-semibold text-white mr-2">{comment.user_id.username}</span>
-                            <span className="text-[#e0e7ff]">{comment.content}</span>
+                        {bgEffect !== '' && (
+                            <div className="absolute -bottom-1 -right-1 z-10 scale-75">
+                                <motion.span
+                                    initial={{ scale: 0.5, opacity: 0 }}
+                                    animate={{ scale: 1, opacity: 1 }}
+                                    className={`text-[8px] px-1.5 py-0.5 rounded-full font-black uppercase tracking-tighter border shadow-lg flex items-center gap-0.5 ${planName === 'FRIEND' ? 'bg-cyan-500 text-black border-cyan-300' :
+                                        planName === 'VIP' ? 'bg-amber-400 text-black border-amber-200' :
+                                            'bg-purple-600 text-white border-purple-400'
+                                        }`}
+                                >
+                                    {bgEffect}
+                                </motion.span>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="flex-1 min-w-0 pt-0.5">
+                        <div className="flex items-baseline gap-2 mb-1">
+                            <span className={`font-bold text-sm ${nameColor}`}>{comment.user_id.username}</span>
+                            <span className="text-[10px] text-gray-500 font-medium">
+                                {new Date(comment.created_at).toLocaleDateString()}
+                            </span>
+                        </div>
+                        <p className="text-sm leading-relaxed text-gray-200 break-words">
+                            {comment.content}
                         </p>
 
-                        <div className="flex items-center gap-4 mt-1 text-xs text-[#8b9cff]/70">
-                            <span>{comment.create_at}</span>
-
+                        <div className="flex items-center gap-5 mt-2 text-xs">
                             <button
                                 onClick={() => handleReply(comment.uuid, comment.user_id.username)}
                                 className="font-medium hover:text-white transition-colors"
@@ -177,9 +260,6 @@ export const ShowComments = ({
                         )}
                     </div>
 
-                    <motion.button whileTap={{ scale: 1.4 }} className="text-[#ff6b6b] text-lg">
-                        ❤️
-                    </motion.button>
                 </div>
 
                 {hasReplies && isOpen && (

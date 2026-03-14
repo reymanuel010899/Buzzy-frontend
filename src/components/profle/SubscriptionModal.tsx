@@ -2,11 +2,18 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Star, Zap, Crown, Check, ArrowRight, ShieldCheck, ChevronLeft, ChevronRight } from 'lucide-react';
 
+interface SubscriptionBenefit {
+    benefit_type: string;
+    limit: number;
+    description: string;
+}
+
 interface SubscriptionPlan {
     id: number;
     name: string;
     description: string;
     price: string | number;
+    benefits?: SubscriptionBenefit[];
 }
 
 interface SubscriptionModalProps {
@@ -36,12 +43,6 @@ const SubscriptionModal: React.FC<SubscriptionModalProps> = ({ isOpen, onClose, 
                     borderColor: 'border-amber-500/30',
                     shadowColor: 'shadow-amber-500/20',
                     textColor: 'text-amber-400',
-                    perks: [
-                        'Borde Dorado en Comentarios',
-                        '30 Comentarios Especiales al mes',
-                        'Contenido Detrás de Cámaras',
-                        'Regalos Exclusivos'
-                    ]
                 };
             case 'PLUS':
                 return {
@@ -50,12 +51,6 @@ const SubscriptionModal: React.FC<SubscriptionModalProps> = ({ isOpen, onClose, 
                     borderColor: 'border-blue-500/30',
                     shadowColor: 'shadow-blue-500/20',
                     textColor: 'text-blue-400',
-                    perks: [
-                        '3 Llamadas Mensuales Obligatorias',
-                        'Borde Azul en Comentarios',
-                        'Todas las ventajas VIP',
-                        'Prioridad en el Feed'
-                    ]
                 };
             case 'FRIEND':
                 return {
@@ -64,12 +59,6 @@ const SubscriptionModal: React.FC<SubscriptionModalProps> = ({ isOpen, onClose, 
                     borderColor: 'border-fuchsia-500/30',
                     shadowColor: 'shadow-fuchsia-500/20',
                     textColor: 'text-fuchsia-400',
-                    perks: [
-                        '10 Llamadas Mensuales Obligatorias',
-                        'Todas las ventajas VIP + PLUS',
-                        'Badge Especial de "Friend"',
-                        'Soporte Prioritario'
-                    ]
                 };
             default:
                 return {
@@ -78,7 +67,6 @@ const SubscriptionModal: React.FC<SubscriptionModalProps> = ({ isOpen, onClose, 
                     borderColor: 'border-gray-500/30',
                     shadowColor: 'shadow-gray-500/20',
                     textColor: 'text-gray-400',
-                    perks: ['Acceso Básico']
                 };
         }
     };
@@ -190,14 +178,23 @@ const SubscriptionModal: React.FC<SubscriptionModalProps> = ({ isOpen, onClose, 
                                                     </div>
 
                                                     <ul className="w-full space-y-3 mb-10 text-left">
-                                                        {details.perks.map((perk, pIdx) => (
-                                                            <li key={pIdx} className="flex items-center gap-3 text-[10px] font-medium text-gray-300">
-                                                                <div className={`flex-shrink-0 w-4 h-4 rounded-full bg-white/5 border ${details.borderColor} flex items-center justify-center`}>
-                                                                    <Check size={8} className={details.textColor} strokeWidth={4} />
-                                                                </div>
-                                                                {perk}
+                                                        {plan.benefits && plan.benefits.length > 0 ? (
+                                                            plan.benefits.map((benefit, bIdx) => (
+                                                                <li key={bIdx} className="flex items-center gap-3 text-[10px] font-medium text-gray-300">
+                                                                    <div className={`flex-shrink-0 w-4 h-4 rounded-full bg-white/5 border ${details.borderColor} flex items-center justify-center`}>
+                                                                        <Check size={8} className={details.textColor} strokeWidth={4} />
+                                                                    </div>
+                                                                    <span className="flex-1">
+                                                                        {benefit.description || benefit.benefit_type}
+                                                                        {/* {benefit.limit > 0 && ` (Límite: ${benefit.limit})`} */}
+                                                                    </span>
+                                                                </li>
+                                                            ))
+                                                        ) : (
+                                                            <li className="flex items-center gap-3 text-[10px] font-medium text-gray-500 italic">
+                                                                Sin beneficios específicos listados.
                                                             </li>
-                                                        ))}
+                                                        )}
                                                     </ul>
 
                                                     <motion.button

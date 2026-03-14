@@ -30,7 +30,7 @@ export const addBankAccount = (data: any) => async (dispatch: any) => {
                 type: SUCCESS_ADD_BANK_ACCOUNT,
                 payload: response.data,
             });
-            return true;
+            return response;
         }
     } catch (error) {
         dispatch({

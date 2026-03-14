@@ -12,8 +12,15 @@ import Wallet from "../pages/main/wallet";
 import Store from "../pages/main/store";
 import Game from "../pages/main/game";
 import Profile from "../pages/profille/profile";
+import SubscriptionSuccess from "../pages/main/SubscriptionSuccess";
+import SubscriptionCancel from "../pages/main/SubscriptionCancel";
+import WalletSuccess from "../pages/main/WalletSuccess";
+import WalletCancel from "../pages/main/WalletCancel";
 import SocialAuthCallback from "../pages/SocialAuthCallback";
 import ProtectedRoute from "../PrivateRoute";
+import AccountSuccess from "../pages/main/successAcount";
+import AccountCancel from "../pages/main/CancelAccount";
+import SupportForm from "../pages/main/Support";
 
 export const router = createBrowserRouter(
   createRoutesFromElements(
@@ -74,6 +81,62 @@ export const router = createBrowserRouter(
         element={
           <ProtectedRoute>
             <Profile />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/subscription-success"
+        element={
+          <ProtectedRoute>
+            <SubscriptionSuccess />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/subscription-cancel"
+        element={
+          <ProtectedRoute>
+            <SubscriptionCancel />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/wallet-success"
+        element={
+          <ProtectedRoute>
+            <WalletSuccess />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/wallet-cancel"
+        element={
+          <ProtectedRoute>
+            <WalletCancel />
+          </ProtectedRoute>
+        }
+      />
+       <Route
+        path="/success"
+        element={
+          <ProtectedRoute>
+            <AccountSuccess />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/reconnect"
+        element={
+          <ProtectedRoute>
+            <AccountCancel />
+          </ProtectedRoute>
+        }
+      />
+       <Route
+        path="/support"
+        element={
+          <ProtectedRoute>
+            <SupportForm />
           </ProtectedRoute>
         }
       />

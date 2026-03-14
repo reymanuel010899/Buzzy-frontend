@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, CreditCard, Plus, Trash2, Check, Loader2, AlertCircle } from 'lucide-react';
 import { Button } from '../ui/button';
@@ -39,15 +39,26 @@ const BankAccountModal: React.FC<BankAccountModalProps> = ({ isOpen, onClose }) 
         setActionLoading(true);
         setLocalError(null);
 
-        const success = await dispatch(addBankAccount(formData) as any);
+        const response = await dispatch(addBankAccount(formData) as any);
         setActionLoading(false);
+        console.log(response, "**")
+        if (response) {
+            if (response.data?.stripe_onboarding_url) {
+                 window.location.href = response.data.stripe_onboarding_url;
+                return;
+            }
 
-        if (success) {
-            setShowAddForm(false);
-            setFormData({ bank_name: '', account_holder_name: '', account_number: '', routing_number: '' });
+        // getBankAccounts()(dispatch);
+        // setShowAddForm(false);
+        // setFormData({
+        //     bank_name: '',
+        //     account_holder_name: '',
+        //     account_number: '',
+        //     routing_number: ''
+        // });
         } else {
-            setLocalError("Error al agregar la cuenta. Verifica los datos.");
-        }
+                setLocalError("Error al agregar la cuenta. Verifica los datos.");
+            }
     };
 
     const handleDeleteAccount = async (id: number) => {
@@ -63,7 +74,7 @@ const BankAccountModal: React.FC<BankAccountModalProps> = ({ isOpen, onClose }) 
             setTimeout(() => setLocalError(null), 3000);
         }
     };
-
+    console.log(formData, "***")
     return (
         <AnimatePresence>
             {isOpen && (

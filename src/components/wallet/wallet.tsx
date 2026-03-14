@@ -5,9 +5,13 @@ import { motion } from "framer-motion"
 import { Wallet, Plus, ArrowDown, ArrowUp, Clock } from 'lucide-react';
 import BottomNavbar from "../Layout/ButtonNavar"
 import WalletModal from "./WalletModal";
-import { createTransactions } from "../../redux/actions/createTransactions";
-import { useDispatch } from 'react-redux';
+import WithdrawSuccessModal from "./WithdrawSuccessModal";
+import { useDispatch, useSelector } from 'react-redux';
+import { RootState } from "../../store";
+import { getBankAccounts } from "../../redux/actions/bankActions";
+import BankAccountModal from "../profle/BankAccountModal";
 import { IUser } from "../../interfaces/auth";
+import WithdrawCancel from "./withdrawBad";
 interface Transaction {
   id: string
   description: string
@@ -23,7 +27,7 @@ type WalletComponentProps = {
   pass_code?: string;
   wallet_type?: string;
   createDepositSession: (amount: number) => any;
-  withdrawFunds: (amount: number) => any;
+  withdrawFunds: (amount: number, bankAccountId?: string | number) => any;
 }
 
 const WalletComponent = ({ balances, getWallet, pass_code, wallet_type, user, createDepositSession, withdrawFunds }: WalletComponentProps) => {
@@ -31,9 +35,15 @@ const WalletComponent = ({ balances, getWallet, pass_code, wallet_type, user, cr
   const dispatch = useDispatch();
   const [balance, setBalance] = useState(parseInt(balances?.toString() || "0"))
   const [isWalletModalOpen, setIsWalletModalOpen] = useState(false)
+  const [showWithdrawSuccessModal, setShowWithdrawSuccessModal] = useState(false);
+  const [cancelModal, setCancelModal] = useState(false);
+  const [mesageError, setMessageError] = useState('')
+  const [isBankAccountModalOpen, setIsBankAccountModalOpen] = useState(false)
   const [defaultTab, setDefaultTab] = useState<'deposit' | 'withdraw'>('deposit')
   const [activeFilter, setActiveFilter] = useState<"all" | "income" | "expense">("all")
   const [scrollPosition, setScrollPosition] = useState(0)
+
+  const { accounts: bankAccounts } = useSelector((state: RootState) => state.bankReducer);
   // let count = useRef(0)
   console.log(scrollPosition)
   // Sample transactions data
@@ -71,8 +81,9 @@ const WalletComponent = ({ balances, getWallet, pass_code, wallet_type, user, cr
     // if(count.current >= 1) return;
     // count.current += 1
     getWallet()
+    dispatch(getBankAccounts() as any)
     setBalance(balances ? parseInt(balances.toString()) : 0)
-  }, [balances])
+  }, [balances, dispatch])
   // Handle scroll for parallax effects
   useEffect(() => {
     const handleScroll = () => {
@@ -85,21 +96,33 @@ const WalletComponent = ({ balances, getWallet, pass_code, wallet_type, user, cr
 
   const handleAddFunds = (amount: number) => {
     createDepositSession(amount)
-      .catch((err: any) => {
+      .catch(() => {
         alert("Error al crear la sesión de depósito");
       });
   }
 
-  const handleWithdraw = (amount: number, details: string) => {
-    withdrawFunds(amount)
-      .then((res: any) => {
-        alert(res.message || "Solicitud de retiro enviada con éxito");
+  const handleWithdraw = async (amount: number, bankAccountId?: string | number) => {
+    try {
+      await withdrawFunds(amount, bankAccountId).then((res)=>{
+        if ( !res?.active) {
+          setMessageError(res?.message)
+          setIsWalletModalOpen(false);
+          setCancelModal(true)
+          return
+        
+        };
+        new Promise(r => setTimeout(r, 3000));
         setIsWalletModalOpen(false);
+        setShowWithdrawSuccessModal(true);
         getWallet();
-      })
-      .catch((err: any) => {
-        alert(err.error || "Error al solicitar retiro");
       });
+      // Artificial delay so the spinner spins for exactly 3 seconds after success
+      
+    } catch (err: any) {
+      
+      // alert(err.error || "Error al solicitar retiro");
+      // throw err;
+    }
   }
 
   const filteredTransactions = transactions.filter((tx) => {
@@ -319,8 +342,29 @@ const WalletComponent = ({ balances, getWallet, pass_code, wallet_type, user, cr
         onAddFunds={handleAddFunds}
         onWithdraw={handleWithdraw}
         defaultTab={defaultTab}
+        bankAccounts={bankAccounts || []}
+        onOpenBankAccounts={() => {
+          setIsWalletModalOpen(false);
+          setIsBankAccountModalOpen(true);
+        }}
       />
 
+      <BankAccountModal
+        isOpen={isBankAccountModalOpen}
+        onClose={() => setIsBankAccountModalOpen(false)}
+      />
+
+      <WithdrawSuccessModal
+        isOpen={showWithdrawSuccessModal}
+        onClose={() => setShowWithdrawSuccessModal(false)}
+      />
+      
+
+      <WithdrawCancel
+          isOpen={cancelModal}
+          message={mesageError}
+          onClose={() => setCancelModal(false)}
+      />
       {/* Bottom navbar */}
       <BottomNavbar />
     </div>

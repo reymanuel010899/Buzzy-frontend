@@ -25,10 +25,11 @@ export const getSubscriptionPlans = () => async (dispatch: any) => {
     }
 };
 
-export const createCheckoutSession = (planId: number) => async (dispatch: any) => {
+export const createCheckoutSession = (planId: number, subscribedToId: number) => async (dispatch: any) => {
     try {
         const response = await apiClient.post(`/api/subscriptions/create-checkout-session/`, {
-            plan_id: planId
+            plan_id: planId,
+            subscribed_to_id: subscribedToId
         });
         if (response.status === 200) {
             dispatch({
@@ -50,9 +51,11 @@ export const createCheckoutSession = (planId: number) => async (dispatch: any) =
     }
 };
 
-export const startCall = () => async () => {
+export const startCall = (subscribedToId: number) => async () => {
     try {
-        const response = await apiClient.post(`/api/subscriptions/start-call/`);
+        const response = await apiClient.post(`/api/subscriptions/start-call/`, {
+            subscribed_to_id: subscribedToId
+        });
         if (response.status === 200) {
             return response.data;
         }

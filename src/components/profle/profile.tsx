@@ -50,6 +50,7 @@ import type { SocialAccount } from "../../redux/reducers/socialAccountsReducer"
 import { FaTiktok } from "react-icons/fa"
 import EditProfileModal from "./EditProfileModal"
 import BankAccountModal from "./BankAccountModal"
+import { div } from "three/src/nodes/TSL.js"
 
 const WS_URL = "ws://localhost:8001/ws"
 
@@ -109,8 +110,8 @@ interface ProfileSeccionProps {
   getUserMedia: (username: string) => void
   media_user: VideoItem[]
   getSubscriptionPlans: () => any
-  createCheckoutSession: (planId: number) => any
-  startCall: () => any
+  createCheckoutSession: (planId: number, subscribedToId: number) => any
+  startCall: (subscribedToId: number) => any
   subscriptionPlans: any[]
   saveAvailability: (payload: { start_time: string; end_time: string; days: number[] }) => any
   getAvailability: () => any
@@ -347,8 +348,8 @@ function ProfileSeccion({
       }, 300);
     }
   };
-      // setLocalMedia(media_user);e
-console.log(user, "**********")
+  // setLocalMedia(media_user);e
+  console.log(user, "**********")
   const handleGridVideoToggle = (videoId: string, videoElement: HTMLVideoElement | null) => {
     if (!videoElement) return;
     const currentlyPlaying = isGridVideoPlaying[videoId] || false;
@@ -445,16 +446,20 @@ console.log(user, "**********")
   };
 
   const handleSelectPlan = (planId: number) => {
-    createCheckoutSession(planId);
+    if (user?.id) {
+      createCheckoutSession(planId, user.id);
+    }
   };
 
   const handleStartCall = () => {
-    startCall().then((res: any) => {
-      alert(res.message);
-      // Here you would navigate to the call room if implemented
-    }).catch((err: string) => {
-      alert(err);
-    });
+    if (user?.id) {
+      startCall(user.id).then((res: any) => {
+        alert(res.message);
+        // Here you would navigate to the call room if implemented
+      }).catch((err: string) => {
+        alert(err);
+      });
+    }
   };
 
   // --- 5. Lógica Modal FullScreen ---
@@ -556,7 +561,7 @@ console.log(user, "**********")
       createFollower({ follower_user_id: user.id.toString() })(dispatch).then((res) => {
         setShowFollowPrompt(false);
         // Force opening messages after following
-        
+
         setShowMessages(true);
         setSelectedChat(res?.data.chat_uuid)
         navigate("/")
@@ -614,10 +619,10 @@ console.log(user, "**********")
                       loop
                       playsInline
                     />
-                  ) : user?.profile_picture ? (
+                  ) : user?.profile_picture.startsWith("http") ? (
                     <img
                       className="w-full h-full object-cover"
-                      src={`${getBaseUrl()}${user.profile_picture}`}
+                      src={`${user.profile_picture}`}
                       alt={user.username}
                     />
                   ) : (

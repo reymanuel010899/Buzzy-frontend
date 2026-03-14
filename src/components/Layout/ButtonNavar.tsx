@@ -52,7 +52,7 @@ const BottomNavbar: React.FC = () => {
                   className="relative flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-r from-[#7000ff] to-[#00f0ff] shadow-[0_0_15px_rgba(112,0,255,0.7)]"
                 >
                   <item.icon className="h-5 w-5 text-white" />
-                </Link>
+                
                 {hoveredItem === item.label && (
                   <motion.div
                     initial={{ opacity: 0, y: 5 }}
@@ -62,6 +62,7 @@ const BottomNavbar: React.FC = () => {
                     {item.label}
                   </motion.div>
                 )}
+                </Link>
               </motion.div>
             ) : (
               // Regular navigation items
