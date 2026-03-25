@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useState } from "react"
-import {  Plus } from "lucide-react"
+import { Plus } from "lucide-react"
 import {
   HomeIcon,
   ShoppingBagIcon,
@@ -10,20 +10,34 @@ import {
 import { Link, useLocation } from "react-router-dom"
 import { motion } from "framer-motion"
 import profileIconC from "./ProfileIcon";
+import CreateActionModal from "./CreateActionModal";
 
 const BottomNavbar: React.FC = () => {
   const location = useLocation()
   const [hoveredItem, setHoveredItem] = useState<string | null>(null)
+  const [isModalOpen, setIsModalOpen] = useState(false)
+
+  // Obtener usuario actual para el link de perfil
+  const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
+  const profilePath = `/profile/${currentUser.username || 'user'}`;
+
+  // Mock subscription status - In a real app, this would come from a global state/hook
+  const subStatus = {
+    is_active: true,
+    plan_name: 'FRIEND',
+    ai_limit: 20,
+    ai_used: 5
+  }
 
   // Navigation items
   const navItems = [
     { icon: HomeIcon, label: "Home", path: "/" },
-      // { icon: WalletIcon, label: "Wallet", path: "/wallet" },
+    // { icon: WalletIcon, label: "Wallet", path: "/wallet" },
     { icon: ShoppingBagIcon, label: "Store", path: "/marker" },
     { icon: Plus, label: "Create", path: null, isSpecial: true },
     // { icon: MapIcon, label: "Game", path: "/game" },
     { icon: WalletIcon, label: "Wallet", path: "/wallet" },
-    { icon: profileIconC, label: "Profile", path: "/profile" },
+    { icon: profileIconC, label: "Profile", path: profilePath },
   ]
 
   // Check if a path is active
@@ -47,22 +61,22 @@ const BottomNavbar: React.FC = () => {
                 onHoverEnd={() => setHoveredItem(null)}
               >
                 <div className="absolute -inset-3 rounded-full  opacity-70 blur-md"></div>
-                <Link
-                  to={item.path || "/create"}
+                <button
+                  onClick={() => setIsModalOpen(true)}
                   className="relative flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-r from-[#7000ff] to-[#00f0ff] shadow-[0_0_15px_rgba(112,0,255,0.7)]"
                 >
                   <item.icon className="h-5 w-5 text-white" />
-                
-                {hoveredItem === item.label && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 5 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="absolute -bottom-8 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-[#0c1033] px-3 py-1 text-xs font-medium text-white shadow-lg"
-                  >
-                    {item.label}
-                  </motion.div>
-                )}
-                </Link>
+
+                  {hoveredItem === item.label && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="absolute -bottom-8 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-[#0c1033] px-3 py-1 text-xs font-medium text-white shadow-lg"
+                    >
+                      {item.label}
+                    </motion.div>
+                  )}
+                </button>
               </motion.div>
             ) : (
               // Regular navigation items
@@ -75,9 +89,8 @@ const BottomNavbar: React.FC = () => {
               >
                 <Link
                   to={item.path || ""}
-                  className={`flex flex-col items-center justify-center gap-1 p-2 transition-colors ${
-                    isActive(item.path) ? "text-[#00f0ff]" : "text-gray-400 hover:text-white"
-                  }`}
+                  className={`flex flex-col items-center justify-center gap-1 p-2 transition-colors ${isActive(item.path) ? "text-[#00f0ff]" : "text-gray-400 hover:text-white"
+                    }`}
                 >
                   <item.icon className="h-6 w-6" />
                   <span className="text-xs">{item.label}</span>
@@ -101,6 +114,11 @@ const BottomNavbar: React.FC = () => {
           </React.Fragment>
         ))}
       </div>
+      <CreateActionModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        subscriptionStatus={subStatus}
+      />
     </nav>
   )
 }

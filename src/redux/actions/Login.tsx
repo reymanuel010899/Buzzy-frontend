@@ -1,5 +1,4 @@
-import axios from "axios";
-import { SUCCEES_LOGIN, FAILED_LOGIN } from "../type";
+import { SUCCEES_LOGIN, FAILED_LOGIN, LOGOUT_USER } from "../type";
 
 import type { AppDispatch } from "../../store";
 import { apiClient, getBaseUrl } from "../client/api-client";
@@ -38,10 +37,52 @@ export const login = (formData: FetchWithAuthProps) => async (dispatch: AppDispa
       dispatch({ type: FAILED_LOGIN, payload: null });
     }
   } catch (error: unknown) {
-    //  debugger
-    handleLoginError(error, formData, dispatch);
+    return handleLoginError(error, formData, dispatch);
   }
 };
+
+// Función de Logout
+export const logout = () => (dispatch: AppDispatch) => {
+  clearAuthData();
+  dispatch({ type: LOGOUT_USER });
+  window.location.href = "/sign-in";
+};
+
+// Función de login con Google
+export const googleLogin = (accessToken: string, photoUrl?: string, countryCode?: string, countryName?: string) => async (dispatch: AppDispatch) => {
+  try {
+    const response = await apiClient.post(
+      "/api/google/login/",
+      {
+        access_token: accessToken,
+        photo_url: photoUrl || null,
+        country_code: countryCode || 'US',
+        country_name: countryName || 'United States'
+      },
+      { headers: { "Content-Type": "application/json" } }
+    );
+
+    if (response.status === 200) {
+      localStorage.setItem("refreshToken", response.data.refresh);
+      localStorage.setItem("accessToken", response.data.access);
+      localStorage.setItem("isAuthenticated", "true");
+      localStorage.setItem("user", JSON.stringify(response.data.user));
+
+      dispatch({
+        type: SUCCEES_LOGIN,
+        payload: response.data,
+      });
+    } else {
+      clearAuthData();
+      dispatch({ type: FAILED_LOGIN, payload: null });
+    }
+  } catch (error: unknown) {
+    console.error("Error en Google Login:", error);
+    clearAuthData();
+    dispatch({ type: FAILED_LOGIN, payload: null });
+  }
+};
+
 
 
 const clearAuthData = () => {
@@ -70,14 +111,20 @@ const handleLoginError = async (error: unknown, formData: FetchWithAuthProps, di
         }
       } catch (refreshError) {
         console.error("Error refreshing token:", refreshError);
-        window.location.href = "/sign-in";
+        if (window.location.pathname !== "/sign-in") {
+          window.location.href = "/sign-in";
+        }
       }
     } else {
       console.error("No refresh token available");
       dispatch({ type: FAILED_LOGIN, payload: null });
+      if (window.location.pathname !== "/sign-in") {
+        window.location.href = "/sign-in";
+      }
     }
   } else {
     console.error("Error in login:", error);
     dispatch({ type: FAILED_LOGIN, payload: null });
   }
+  throw error;
 };

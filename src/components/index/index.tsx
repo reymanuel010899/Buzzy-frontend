@@ -1,9 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState, useMemo } from "react"
+import axios from "axios";
 import { Link, useNavigate } from "react-router-dom"
 import sendMessageSound from "../../assets/sounds/sendMessage.mp3";
-import { Eye, MessageCircle, Heart, Volume2, VolumeX, Play, Pause, Plus, Loader2, X, MoreVertical } from "lucide-react"
+import { Eye, MessageCircle, Heart, Volume2, VolumeX, Play, Pause, Plus, Loader2, X, MoreVertical, Rocket, ExternalLink } from "lucide-react"
+import AdCard from "../ads/AdCard"
 import BottomNavbar from "../Layout/ButtonNavar"
 import { motion, AnimatePresence } from "framer-motion"
+import AdOverlay from "../ads/AdOverlay"
 import { createStory } from "../../redux/actions/history/createHistory"
 import { StoryList, Video as videoI } from './main.interface';
 import { useDispatch, useSelector } from "react-redux"
@@ -161,7 +164,58 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   } | null>(null);
 
   const [expandedDescriptions, setExpandedDescriptions] = useState<{ [key: string]: boolean }>({});
+  const [ads, setAds] = useState<any[]>([]);
+  const [activeAdIndex, setActiveAdIndex] = useState<number | null>(null);
+  const [selectedAd, setSelectedAd] = useState<any | null>(null);
+  const [shownAds, setShownAds] = useState<Set<string>>(new Set());
+  const [lastAdTimestamp, setLastAdTimestamp] = useState<number>(0);
+  const [adSequenceCount, setAdSequenceCount] = useState<number>(0);
+  const [videoLoopCount, setVideoLoopCount] = useState<Record<string, number>>({});
+  const lastVideoTimeRef = useRef<Record<string, number>>({});
   const typingAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    fetchAds();
+  }, []);
+
+  useEffect(() => {
+    setMedia(media);
+  }, [media]);
+
+  const fetchAds = async () => {
+    try {
+      console.log("Fetching ads from:", `${getBaseUrl()}api/ads/campaigns/serve/`);
+      const response = await axios.get(`${getBaseUrl()}api/ads/campaigns/serve/`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` }
+      });
+      console.log("Ads response data:", response.data);
+      setAds(response.data);
+    } catch (error) {
+      console.error("Error fetching ads:", error);
+    }
+  };
+
+  const mergedFeed = useMemo(() => {
+    if (!mediaVideo) {
+      console.log("mergedFeed: mediaVideo is null");
+      return [];
+    }
+    const feed: any[] = [];
+    let adIndex = 0;
+
+    mediaVideo.forEach((video, index) => {
+      feed.push({ ...video, type: 'video' });
+      // Insert an ad every 15 videos
+      if ((index + 1) % 15 === 0 && ads[adIndex]) {
+        console.log(`Inserting ad at index ${index + 1}`);
+        feed.push({ ...ads[adIndex], type: 'ad' });
+        adIndex++;
+      }
+    });
+
+    console.log("mergedFeed total items:", feed.length);
+    return feed;
+  }, [mediaVideo, ads]);
 
   useEffect(() => {
     sendAudioRef.current = new Audio(sendMessageSound);
@@ -519,6 +573,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     if (mediaVideo && mediaVideo[index]) {
       const videoId = mediaVideo[index].id.toString();
       setCurrentVideoId(videoId);
+      setComments(null); // Limpiar comentarios previos inmediatamente
       setShowCommentsModal(true);
       getComment({ video_id: mediaVideo?.[index]?.uuid?.toString() ?? "" })(dispatch).then((res: any) => {
         setComments(Array.isArray(res) ? res : [])
@@ -621,8 +676,17 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
           const video = entry.target as HTMLVideoElement
           const index = videoRefs.current.findIndex((ref) => ref === video)
           if (entry.isIntersecting) {
-            video.play().catch(() => {/* Autoplay ignored */ })
+            // Only play if there is no active ad overlay for this video
+            if (activeAdIndex !== index) {
+              video.play().catch(() => {/* Autoplay ignored */ })
+            }
             setActiveVideo(index)
+            // Reset loop count for this video when it comes into view
+            const vidId = mergedFeed[index]?.type === 'video' ? mergedFeed[index].id?.toString() : `ad-${mergedFeed[index].id}`;
+            if (vidId) {
+              setVideoLoopCount(prev => ({ ...prev, [vidId]: 0 }));
+              lastVideoTimeRef.current[vidId] = 0;
+            }
           } else {
             video.pause()
           }
@@ -638,7 +702,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         if (video) observer.unobserve(video)
       })
     }
-  }, [mediaVideo])
+  }, [mergedFeed, activeAdIndex])
   // --- New Effect to Pause Videos When Story Modal Opens ---
   useEffect(() => {
     if (viewingStoryUserIndex !== null) {
@@ -652,6 +716,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     }
   }, [viewingStoryUserIndex]);
   const handleVideoClick = (index: number) => {
+    if (activeAdIndex !== null) return; // Prevent clicking video while ad is active
     const videoElement = videoRefs.current[index];
     if (!videoElement) return;
     if (videoElement.paused) {
@@ -1378,7 +1443,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         <div className="absolute inset-0 bg-black opacity-[0.03]"></div>
         <div className="absolute bottom-1/3 right-1/3 h-60 w-60 rounded-full bg-[#00f0ff]/20 blur-3xl animate-float-delayed"></div>
       </div>
-      <main ref={mainRef} className="h-screen w-full overflow-y-auto pt-30 pb-10">
+      <main ref={mainRef} className="h-screen w-full overflow-y-auto pt-30 ">
         {/* Search Bar Area */}
         <div className="w-full border-t border-[#2a2f5e]/50 ">
           <div className="max-w-7xl mx-auto">
@@ -1453,18 +1518,12 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
             </div>
           </div>
         </div>
-        <section className="px-4 py-3">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 ">
-            {mediaVideo?.map((data, index) => {
-              const videoId = data.id?.toString();
+        <section className="">
+          <div className="grid grid-cols-1 sm:grid-cols-2 ml-1 lg:grid-cols-3 xl:grid-cols-4 gap-2 ">
+            {mergedFeed.map((data, index) => {
+              const videoId = data.type === 'video' ? data.id?.toString() : `ad-${data.id}`;
               const isExpanded = expandedDescriptions[videoId];
 
-              // --- INICIO DE LA LÓGICA DE TRANSFORMACIÓN DE DESCRIPCIÓN ---
-
-              /**
-               * Función local para transformar el texto de la descripción
-               * convirtiendo las menciones (@usuario) en elementos con estilos.
-               */
               const renderDescriptionWithMentions = (description: string, truncate = false) => {
                 if (!description) {
                   return { content: [], needsTruncation: false };
@@ -1473,19 +1532,16 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 let displayDescription = description;
                 let needsTruncation = false;
 
-                // Si necesitamos truncar y la descripción es larga
                 if (truncate && description.length > maxChars) {
                   displayDescription = description.substring(0, maxChars);
                   needsTruncation = true;
                 }
 
-                // Expresión regular para encontrar @ seguido de letras, números y guiones bajos
                 const regex = /(@[a-zA-Z0-9_]+)/g;
                 const parts = displayDescription.split(regex);
 
                 const content = parts.map((part: string, i: number) => {
                   if (part.match(regex)) {
-                    // Es una mención
                     const username = part.substring(1);
                     return (
                       <span
@@ -1493,8 +1549,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                         className="text-[#00f0ff] font-semibold hover:text-white transition-colors cursor-pointer"
                         onClick={(e) => {
                           e.stopPropagation();
-                          // Lógica de navegación (usar 'history' o 'navigate' si estás usando react-router-dom)
-                          console.log(`Navegar a perfil de: ${username}`);
                           navigate(`/profile/${username}`);
                         }}
                       >
@@ -1509,8 +1563,26 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 return { content, needsTruncation };
               };
 
-              const { content: truncatedContent, needsTruncation } = renderDescriptionWithMentions(data.description, !isExpanded);
-              const fullContent = renderDescriptionWithMentions(data.description, false).content;
+              const { content: truncatedContent, needsTruncation } = renderDescriptionWithMentions(data.description || "", !isExpanded);
+              const fullContent = renderDescriptionWithMentions(data.description || "", false).content;
+
+              if (data.type === 'ad') {
+                return (
+                  <div key={`ad-${data.id}`} className="relative h-[725px]">
+                    <AdCard
+                      ad={data}
+                      isVisible={activeVideo === index}
+                      isMuted={isMuted}
+                      toggleMute={toggleMute}
+                    />
+                    <video
+                      ref={(el) => { if (el) videoRefs.current[index] = el }}
+                      className="hidden"
+                    />
+                  </div>
+                );
+              }
+
               return (
                 <motion.div
                   key={index}
@@ -1518,22 +1590,104 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: index * 0.1 }}
                   className="relative rounded-xl overflow-hidden shadow-2xl shadow-black/50 border border-[#2a2f5e]/30"
-                  style={{ height: "710px" }}
+                  style={{ height: "725px" }}
                 >
                   <div className="absolute inset-0 rounded-xl overflow-hidden pt-0 group">
-                    <div className="relative h-[710px] w-full rounded-xl overflow-hidden bg-black">
-                      <video
-                        ref={(el) => { if (el) videoRefs.current[index] = el }}
-                        muted={isMuted}
-                        loop
-                        playsInline
-                        className="h-[710px] w-full object-cover border-[#00f0ff]/5"
-                        onClick={() => handleVideoClick(index)}
-                        onTimeUpdate={(e) => handleVideoProgress(e, videoId)}
-                      >
-                        <source src={data.video} type="video/mp4" />
-                        Tu navegador no soporta el formato de video.
-                      </video>
+                    <div className="relative h-[725px] w-full rounded-xl overflow-hidden bg-black">
+                      {data.media_type === 'image' ? (
+                        <img
+                          src={data.video}
+                          className="h-[725px] w-full object-cover border-[#00f0ff]/5"
+                          alt="Feed Content"
+                          onClick={() => handleVideoClick(index)}
+                        />
+                      ) : (
+                        <video
+                          ref={(el) => { if (el) videoRefs.current[index] = el }}
+                          muted={isMuted || activeAdIndex === index}
+                          loop
+                          playsInline
+                          className="h-[725px] w-full object-cover border-[#00f0ff]/5"
+                          onClick={() => handleVideoClick(index)}
+                          onTimeUpdate={(e) => {
+                            handleVideoProgress(e, videoId);
+                            // Trigger ad logic: if video is at 5s, we have an ad, cooldown passed (4m), and not shown yet
+                            const now = Date.now();
+                            const cooldownPassed = now - lastAdTimestamp > 4 * 60 * 1000;
+                            const currentTime = e.currentTarget.currentTime;
+                            const prevTime = lastVideoTimeRef.current[videoId] || 0;
+                            lastVideoTimeRef.current[videoId] = currentTime;
+
+                            // Loop detection: if time jumped backwards significantly
+                            if (prevTime > currentTime + 1) {
+                              const videoElement = e.currentTarget;
+                              setVideoLoopCount(prev => {
+                                const currentCount = (prev[videoId] || 0) + 1;
+                                if (currentCount >= 3) {
+                                  if (ads.length > 0 && activeAdIndex === null) {
+                                    const randIndex = Math.floor(Math.random() * ads.length);
+                                    setSelectedAd(ads[randIndex]);
+                                    setActiveAdIndex(index);
+                                    videoElement.pause();
+                                    setIsMuted(false); // Force unmute for ad
+                                    setAdSequenceCount(1); // Start sequence
+                                  }
+                                  return { ...prev, [videoId]: 0 }; // Reset count
+                                }
+                                return { ...prev, [videoId]: currentCount };
+                              });
+                            }
+
+                            if (currentTime >= 5 && currentTime < 6 && ads.length > 0 && activeAdIndex === null && index % 3 === 0 && !shownAds.has(videoId) && cooldownPassed) {
+                              // Pick a random ad from the pool
+                              const randIndex = Math.floor(Math.random() * ads.length);
+                              setSelectedAd(ads[randIndex]);
+
+                              setActiveAdIndex(index);
+                              setShownAds(prev => new Set(prev).add(videoId));
+                              e.currentTarget.pause();
+                              setIsMuted(false); // Force unmute for ad
+                              setAdSequenceCount(1); // Start sequence
+                              // Auto-collapse description if it's open
+                              setExpandedDescriptions(prev => ({ ...prev, [videoId]: false }));
+                            }
+                          }}
+                        >
+                          <source src={data.video} type="video/mp4" />
+                          Tu navegador no soporta el formato de video.
+                        </video>
+                      )}
+
+                      <AnimatePresence>
+                        {activeAdIndex === index && selectedAd && (
+                          <AdOverlay
+                            key={`ad-${selectedAd.id}-${adSequenceCount}`}
+                            ad={selectedAd}
+                            isMuted={isMuted}
+                            toggleMute={toggleMute}
+                            isVisible={activeVideo === index}
+                            onClose={(finished, duration) => {
+                              // User's rule: If finished naturally AND duration > 60s AND sequence < 3, show next ad
+                              // "si el anuncio pasa de 1 minuto quiero este flujo [sequence]"
+                              if (finished && duration && duration >= 60 && adSequenceCount < 3) {
+                                // Show another different ad
+                                const otherAds = ads.filter(a => a.id !== selectedAd.id);
+                                const nextAdPool = otherAds.length > 0 ? otherAds : ads;
+                                const randIndex = Math.floor(Math.random() * nextAdPool.length);
+                                setSelectedAd(nextAdPool[randIndex]);
+                                setAdSequenceCount(prev => prev + 1);
+                                // Stay in activeAdIndex = index, so AdOverlay remounts with new ad
+                              } else {
+                                // End sequence
+                                setActiveAdIndex(null);
+                                setAdSequenceCount(0);
+                                setLastAdTimestamp(Date.now());
+                                videoRefs.current[index]?.play();
+                              }
+                            }}
+                          />
+                        )}
+                      </AnimatePresence>
                       <div className="absolute inset-0 bg-gradient-to-t from-[#050718] via-[#050718]/10 to-transparent pointer-events-none"></div>
                       <div className="absolute inset-0 bg-gradient-to-r from-[#7000ff]/10 to-[#00f0ff]/10 opacity-0 group-hover:opacity-100 transition-opacity duration-500" onClick={() => handleGridVideoToggle(videoId, videoRefs.current[index])}>
                       </div>
@@ -1563,7 +1717,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                       </div>
                       <motion.button
                         whileTap={{ scale: 0.9 }}
-                        className="absolute top-3 right-3 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-black/30 backdrop-blur-md border border-white/10"
+                        className="h-9 w-9 flex items-center justify-center rounded-full text-white drop-shadow-lg pointer-events-auto absolute top-3 right-3 z-10"
                         onClick={(e) => {
                           e.stopPropagation()
                           toggleMute()
@@ -1573,61 +1727,136 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                       </motion.button>
                       <motion.button
                         whileTap={{ scale: 0.9 }}
-                        className="absolute top-3 left-3 z-10 flex items-center gap-1 px-3 py-1.5 rounded-full  text-xs font-medium"
+                        className="absolute top-3 left-1 z-10 flex items-center gap-1   rounded-full  text-xs font-medium"
                         onClick={() => handleVideoClick(index)}
                       >
                         <span>AR</span>
                       </motion.button>
 
                       {/* INICIO DEL CONTENEDOR DE METADATOS INFERIOR UNIFICADO */}
-                      <div className="absolute bottom-0 left-0 right-0 py-4 px-4 pr-3 z-10">
+                      <div className="absolute bottom-0 left-0 right-0 pb-3 pt-20 px-1 z-20 pointer-events-none flex flex-col justify-end bg-gradient-to-t from-black/60 via-black/20 to-transparent">
 
-                        {/* 2. PERFIL DE USUARIO */}
-                        <div className="flex items-center mb-1">
-                          <div className="relative h-10 w-10 overflow-hidden rounded-full flex-shrink-0">
-                            <img
-                              className="h-full w-full object-cover rounded-full"
-                              src={`${data.user_id?.profile_picture ? `${getBaseUrl()}media/${data.user_id.profile_picture}` : `${getBaseUrl()}media/profile_pics/avatar.webp`}`}
-                              onError={(e) => {
-                                (e.target as HTMLImageElement).src = `https://picsum.photos/100/100?random=${index}`;
-                              }}
-                              alt={data.user_id?.username}
-                            />
-                            <div className="absolute inset-0 rounded-full border-2 border-[#2a2f5e] pointer-events-none" />
-
-                            {!isMuted && videoRefs.current[index]?.paused === false && (
-                              <motion.div
-                                className="absolute inset-0 rounded-full border-4 border-[#00f0ff]"
-                                animate={{
-                                  boxShadow: [
-                                    "0 0 0 0 rgba(0, 240, 255, 0)",
-                                    "0 0 20px 4px rgba(0, 240, 255, 0.8)",
-                                    "0 0 0 0 rgba(0, 240, 255, 0)",
-                                  ],
-                                  scale: [1, 1.05, 1],
+                        <div className="flex flex-col gap-5 pointer-events-auto max-w-[100%]">
+                          {/* 2. PERFIL DE USUARIO */}
+                          <div className="flex items-center">
+                            <div className="relative h-10 w-10 overflow-hidden rounded-full flex-shrink-0 group">
+                              <img
+                                className="h-full w-full object-cover rounded-full border border-white/20"
+                                src={`${data.user_id?.profile_picture ? `${getBaseUrl()}media/${data.user_id.profile_picture}` : `${getBaseUrl()}media/profile_pics/avatar.webp`}`}
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).src = `https://picsum.photos/100/100?random=${index}`;
                                 }}
-                                transition={{
-                                  duration: 0.8,
-                                  repeat: Infinity,
-                                  repeatType: "loop",
-                                  ease: "easeInOut",
-                                }}
+                                alt={data.user_id?.username}
                               />
-                            )}
-                            <motion.div
-                              className="absolute inset-0 rounded-full border-2 border-transparent group-hover:border-[#00f0ff] transition-colors duration-300 pointer-events-none"
-                            />
+                              <div className="absolute inset-0 rounded-full border-2 border-white/5 pointer-events-none" />
+
+                              {!isMuted && videoRefs.current[index]?.paused === false && (
+                                <motion.div
+                                  className="absolute inset-0 rounded-full border-4 border-[#00f0ff]/60"
+                                  animate={{
+                                    boxShadow: [
+                                      "0 0 0 0 rgba(0, 240, 255, 0)",
+                                      "0 0 20px 4px rgba(0, 240, 255, 0.4)",
+                                      "0 0 0 0 rgba(0, 240, 255, 0)",
+                                    ],
+                                    scale: [1, 1.05, 1],
+                                  }}
+                                  transition={{
+                                    duration: 0.8,
+                                    repeat: Infinity,
+                                    repeatType: "loop",
+                                    ease: "easeInOut",
+                                  }}
+                                />
+                              )}
+                            </div>
+                            <Link
+                              className="text-white font-bold text-shadow-md hover:text-[#00f0ff] transition-colors ml-3 truncate"
+                              to={`/profile/${data.user_id?.username}`}
+                            >
+                              @{data.user_id?.username}
+                            </Link>
                           </div>
-                          <Link
-                            className="text-white font-medium hover:text-[#00f0ff] transition-colors ml-3 truncate max-w-[120px] flex-1"
-                            to={`/profile/${data.user_id?.username}`}
-                          >
-                            @{data.user_id?.username}
-                          </Link>
+
+                          {/* 1. SECCIÓN DE DESCRIPCIÓN DEL VIDEO (Manejo de @mentions) */}
+                          {data.description && (
+                            <motion.div
+                              className={`
+                                rounded-xl backdrop-blur-md border border-white/10 bg-white/5 shadow-2xl transition-all duration-500 ease-in-out
+                                ${isExpanded
+                                  ? 'p-4 max-h-[60vh] overflow-y-auto z-30 w-full'
+                                  : 'p-2 px-3 max-h-[120px] overflow-hidden cursor-pointer hover:bg-white/10'
+                                }
+                              `}
+                              onClick={(e) => {
+                                if (!isExpanded) {
+                                  e.stopPropagation();
+                                  handleToggleDescription(videoId);
+                                }
+                              }}
+                              initial={false}
+                              animate={{
+                                scale: isExpanded ? 1.02 : 1,
+                                y: isExpanded ? -5 : 0
+                              }}
+                            >
+                              <div className="text-[13px] leading-relaxed text-white/95 drop-shadow-sm font-light">
+                                {isExpanded && (
+                                  <div className="flex justify-center mb-3">
+                                    <div
+                                      className="w-10 h-1 bg-white/30 rounded-full cursor-pointer hover:bg-[#00f0ff]/60 transition-colors"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleToggleDescription(videoId);
+                                      }}
+                                    ></div>
+                                  </div>
+                                )}
+
+                                {isExpanded ? (
+                                  <div className="flex flex-col gap-2">
+                                    <p className="whitespace-pre-wrap">{fullContent}</p>
+                                    <button
+                                      className="text-[#00f0ff] text-xs font-semibold mt-2 self-start hover:underline"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleToggleDescription(videoId);
+                                      }}
+                                    >
+                                      Ocultar
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="flex flex-wrap items-center">
+                                    <span>{truncatedContent}</span>
+                                    {needsTruncation && (
+                                      <span
+                                        className="ml-1 text-[#00f0ff] font-bold text-[11px]"
+                                      >
+                                        ... ver más
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Hashtags */}
+                              {data.tags && data.tags.tags && Array.isArray(data.tags.tags) && (
+                                <div className={`flex flex-wrap gap-2 mt-2 ${isExpanded ? 'opacity-100' : 'opacity-80'}`}>
+                                  {data.tags.tags.map((tag: any, i: number) => (
+                                    <span key={i} className="text-[11px] font-medium text-[#00f0ff] hover:text-white transition-colors">
+                                      #{tag}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </motion.div>
+                          )}
                         </div>
 
+
                         {/* 3. BARRA DE INTERACCIÓN Y BOTÓN DE SUSCRIPCIÓN */}
-                        <div className={`flex items-center justify-between w-full ${isExpanded ? "pb-4" : "pb-13"}`}>
+                        {/* <div className={`flex items-center justify-between w-full ${isExpanded ? "pb-4" : "pb-13"}`}>
                           <div className="flex items-center gap-4">
                             <motion.button
                               whileTap={{ scale: 0.9 }}
@@ -1747,7 +1976,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                               }}
                             >
                               <div className="flex h-10 mb-3 w-10 items-center justify-center rounded-full bg-white/10 border-2 border-pink-500/60">
-                                <svg data-v-92f2660e width="20" height="20" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg"><g id="giftbox" data-v-92f2660e=""><g id="Base" data-v-92f2660e=""><g id="bottom" data-v-92f2660e=""><path id="Rectangle 15 Copy 2" d="M94 58H26V104H94V58Z" fill="#FF4F64" data-v-92f2660e=""></path><path id="Rectangle 3 Copy" opacity="0.05" d="M94 101.294H26V104H94V101.294Z" fill="black" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 5" opacity="0.1" d="M28.6842 58H26V104H28.6842V58Z" fill="white" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 6" opacity="0.05" d="M94 58H91.3158V104H94V58Z" fill="black" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 3" opacity="0.05" d="M73.8684 58H71.1842V104H73.8684V58Z" fill="black" data-v-92f2660e=""></path><path id="Rectangle Copy" d="M71.1842 58H48.5921V104H71.1842V58Z" fill="#FFD4D9" data-v-92f2660e=""></path><path id="Rectangle 2" opacity="0.1" d="M94 58H26V63.8627H94V58Z" fill="url(#paint0_linear_740_3020)" data-v-92f2660e=""></path></g></g><g id="top" data-v-92f2660e=""><path id="Rectangle 15 Copy 3" d="M100 42.665H20V60.0001H100V42.665Z" fill="#FF4F64" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 7" opacity="0.05" d="M100 42.665H97.2881V60.0001H100V42.665Z" fill="black" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 4" opacity="0.1" d="M22.7119 42.665H20V59.775H22.7119V42.665Z" fill="white" data-v-92f2660e=""></path><path id="ribbon" d="M60.0077 31.2585C59.9498 31.1677 58.6909 29.2544 58.0916 28.4143C55.4283 24.6809 52.6562 21.6866 49.7588 19.6882C45.9232 17.0425 41.9395 16.2219 38.0786 17.8014C35.6247 18.8053 33.3914 20.7344 31.3719 23.5749C27.177 29.4752 27.4011 34.7531 31.83 38.2919C34.9369 40.7745 39.8498 42.1747 46.1869 42.8621C50.835 43.3663 55.0298 43.2435 59.6147 43.3624L60.0077 31.2585ZM46.7269 37.0423C41.3928 36.4628 37.3603 35.3117 35.3278 33.6852C34.4441 32.978 34.0493 32.2813 34.0144 31.4588C33.9664 30.3263 34.5486 28.7649 35.9595 26.7772C37.3893 24.7631 38.8028 23.5403 40.1691 22.9805C43.7795 21.5011 48.4661 24.7386 53.3703 31.624C54.6954 33.4844 55.9353 35.4716 57.0626 37.4757C53.6591 37.5264 50.0985 37.4086 46.7269 37.0423ZM66.6306 31.624C71.5348 24.7386 76.2213 21.5011 79.8318 22.9805C81.1981 23.5403 82.6115 24.7631 84.0413 26.7772C85.4522 28.7649 86.0344 30.3263 85.9864 31.4588C85.9515 32.2813 85.5567 32.978 84.673 33.6852C82.6406 35.3117 78.608 36.4628 73.2739 37.0423C69.9024 37.4086 66.3417 37.5264 62.9383 37.4757C64.0656 35.4716 65.3054 33.4844 66.6306 31.624ZM59.6147 43.3626C64.0607 43.3626 69.1658 43.3663 73.8139 42.8621C80.1511 42.1747 85.0639 40.7745 88.1708 38.2919C92.5997 34.7531 92.8238 29.4752 88.6289 23.5749C86.6095 20.7344 84.3761 18.8053 81.9222 17.8014C78.0613 16.2219 74.0777 17.0425 70.242 19.6882C67.3447 21.6866 64.5725 24.6809 61.9092 28.4143C61.2369 29.3568 60.6251 30.2764 60.0004 31.2585" fill="url(#paint1_linear_740_3020)" data-v-92f2660e=""></path><path id="Rectangle" d="M76.9491 42.665H42.8248V60.0001H76.9491V42.665Z" fill="#FFD4D9" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 8" opacity="0.1" d="M100 42.665H20V45.3666H100V42.665Z" fill="white" data-v-92f2660e=""></path><path id="Rectangle 4 Copy" opacity="0.05" d="M79.661 42.665H76.9492V60.0001H79.661V42.665Z" fill="black" data-v-92f2660e=""></path></g></g><defs data-v-92f2660e=""><linearGradient id="paint0_linear_740_3020" x1="60" y1="58" x2="60" y2="63.8627" gradientUnits="userSpaceOnUse" data-v-92f2660e=""><stop data-v-92f2660e=""></stop><stop offset="1" stopOpacity="0" data-v-92f2660e=""></stop></linearGradient><linearGradient id="paint1_linear_740_3020" x1="60.0004" y1="18.9264" x2="60.0004" y2="43.3626" gradientUnits="userSpaceOnUse" data-v-92f2660e=""><stop stopColor="#FF879D" data-v-92f2660e=""></stop><stop offset="0.326625" stopColor="#FF4F64" data-v-92f2660e=""></stop><stop offset="1" stopColor="#E54659" data-v-92f2660e=""></stop></linearGradient></defs></svg>
+                                <svg data-v-92f2660e width="20" height="20" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg"><g id="giftbox" data-v-92f2660e=""><g id="Base" data-v-92f2660e=""><g id="bottom" data-v-92f2660e=""><path id="Rectangle 15 Copy 2" d="M94 58H26V104H94V58Z" fill="#FF4F64" data-v-92f2660e=""></path><path id="Rectangle 3 Copy" opacity="0.05" d="M94 101.294H26V104H94V101.294Z" fill="black" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 5" opacity="0.1" d="M28.6842 58H26V104H28.6842V58Z" fill="white" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 6" opacity="0.05" d="M94 58H91.3158V104H94V58Z" fill="black" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 3" opacity="0.05" d="M73.8684 58H71.1842V104H73.8684V58Z" fill="black" data-v-92f2660e=""></path><path id="Rectangle Copy" d="M71.1842 58H48.5921V104H71.1842V58Z" fill="#FFD4D9" data-v-92f2660e=""></path><path id="Rectangle 2" opacity="0.1" d="M94 58H26V63.8627H94V58Z" fill="url(#paint0_linear_740_3020)" data-v-92f2660e=""></path></g></g><g id="top" data-v-92f2660e=""><path id="Rectangle 15 Copy 3" d="M100 42.665H20V60.0001H100V42.665Z" fill="#FF4F64" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 7" opacity="0.05" d="M100 42.665H97.2881V60.0001H100V42.665Z" fill="black" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 4" opacity="0.1" d="M22.7119 42.665H20V59.775H22.7119V42.665Z" fill="white" data-v-92f2660e=""></path><path id="ribbon" d="M60.0077 31.2585C59.9498 31.1677 58.6909 29.2544 58.0916 28.4143C55.4283 24.6809 52.6562 21.6866 49.7588 19.6882C45.9232 17.0425 41.9395 16.2219 38.0786 17.8014C35.6247 18.8053 33.3914 20.7344 31.3719 23.5749C27.177 29.4752 27.4011 34.7531 31.83 38.2919C34.9369 40.7745 39.8498 42.1747 46.1869 42.8621C50.835 43.3663 55.0298 43.2435 59.6147 43.3624L60.0077 31.2585ZM46.7269 37.0423C41.3928 36.4628 37.3603 35.3117 35.3278 33.6852C34.4441 32.978 34.0493 32.2813 34.0144 31.4588C33.9664 30.3263 34.5486 28.7649 35.9595 26.7772C37.3893 24.7631 38.8028 23.5403 40.1691 22.9805C43.7795 21.5011 48.4661 24.7386 53.3703 31.624C54.6954 33.4844 55.9353 35.4716 57.0626 37.4757C53.6591 37.5264 50.0985 37.4086 46.7269 37.0423ZM66.6306 31.624C71.5348 24.7386 76.2213 21.5011 79.8318 22.9805C81.1981 23.5403 82.6115 24.7631 84.0413 26.7772C85.4522 28.7649 86.0344 30.3263 85.9864 31.4588C85.9515 32.2813 85.5567 32.978 84.673 33.6852C82.6406 35.3117 78.608 36.4628 73.2739 37.0423C69.9024 37.4086 66.3417 37.5264 62.9383 37.4757C64.0656 35.4716 65.3054 33.4844 66.6306 31.624ZM59.6147 43.3626C64.0607 43.3626 69.1658 43.3663 73.8139 42.8621C80.1511 42.1747 85.0639 40.7745 88.1708 38.2919C92.5997 34.7531 92.8238 29.4752 88.6289 23.5749C86.6095 20.7344 84.3761 18.8053 81.9222 17.8014C78.0613 16.2219 74.0777 17.0425 70.242 19.6882C67.3447 21.6866 64.5725 24.6809 61.9092 28.4143C61.2369 29.3568 60.6251 30.2764 60.0004 31.2585" fill="url(#paint1_linear_740_3020)" data-v-92f2660e=""></path><path id="Rectangle" d="M76.9491 42.665H42.8248V60.0001H76.9491V42.665Z" fill="#FFD4D9" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 8" opacity="0.1" d="M100 42.665H20V45.3666H100V42.665Z" fill="white" data-v-92f2660e=""></path><path id="Rectangle 4 Copy" opacity="0.05" d="M79.661 42.665H76.9492V60.0001H79.661V42.665Z" fill="black" data-v-92f2660e="="></path></g></g><defs data-v-92f2660e=""><linearGradient id="paint0_linear_740_3020" x1="60" y1="58" x2="60" y2="63.8627" gradientUnits="userSpaceOnUse" data-v-92f2660e=""><stop data-v-92f2660e=""></stop><stop offset="1" stopOpacity="0" data-v-92f2660e=""></stop></linearGradient><linearGradient id="paint1_linear_740_3020" x1="60.0004" y1="18.9264" x2="60.0004" y2="43.3626" gradientUnits="userSpaceOnUse" data-v-92f2660e=""><stop stopColor="#FF879D" data-v-92f2660e=""></stop><stop offset="0.326625" stopColor="#FF4F64" data-v-92f2660e=""></stop><stop offset="1" stopColor="#E54659" data-v-92f2660e=""></stop></linearGradient></defs></svg>
                               </div>
                             </motion.button>
                           </div>
@@ -1787,72 +2016,217 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                               </motion.button>
                             )}
                           </AnimatePresence>
-                        </div>
+                        </div> */}
 
-                        {/* 1. SECCIÓN DE DESCRIPCIÓN DEL VIDEO (Manejo de @mentions) */}
-                        {data.description && (
-                          <motion.div
-                            className={`
-                                              p-1 rounded-lg backdrop-blur-sm transition-all duration-300 ease-in-out
-                                              ${isExpanded
-                                ? 'absolute max-w-[60vh] center pt-2 pb-1 pr-2  pl-2 bottom-1 -left-1  max-h-[90vh] overflow-y-auto  overflow-x-hidden bg-black/50 z-20'
-                                : 'absolute -mx-5 bottom-1 pb-1 pl-3 pr-10  max-h-[100px] overflow-hidden bg-black/50'
-                              }
-                                          `}
-                            // className={`mb-1 bg-black/10 p-3 rounded-lg backdrop-blur-sm relative transition-all duration-300 ease-in-out ${isExpanded ? 'max-h-96 overflow-y-auto' : 'max-h-[100px] overflow-hidden'}`}
-                            initial={false}
-                            animate={{ maxHeight: isExpanded ? 384 : 100 }}
+                        {/* BARRA VERTICAL PEGADA AL BORDE DERECHO - estilo TikTok real */}
+                        {/* 3. COLUMNA DE INTERACCIONES (DERECHA) */}
+                        <div className={`
+                              absolute right-2 bottom-[120px] flex flex-col items-center gap-6 z-[70]
+                              pointer-events-auto
+                              pb-[env(safe-area-inset-bottom)+50px]         // evita superposición con navbar inferior
+                            `}>
+
+                          {/* Like */}
+                          <motion.button
+                            whileTap={{ scale: 0.9 }}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleLikeClick((videoId || "1"))
+                            }}
+                            className="relative flex flex-col items-center gap-1"
                           >
-                            <div className="text-sm text-white/90">
-                              {/* Contenido Dinámico con Menciones */}
-                              {isExpanded ? (
-                                // Mostrar contenido completo
+                            <motion.div
+                              animate={{ scale: data.liked ? [1, 1.3, 1] : 1 }}
+                              transition={{ duration: 0.3 }}
+                              className={`flex h-10 w-10 items-center justify-center rounded-full ${data.liked
+                                ? "bg-red-500/20 text-red-500"
+                                : "bg-white/10 text-white"
+                                }`}
+                            >
+                              <Heart
+                                className={`h-5 w-5 ${data.liked ? "fill-red-900 text-red-500" : "text-white"
+                                  }`}
+                              />
+                            </motion.div>
+                            <span className="text-xs text-white">{data.like_count || 0}</span>
+                            <AnimatePresence>
+                              {showLikeAnimation[data.id || "1"] && (
                                 <>
-                                  {data.description.length > 49 && (
-                                    <div
-                                      className="flex justify-center p-3 "
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleToggleDescription(videoId);
+                                  {[...Array(5)].map((_, i) => (
+                                    <motion.div
+                                      key={`heart-particle-${data.id}-${i}`}
+                                      initial={{
+                                        opacity: 1,
+                                        y: 0,
+                                        x: 0,
+                                        scale: 0.5,
+                                      }}
+                                      animate={{
+                                        opacity: 0,
+                                        y: -50 - Math.random() * 50,
+                                        x: (Math.random() - 0.5) * 40,
+                                        scale: 1.5,
+                                      }}
+                                      exit={{ opacity: 0 }}
+                                      transition={{
+                                        duration: 1 + Math.random() * 0.5,
+                                      }}
+                                      className="absolute text-red-500"
+                                      style={{
+                                        top: "50%",
+                                        left: "50%",
+                                        transform: "translate(-50%, -50%)",
                                       }}
                                     >
-                                      <div className="w-12 h-1.5 bg-[#00f0ff] rounded-full cursor-pointer"></div>
-                                    </div>
-                                  )}
-                                  {fullContent}
-                                </>
-                              ) : (
-                                // Mostrar contenido truncado
-                                <>
-                                  {truncatedContent}
-                                  {needsTruncation && (
-                                    <>
-                                      ...
-                                      <button
-                                        className="ml-1 text-[#00f0ff] font-semibold hover:text-white transition-colors text-xs"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleToggleDescription(videoId);
-                                        }}
-                                      >
-                                        Ver más
-                                      </button>
-                                    </>
-                                  )}
+                                      ❤️
+                                    </motion.div>
+                                  ))}
                                 </>
                               )}
-                            </div>
+                            </AnimatePresence>
+                          </motion.button>
 
-                            {/* Contenedor de hashtags */}
-                            {data.tags && (
-                              <div className="mt-1 text-xs text-[#00f0ff]/80">
-                                {data.tags.tags.map((tag, i) => (
-                                  <span key={i} className="mr-2">#{tag}</span>
-                                ))}
-                              </div>
+                          {/* Comment */}
+                          <motion.button
+                            whileTap={{ scale: 0.92 }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCommentClick(index);
+                            }}
+                            className="flex flex-col items-center relative"
+                          >
+                            <div className="relative flex h-7 w-7 items-center justify-center rounded-full">
+                              <MessageCircle className="h-6 w-8" />
+                              {activeVideo === index && (data.comments_count || 0) > 0 && (
+                                <div className="absolute -top-1 -right-1 min-h-[8px] min-w-[8px] flex items-center justify-center rounded-full bg-cyan-500 text-[10px] font-bold px-1 shadow-cyan-500/40">
+                                  {data.comments_count > 9 ? "9+" : data.comments_count}
+                                </div>
+                              )}
+                            </div>
+                            <span className="text-xs mt-0.5 text-white">
+                              {data.comments_count || 0}
+                            </span>
+                          </motion.button>
+
+                          {/* Views */}
+                          <div className="flex flex-col items-center">
+                            <div className="flex h-8 w-8 items-center justify-center">
+                              <Eye className="h-7 w-8 " />
+                            </div>
+                            <span className="text-xs   ">
+                              {data.view_acount || 0}
+                            </span>
+                          </div>
+
+                          {/* Gift */}
+                          <motion.button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleVideoGiftClick(data.id);
+                            }}
+                            className="flex flex-col items-center relative"
+                            whileHover={{ scale: 1.1 }}
+                            whileTap={{ scale: 0.9 }}
+                            animate={{
+                              scale: [1, 1.04, 1],
+                              rotate: [0, -4, 4, -4, 4, 0],
+                            }}
+                            transition={{
+                              duration: 1.4,
+                              repeat: Infinity,
+                              repeatDelay: 12,
+                            }}
+                          >
+                            <div className={`
+                                  flex h-7 w-8 items-center justify-center rounded-full
+                                  bg-gradient-to-br from-pink-500/35 to-purple-500/25
+                                  backdrop-blur-md border border-pink-400/40 shadow-md
+                                `}>
+                              {/* Tu SVG del gift (más pequeño) */}
+                              <svg data-v-92f2660e width="20" height="20" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg"><g id="giftbox" data-v-92f2660e=""><g id="Base" data-v-92f2660e=""><g id="bottom" data-v-92f2660e=""><path id="Rectangle 15 Copy 2" d="M94 58H26V104H94V58Z" fill="#FF4F64" data-v-92f2660e=""></path><path id="Rectangle 3 Copy" opacity="0.05" d="M94 101.294H26V104H94V101.294Z" fill="black" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 5" opacity="0.1" d="M28.6842 58H26V104H28.6842V58Z" fill="white" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 6" opacity="0.05" d="M94 58H91.3158V104H94V58Z" fill="black" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 3" opacity="0.05" d="M73.8684 58H71.1842V104H73.8684V58Z" fill="black" data-v-92f2660e=""></path><path id="Rectangle Copy" d="M71.1842 58H48.5921V104H71.1842V58Z" fill="#FFD4D9" data-v-92f2660e=""></path><path id="Rectangle 2" opacity="0.1" d="M94 58H26V63.8627H94V58Z" fill="url(#paint0_linear_740_3020)" data-v-92f2660e=""></path></g></g><g id="top" data-v-92f2660e=""><path id="Rectangle 15 Copy 3" d="M100 42.665H20V60.0001H100V42.665Z" fill="#FF4F64" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 7" opacity="0.05" d="M100 42.665H97.2881V60.0001H100V42.665Z" fill="black" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 4" opacity="0.1" d="M22.7119 42.665H20V59.775H22.7119V42.665Z" fill="white" data-v-92f2660e=""></path><path id="ribbon" d="M60.0077 31.2585C59.9498 31.1677 58.6909 29.2544 58.0916 28.4143C55.4283 24.6809 52.6562 21.6866 49.7588 19.6882C45.9232 17.0425 41.9395 16.2219 38.0786 17.8014C35.6247 18.8053 33.3914 20.7344 31.3719 23.5749C27.177 29.4752 27.4011 34.7531 31.83 38.2919C34.9369 40.7745 39.8498 42.1747 46.1869 42.8621C50.835 43.3663 55.0298 43.2435 59.6147 43.3624L60.0077 31.2585ZM46.7269 37.0423C41.3928 36.4628 37.3603 35.3117 35.3278 33.6852C34.4441 32.978 34.0493 32.2813 34.0144 31.4588C33.9664 30.3263 34.5486 28.7649 35.9595 26.7772C37.3893 24.7631 38.8028 23.5403 40.1691 22.9805C43.7795 21.5011 48.4661 24.7386 53.3703 31.624C54.6954 33.4844 55.9353 35.4716 57.0626 37.4757C53.6591 37.5264 50.0985 37.4086 46.7269 37.0423ZM66.6306 31.624C71.5348 24.7386 76.2213 21.5011 79.8318 22.9805C81.1981 23.5403 82.6115 24.7631 84.0413 26.7772C85.4522 28.7649 86.0344 30.3263 85.9864 31.4588C85.9515 32.2813 85.5567 32.978 84.673 33.6852C82.6406 35.3117 78.608 36.4628 73.2739 37.0423C69.9024 37.4086 66.3417 37.5264 62.9383 37.4757C64.0656 35.4716 65.3054 33.4844 66.6306 31.624ZM59.6147 43.3626C64.0607 43.3626 69.1658 43.3663 73.8139 42.8621C80.1511 42.1747 85.0639 40.7745 88.1708 38.2919C92.5997 34.7531 92.8238 29.4752 88.6289 23.5749C86.6095 20.7344 84.3761 18.8053 81.9222 17.8014C78.0613 16.2219 74.0777 17.0425 70.242 19.6882C67.3447 21.6866 64.5725 24.6809 61.9092 28.4143C61.2369 29.3568 60.6251 30.2764 60.0004 31.2585" fill="url(#paint1_linear_740_3020)" data-v-92f2660e=""></path><path id="Rectangle" d="M76.9491 42.665H42.8248V60.0001H76.9491V42.665Z" fill="#FFD4D9" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 8" opacity="0.1" d="M100 42.665H20V45.3666H100V42.665Z" fill="white" data-v-92f2660e=""></path><path id="Rectangle 4 Copy" opacity="0.05" d="M79.661 42.665H76.9492V60.0001H79.661V42.665Z" fill="black" data-v-92f2660e=""></path></g></g><defs data-v-92f2660e=""><linearGradient id="paint0_linear_740_3020" x1="60" y1="58" x2="60" y2="63.8627" gradientUnits="userSpaceOnUse" data-v-92f2660e=""><stop data-v-92f2660e=""></stop><stop offset="1" stopOpacity="0" data-v-92f2660e=""></stop></linearGradient><linearGradient id="paint1_linear_740_3020" x1="60.0004" y1="18.9264" x2="60.0004" y2="43.3626" gradientUnits="userSpaceOnUse" data-v-92f2660e=""><stop stopColor="#FF879D" data-v-92f2660e=""></stop><stop offset="0.326625" stopColor="#FF4F64" data-v-92f2660e=""></stop><stop offset="1" stopColor="#E54659" data-v-92f2660e=""></stop></linearGradient></defs></svg>
+                            </div>
+                            <span className="text-[10px] mt-0.5 text-pink-300/90 font-medium drop-shadow-md">
+                              Regalar
+                            </span>
+                          </motion.button>
+
+                          {/* Seguir / Siguiendo */}
+                          {/* Botón de seguir - ahora como circulito con icono + efecto */}
+                          <AnimatePresence mode="wait">
+                            {(!followingState[data.user_id.id.toString()] &&
+                              !data.current_user_followered &&
+                              data.user_id.username !== user.username) ? (
+                              <motion.button
+                                key="follow"
+                                initial={{ scale: 0.8, opacity: 0 }}
+                                animate={{ scale: 1, opacity: 1 }}
+                                exit={{ scale: 0.8, opacity: 0 }}
+                                whileTap={{ scale: 0.85 }}
+                                transition={{ type: "spring", stiffness: 400, damping: 20 }}
+                                className={`
+                                  mt-3 relative flex h-8 w-8 items-center justify-center rounded-full
+                                  bg-gradient-to-br from-cyan-500 to-purple-600
+                                  shadow-lg shadow-cyan-500/40 border border-white/20 backdrop-blur-md
+                                `}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleFollowClick(Number(data.user_id.id), data.user_id.id.toString(), "create");
+                                }}
+                              >
+                                {/* Icono + cuando NO sigues */}
+                                <Plus className="h-5 w-5 text-white" strokeWidth={3} />
+
+                                {/* Efecto ripple al tocar (opcional pero bonito) */}
+                                <motion.div
+                                  className="absolute inset-0 rounded-full bg-white/20"
+                                  initial={{ scale: 0, opacity: 0.6 }}
+                                  animate={{ scale: 1.8, opacity: 0 }}
+                                  transition={{ duration: 0.6, ease: "easeOut" }}
+                                />
+                              </motion.button>
+                            ) : (
+                              <motion.button
+                                key="following"
+                                initial={{ scale: 0.8, opacity: 0 }}
+                                animate={{ scale: 1, opacity: 1 }}
+                                exit={{ scale: 0.8, opacity: 0 }}
+                                whileTap={{ scale: 0.85 }}
+                                transition={{ type: "spring", stiffness: 400, damping: 20 }}
+                                className={`
+                                mt-3 relative flex h-8 w-8 items-center justify-center rounded-full
+                                                          bg-gradient-to-br from-green-500 to-emerald-600
+                                                          shadow-lg shadow-green-500/40 border border-white/20 backdrop-blur-md
+                                `}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleFollowClick(Number(data.user_id.id), data.user_id.id.toString(), "delete");
+                                }}
+                              >
+                                {/* Icono check cuando YA sigues */}
+                                <svg
+                                  className="h-5 w-5 text-white"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="3"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <polyline points="20 6 9 17 4 12" />
+                                </svg>
+
+                                {/* Efecto de brillo/confeti sutil al cambiar estado */}
+                                <motion.div
+                                  className="absolute inset-0 rounded-full bg-white/30"
+                                  initial={{ scale: 0, opacity: 0.7 }}
+                                  animate={{ scale: 2, opacity: 0 }}
+                                  transition={{ duration: 0.7, ease: "easeOut" }}
+                                />
+                              </motion.button>
                             )}
-                          </motion.div>
-                        )}
+                          </AnimatePresence>
+                        </div>
+
 
                         {/* 4. BARRA DE PROGRESO DE VIDEO (AL FINAL) */}
                         {videoDuration[videoId] > 0 && (
@@ -1862,7 +2236,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                               '--progress': `${progressPercentage}%`
                             } as React.CSSProperties;
                             return (
-                              <div className="relative h-1 -mx-4">
+                              <div className="relative h-1.5 -mx-1 mt-2">
                                 <input
                                   type="range"
                                   min="0"
@@ -1942,101 +2316,12 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 </motion.div>
               );
             })()}
-            {/* Gift Animation Overlay - Now with R3F Canvas for 3D Immersive Effects */}
-            <AnimatePresence>
-              {giftAnimation && (
-                <motion.div
-                  initial={{ opacity: 0, y: 200, scale: 0.7 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: 400, scale: 0.7 }}
-                  transition={{ type: "tween", duration: 0.4, ease: "easeInOut" }}
-                  className={`fixed bottom-15 left-1/2 -translate-x-1/2 z-60 pointer-events-none w-[700px] max-w-lg  py-15`}
-                >
-                  <video
-                    key={giftAnimation.giftId}
-                    src={`${getBaseUrl()}${giftAnimation.gift}`}
-                    autoPlay
-                    playsInline
-                    muted={false}
-                    className="w-full drop-shadow-2xl rounded-3xl"
-                    style={{
-                      WebkitMaskImage: `
-                          linear-gradient(to top, transparent 10%, black 50%),
-                          linear-gradient(to bottom, transparent 10%, black 50%),
-                          linear-gradient(to left, transparent 0%, black 30%),
-                          linear-gradient(to right, transparent 0%, black 30%)
-                        `,
-                      WebkitMaskComposite: "destination-in",
-                      maskComposite: "intersect"
-                    }}
-                    onTimeUpdate={(e) => {
-                      // Blackout effect for Space gift ("🪐" or "Space")
-                      const video = e.currentTarget;
-                      if (giftAnimation.type === 'Space' || giftAnimation.type === '🪐') {
-                        if (video.currentTime >= 4.0 && video.currentTime < 6.0) {
-                          if (!isBlackout) setIsBlackout(true);
-                        } else if (video.currentTime >= 6.0 && isBlackout) {
-                          setIsBlackout(false);
-                        }
-                      }
-                    }}
-                    onPlay={() => {
-                      // Asegurar que el estado premium esté activo cuando el video comience
-                      const storyUuidToActivate = giftAnimation?.storyUuid || currentStoryUuid;
-                      if (storyUuidToActivate && giftAnimation?.amount && giftAnimation.amount > 20) {
-                        // setStoryPremiumStatesSee(prev => ({ ...prev, [storyUuidToActivate]: true }));
-                        // Guardar el color premium si viene en el regalo
-                        if (giftAnimation?.color_premiun) {
-                          setStoryPremiumColors(prev => ({ ...prev, [storyUuidToActivate]: giftAnimation.color_premiun! }));
-                        }
-                      }
-                    }}
-                    onEnded={() => {
-                      setIsBlackout(false); // Ensure blackout is cleared
-                      // Obtener el storyUuid del regalo antes de limpiar la animación
-                      const storyUuidToClean = giftAnimation?.storyUuid || currentStoryUuid;
-
-                      // Limpiar inmediatamente los estados premium para quitar los colores y el borde azul
-                      // Esto debe hacerse ANTES de limpiar giftAnimation para evitar problemas de referencia
-                      if (storyUuidToClean) {
-                        // Forzar la limpieza de ambos estados premium
-                        setStoryPremiumStates(prev => {
-                          const newState = { ...prev };
-                          if (newState[storyUuidToClean]) {
-                            delete newState[storyUuidToClean];
-                          }
-                          return newState;
-                        });
-                        setStoryPremiumStatesSee(prev => {
-                          const newState = { ...prev };
-                          if (newState[storyUuidToClean]) {
-                            delete newState[storyUuidToClean];
-                          }
-                          return newState;
-                        });
-                        // Limpiar también el color premium
-                        setStoryPremiumColors(prev => {
-                          const newState = { ...prev };
-                          if (newState[storyUuidToClean]) {
-                            delete newState[storyUuidToClean];
-                          }
-                          return newState;
-                        });
-                      }
-
-                      // Limpiar la animación del regalo después de limpiar los estados
-                      setGiftAnimation(null);
-                    }}
-                  />
-                </motion.div>
-              )}
-            </AnimatePresence>
             {/* Story Header & Progress Bars */}
-            <div className={`relative z-20 pt-4 px-2 bg-gradient-to-b from-black/80 to-transparent pb-8 ${storyPremiumStates[currentStoryUuid || ''] ? 'premium-header' : ''}`}>
+            <div className={`relative z-20 px-2 bg-gradient-to-b from-black/80 to-transparent pb-8 ${storyPremiumStates[currentStoryUuid || ''] ? 'premium-header' : ''}`}>
               {/* Progress Bars Container - Divided per story item */}
               <div className="flex gap-1 mb-3">
                 {groupedStories[viewingStoryUserIndex].media.map((_: any, idx: number) => (
-                  <div key={idx} className="h-1 flex-1 bg-white/20 rounded-full overflow-hidden">
+                  <div key={idx} className="h-2 flex-1 bg-white/20 rounded-full overflow-hidden">
                     <div
                       className="h-full bg-white rounded-full transition-all duration-300 ease-linear"
                       style={{ width: `${(getCurrentProgress[idx] || 0) * 100}%` }}
@@ -2607,109 +2892,63 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         }
       </AnimatePresence >
       <ShowComments showCommentsModal={showCommentsModal} setShowCommentsModal={setShowCommentsModal} comments={comments} user={user} commentText={commentText} setCommentText={setCommentText} handlePostComment={handlePostComment} />
-      {/* <AnimatePresence>
-        {showCommentsModal && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/70 z-40"
-              onClick={() => setShowCommentsModal(false)}
+
+      {/* Gift Animation Overlay - Moved to top level to show in videos too */}
+      <AnimatePresence>
+        {giftAnimation && (
+          <motion.div
+            initial={{ opacity: 0, y: 200, scale: 0.7 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 400, scale: 0.7 }}
+            transition={{ type: "tween", duration: 0.4, ease: "easeInOut" }}
+            className="fixed bottom-32 left-1/2 -translate-x-1/2 z-[100] pointer-events-none w-[90vw] max-w-lg overflow-visible"
+          >
+            <video
+              key={giftAnimation.giftId}
+              src={`${getBaseUrl()}${giftAnimation.gift}`}
+              autoPlay
+              playsInline
+              muted={false}
+              className="w-full drop-shadow-[0_0_30px_rgba(255,255,255,0.3)] rounded-3xl"
+              style={{
+                WebkitMaskImage: `
+                    linear-gradient(to top, transparent 10%, black 50%),
+                    linear-gradient(to bottom, transparent 10%, black 50%),
+                    linear-gradient(to left, transparent 0%, black 30%),
+                    linear-gradient(to right, transparent 0%, black 30%)
+                  `,
+                WebkitMaskComposite: "destination-in",
+                maskComposite: "intersect"
+              }}
+              onTimeUpdate={(e) => {
+                const video = e.currentTarget;
+                if (giftAnimation.type === 'Space' || giftAnimation.type === '🪐') {
+                  if (video.currentTime >= 4.0 && video.currentTime < 6.0) {
+                    if (!isBlackout) setIsBlackout(true);
+                  } else if (video.currentTime >= 6.0 && isBlackout) {
+                    setIsBlackout(false);
+                  }
+                }
+              }}
+              onPlay={() => {
+                const storyUuidToActivate = giftAnimation?.storyUuid || currentStoryUuid;
+                if (storyUuidToActivate && giftAnimation?.amount && giftAnimation.amount > 20) {
+                  if (giftAnimation?.color_premiun) {
+                    setStoryPremiumColors(prev => ({ ...prev, [storyUuidToActivate]: giftAnimation.color_premiun! }));
+                  }
+                }
+              }}
+              onEnded={() => {
+                setIsBlackout(false);
+                setGiftAnimation(null);
+              }}
             />
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 30, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 h-[50vh] z-50 flex flex-col bg-black rounded-t-3xl overflow-hidden"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex justify-center pt-3" onClick={() => setShowCommentsModal(false)}>
-                <div className="w-12 h-1.5 bg-white/30 rounded-full cursor-pointer" />
-              </div>
-              <h1 className="p-2 text-center font-bold text-white">Comentarios</h1>
-              <div className="flex-1 overflow-y-auto px-4 custom-scrollbar">
-                {(!comments || comments.length === 0) && (
-                  <div className="flex justify-center items-center h-full">
-                    <p className="text-[#a2b0ff] text-sm">No hay comentarios todavía</p>
-                  </div>
-                )}
-                <AnimatePresence>
-                  {comments?.map((comment) => (
-                    <motion.div
-                      key={comment.uuid}
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, height: 0 }}
-                      className="flex items-start gap-3 py-3 border-b border-[#2a2f5e]/50 last:border-b-0"
-                    >
-                      <div className={`relative p-[2px] rounded-full ${
-                        comment.user_id.subscription_status?.is_active 
-                          ? comment.user_id.subscription_status.plan_name === 'VIP' 
-                            ? 'bg-gradient-to-tr from-amber-300 via-amber-500 to-amber-200 shadow-[0_0_10px_rgba(245,158,11,0.5)]'
-                            : 'bg-gradient-to-tr from-blue-400 via-blue-600 to-blue-300 shadow-[0_0_10px_rgba(37,99,235,0.5)]'
-                          : 'bg-[#2a2f5e]'
-                      }`}>
-                        <img
-                          src={`${getBaseUrl()}media/${comment.user_id.profile_picture || 'profile_pics/avatar.webp'}`}
-                          onError={(e) => (e.target as HTMLImageElement).src = `https://picsum.photos/40/40?random=${comment.uuid}`}
-                          alt={comment.user_id.username}
-                          className="h-10 w-10 rounded-full object-cover border-2 border-black"
-                        />
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-sm">
-                          <span className="font-semibold text-white mr-1">{comment.user_id.username}</span>
-                          <span className="text-[#a2b0ff]">{comment.content}</span>
-                        </p>
-                        <div className="flex items-center gap-3 mt-1 text-xs text-[#6a7199]">
-                          <span>{comment.create_at}</span>
-                          <button className="font-medium hover:text-white transition-colors">Responder</button>
-                        </div>
-                      </div>
-                      <motion.button whileTap={{ scale: 0.9 }} className="text-[#6a7199] hover:text-red-500 transition-colors">
-                        <Heart size={16} />
-                      </motion.button>
-                    </motion.div>
-                  ))}
-                </AnimatePresence>
-              </div>
-              <div className="sticky bottom-17 bg-black border-t border-[#2a2f5e] p-2 flex items-center gap-2 mb-4">
-                <img
-                  src={`${getBaseUrl()}${user.profile_picture}`}
-                  alt="Tu perfil"
-                  className="h-9 w-9 rounded-full object-cover border border-[#2a2f5e]"
-                />
-                <input
-                  type="text"
-                  placeholder="Añadir un comentario..."
-                  className="flex-1 p-2 rounded-full bg-[#1a1f3a] border border-[#2a2f5e] text-white placeholder-[#6a7199] focus:outline-none focus:border-[#00f0ff]"
-                  value={commentText}
-                  onChange={(e) => setCommentText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault()
-                      handlePostComment()
-                    }
-                  }}
-                />
-                <motion.button
-                  whileTap={{ scale: 0.9 }}
-                  className=" py-2 px-4 rounded-full bg-gradient-to-r from-[#7000ff] to-[#00f0ff] text-white font-medium shadow-lg disabled:opacity-50"
-                  onClick={handlePostComment}
-                  disabled={!commentText.trim()}
-                >
-                  Publicar
-                </motion.button>
-              </div>
-            </motion.div>
-          </>
+          </motion.div>
         )}
-      </AnimatePresence> */}
+      </AnimatePresence>
 
       {
-        viewingStoryUserIndex !== null && groupedStories[viewingStoryUserIndex] || selectedChat
+        (viewingStoryUserIndex !== null && groupedStories[viewingStoryUserIndex as number]) || selectedChat
           ? null
           : <BottomNavbar />
       }
@@ -2757,7 +2996,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
             gifts={Array.isArray(_fullGifts) ? _fullGifts : []}
             walletTokens={walletTokens}
             subscriptionStatus={
-              mediaVideo?.find(v => v.id == selectedVideoForGift)?.user_id?.subscription_status
+              (mediaVideo?.find(v => v.id == selectedVideoForGift)?.user_id as any)?.subscription_status
             }
           />
         )}

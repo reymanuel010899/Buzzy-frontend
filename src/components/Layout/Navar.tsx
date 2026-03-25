@@ -8,7 +8,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import {
   FileText, Image as ImageIcon, Camera, Headphones, User, BarChart2, Calendar, Smile,
   Mic, Trash2, StopCircle, Search, Bell, X, Phone, Video, Plus, Send, Download, Play, MessageCircleMore,
-  Sparkles,
+  Sparkles, Megaphone,
 } from "lucide-react"
 // import { Link } from "react-router-dom"
 import { motion, AnimatePresence, LayoutGroup } from "framer-motion"
@@ -616,7 +616,7 @@ const Navbar: React.FC = () => {
     <>
       {/* NAVBAR ORIGINAL - SIN CAMBIOS */}
       <nav
-        className={`fixed w-full top-0 z-40 px-4 sm:px-6 transition-all duration-300 ${scrollPosition > 20 ? "bg-black backdrop-blur-lg" : "bg-black/80 backdrop-blur-2xl"
+        className={`fixed w-full top-0 z-50 px-4 sm:px-6 transition-all duration-300 ${scrollPosition > 20 ? "bg-black backdrop-blur-lg" : "bg-black/80 backdrop-blur-2xl"
           }`}
       >
         <div className="flex justify-between items-center mx-auto py-5">
@@ -662,6 +662,15 @@ const Navbar: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-4 sm:gap-6">
+            <motion.button
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+              className="relative text-gray-300 hover:text-cyan-400 transition-colors"
+              onClick={() => navigate("/ads")}
+            >
+              <Megaphone className="w-10 h-7" />
+            </motion.button>
+
             <motion.button
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.9 }}

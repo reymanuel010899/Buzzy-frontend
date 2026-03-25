@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, User, Camera, Check, Loader2, Video } from 'lucide-react';
 import { Button } from '../ui/button';
@@ -22,11 +22,35 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onClose, us
     });
     const [profilePicture, setProfilePicture] = useState<File | null>(null);
     const [profileVideo, setProfileVideo] = useState<File | null>(null);
-    const [previewUrl, setPreviewUrl] = useState<string | null>(user?.profile_picture ? `${getBaseUrl()}${user.profile_picture}` : null);
-    const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(user?.profile_video ? `${getBaseUrl()}${user.profile_video}` : null);
+
+    const getMediaUrl = (path: string | undefined) => {
+        if (!path) return null;
+        if (path.startsWith('http')) return path;
+        return `${getBaseUrl()}${path}`;
+    };
+
+    const [previewUrl, setPreviewUrl] = useState<string | null>(getMediaUrl(user?.profile_picture));
+    const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(getMediaUrl(user?.profile_video));
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState(false);
+
+    // Sincronizar datos cuando el modal abre o el usuario cambia
+    useEffect(() => {
+        if (isOpen && user) {
+            setFormData({
+                username: user.username || '',
+                first_name: user.first_name || '',
+                last_name: user.last_name || '',
+                bio: user.bio || ''
+            });
+            setPreviewUrl(getMediaUrl(user.profile_picture));
+            setVideoPreviewUrl(getMediaUrl(user.profile_video));
+            setProfilePicture(null);
+            setProfileVideo(null);
+            setError(null);
+        }
+    }, [isOpen, user]);
 
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
         setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -37,6 +61,10 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onClose, us
             const file = e.target.files[0];
             setProfilePicture(file);
             setPreviewUrl(URL.createObjectURL(file));
+
+            // Exclusión mutua: eliminar video si se sube foto
+            setProfileVideo(null);
+            setVideoPreviewUrl(null);
         }
     };
     const handleVideoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -54,6 +82,11 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onClose, us
                 }
                 setProfileVideo(file);
                 setVideoPreviewUrl(URL.createObjectURL(file));
+
+                // Exclusión mutua: eliminar foto si se sube video
+                setProfilePicture(null);
+                setPreviewUrl(null);
+
                 setError(null);
             };
             video.src = URL.createObjectURL(file);
@@ -170,8 +203,8 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onClose, us
                                 <input
                                     name="username"
                                     value={formData.username}
-                                    onChange={handleInputChange}
-                                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-[#7000ff]/50 transition-colors"
+                                    readOnly
+                                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-gray-500 cursor-not-allowed focus:outline-none"
                                 />
                             </div>
 

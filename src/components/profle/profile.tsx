@@ -26,6 +26,7 @@ import {
   Check,
   Trash2,
   Phone,
+  LogOut,
 } from "lucide-react"
 import { Button } from "../ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs"
@@ -46,6 +47,7 @@ import { getSubscriptionPlans, createCheckoutSession, startCall } from "../../re
 import { saveAvailability, getAvailability, getAvailabilityStatus } from "../../redux/actions/saveAvailability"
 import { getSocialAccounts, initSocialOAuth, disconnectSocialAccount, SocialPlatform } from "../../redux/actions/socialAccountsActions"
 import { useChat } from "../../context/ChatContext"
+import { logout } from "../../redux/actions/Login"
 import type { SocialAccount } from "../../redux/reducers/socialAccountsReducer"
 import { FaTiktok } from "react-icons/fa"
 import EditProfileModal from "./EditProfileModal"
@@ -88,6 +90,7 @@ interface VideoItem {
   current_user_followered?: boolean
   create_at?: string
   content?: string
+  media_type?: 'video' | 'image'
 }
 
 interface Comment {
@@ -839,15 +842,23 @@ function ProfileSeccion({
                       onClick={() => handleVideoClickOrDoubleClick(video, index)}
                     >
                       <div className="relative h-full w-full">
-                        <video
-                          ref={(el) => (videoRefs.current[index] = el)}
-                          muted={isMuted}
-                          loop
-                          playsInline
-                          className="w-full h-full object-cover transform group-hover:scale-105 transition-transform duration-700"
-                        >
-                          <source src={video.video} type="video/mp4" />
-                        </video>
+                        {video.media_type === 'image' ? (
+                          <img
+                            src={video.video}
+                            className="w-full h-full object-cover transform group-hover:scale-105 transition-transform duration-700"
+                            alt="Profile Media"
+                          />
+                        ) : (
+                          <video
+                            ref={(el) => (videoRefs.current[index] = el)}
+                            muted={isMuted}
+                            loop
+                            playsInline
+                            className="w-full h-full object-cover transform group-hover:scale-105 transition-transform duration-700"
+                          >
+                            <source src={video.video} type="video/mp4" />
+                          </video>
+                        )}
                         <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/60"></div>
                         <div className="absolute bottom-2 left-2 flex items-center gap-1 text-xs font-medium">
                           <Play className="h-3 w-3 text-white" fill="white" />
@@ -873,11 +884,13 @@ function ProfileSeccion({
         <BottomNavbar />
       </div >
 
-      <EditProfileModal
-        isOpen={showEditProfileModal}
-        onClose={() => setShowEditProfileModal(false)}
-        user={user}
-      />
+      {showEditProfileModal && (user || currentUser) && (
+        <EditProfileModal
+          isOpen={showEditProfileModal}
+          onClose={() => setShowEditProfileModal(false)}
+          user={user || currentUser}
+        />
+      )}
 
       <BankAccountModal
         isOpen={showBankAccountModal}
@@ -1020,8 +1033,19 @@ function ProfileSeccion({
                 </div>
               </div>
 
-              <div className="px-6 py-6 text-center text-[10px] text-white/40">
-                Versión 1.4.2 • Soporte wallet activa
+              <div className="px-8 py-6 flex items-center justify-between text-[10px] text-white/40">
+                <div className="flex flex-col">
+                  <span>Versión 1.4.2</span>
+                  <span>Soporte wallet activa</span>
+                </div>
+                <button
+                  onClick={() => logout()(dispatch)}
+                  className="flex items-center gap-2 px-3 py-2 bg-red-500/5 hover:bg-red-500/10 border border-red-500/10 rounded-xl text-red-500/70 hover:text-red-500 transition-all active:scale-95"
+                  title="Cerrar sesión"
+                >
+                  <LogOut size={16} />
+                  <span className="font-bold uppercase tracking-tighter">Salir</span>
+                </button>
               </div>
             </motion.div>
           </motion.div>
@@ -1034,71 +1058,82 @@ function ProfileSeccion({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-md p-4"
+            className="fixed inset-0 z-[70] flex items-center justify-center bg-black/90 backdrop-blur-xl p-4"
             onClick={() => setShowAvailabilityModal(false)}
           >
             <motion.div
-              initial={{ scale: 0.9, y: 20, opacity: 0 }}
+              initial={{ scale: 0.9, y: 30, opacity: 0 }}
               animate={{ scale: 1, y: 0, opacity: 1 }}
-              exit={{ scale: 0.9, y: 20, opacity: 0 }}
-              className="bg-[#0f0f13] border border-white/10 rounded-[32px] w-full max-w-sm overflow-hidden shadow-2xl"
+              exit={{ scale: 0.9, y: 30, opacity: 0 }}
+              transition={{ type: "spring", bounce: 0.3 }}
+              className="bg-[#0a0a0f] border border-white/10 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl relative"
               onClick={(e) => e.stopPropagation()}
             >
-              {/* Header más estilizado */}
-              <div className="flex items-center justify-between px-6 py-5 border-b border-white/5">
+              <div className="absolute top-0 right-0 w-[300px] h-[300px] bg-cyan-600/10 blur-[90px] rounded-full -translate-y-1/2 translate-x-1/2 pointer-events-none"></div>
+
+              {/* Header consistente con Configuración */}
+              <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-white/10">
                 <div className="flex items-center gap-3">
-                  <Clock className="w-5 h-5 text-purple-400" />
-                  <h2 className="text-xl font-semibold text-white tracking-tight">Disponibilidad</h2>
+                  <div className="w-9 h-9 bg-violet-500/10 text-violet-400 rounded-2xl flex items-center justify-center">
+                    <Clock className="w-5 h-5" />
+                  </div>
+                  <h2 className="text-2xl font-bold text-white">Disponibilidad</h2>
                 </div>
                 <button
                   onClick={() => setShowAvailabilityModal(false)}
-                  className="text-white/40 hover:text-white transition-colors"
+                  className="w-9 h-9 flex items-center justify-center text-white/70 hover:text-white hover:bg-white/10 rounded-full transition-all"
                 >
-                  <X size={20} />
+                  <X size={22} />
                 </button>
               </div>
 
-              <div className="p-6 space-y-6">
-                {/* Grid para horas (Inicio y Fin en paralelo o bloques compactos) */}
-                <div className="grid grid-cols-1 gap-4">
-                  {/* Hora Inicio */}
-                  <div className="space-y-2">
-                    <label className="text-[11px] uppercase tracking-widest text-emerald-400/80 font-bold ml-1">Hora de inicio</label>
-                    <div className="relative flex items-center bg-white/[0.03] border border-white/10 rounded-2xl px-4 py-3 group focus-within:border-emerald-500/50 transition-all">
-                      <input
-                        type="time"
-                        value={startTime}
-                        onChange={(e) => setStartTime(e.target.value)}
-                        className="bg-transparent text-2xl font-medium text-white focus:outline-none w-full appearance-none"
-                      />
-                      <div className="flex flex-col items-end border-l border-white/10 pl-4">
-                        <span className="text-[10px] text-white/40 leading-none">MODO</span>
-                        <span className="text-sm font-bold text-emerald-400">{formatTime12h(startTime).split(" ")[1]}</span>
-                      </div>
-                    </div>
+              <div className="p-3 space-y-2">
+                {/* 1. Hora de Inicio (Estilo Fila) */}
+                <div className="group flex items-center gap-4 px-5 py-4 rounded-2xl hover:bg-white/5 transition-all">
+                  <div className="w-11 h-11 bg-emerald-500/10 text-emerald-400 rounded-2xl flex items-center justify-center">
+                    <Clock size={26} />
                   </div>
-
-                  {/* Hora Fin */}
-                  <div className="space-y-2">
-                    <label className="text-[11px] uppercase tracking-widest text-red-400/80 font-bold ml-1">Hora de fin</label>
-                    <div className="relative flex items-center bg-white/[0.03] border border-white/10 rounded-2xl px-4 py-3 group focus-within:border-red-500/50 transition-all">
-                      <input
-                        type="time"
-                        value={endTime}
-                        onChange={(e) => setEndTime(e.target.value)}
-                        className="bg-transparent text-2xl font-medium text-white focus:outline-none w-full appearance-none"
-                      />
-                      <div className="flex flex-col items-end border-l border-white/10 pl-4">
-                        <span className="text-[10px] text-white/40 leading-none">MODO</span>
-                        <span className="text-sm font-bold text-red-400">{formatTime12h(endTime).split(" ")[1]}</span>
-                      </div>
-                    </div>
+                  <div className="flex-1">
+                    <p className="text-[11px] uppercase tracking-widest text-emerald-400/80 font-bold mb-1">Hora de inicio</p>
+                    <input
+                      type="time"
+                      value={startTime}
+                      onChange={(e) => setStartTime(e.target.value)}
+                      className="bg-transparent text-2xl font-bold text-white focus:outline-none w-full appearance-none cursor-pointer"
+                    />
+                  </div>
+                  <div className="flex flex-col items-end border-l border-white/10 pl-4 h-10 justify-center">
+                    <span className="text-[10px] text-white/40 leading-none">MODO</span>
+                    <span className="text-sm font-bold text-emerald-400">{formatTime12h(startTime).split(" ")[1]}</span>
                   </div>
                 </div>
 
-                {/* Días de la Semana con diseño refinado */}
-                <div className="pt-2">
-                  <p className="text-white/50 text-xs font-medium mb-3 ml-1">Repetir semanalmente:</p>
+                {/* 2. Hora de Fin (Estilo Fila) */}
+                <div className="group flex items-center gap-4 px-5 py-4 rounded-2xl hover:bg-white/5 transition-all">
+                  <div className="w-11 h-11 bg-red-500/10 text-red-500 rounded-2xl flex items-center justify-center">
+                    <Clock size={26} />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-[11px] uppercase tracking-widest text-red-400/80 font-bold mb-1">Hora de fin</p>
+                    <input
+                      type="time"
+                      value={endTime}
+                      onChange={(e) => setEndTime(e.target.value)}
+                      className="bg-transparent text-2xl font-bold text-white focus:outline-none w-full appearance-none cursor-pointer"
+                    />
+                  </div>
+                  <div className="flex flex-col items-end border-l border-white/10 pl-4 h-10 justify-center">
+                    <span className="text-[10px] text-white/40 leading-none">MODO</span>
+                    <span className="text-sm font-bold text-red-400">{formatTime12h(endTime).split(" ")[1]}</span>
+                  </div>
+                </div>
+
+                {/* Separador sutil */}
+                <div className="h-px bg-white/5 mx-5 my-2"></div>
+
+                {/* Selección de Días (Estilo Mejorado) */}
+                <div className="px-5 py-3">
+                  <p className="text-white/50 text-xs font-medium mb-4 ml-1">Repetir estos días:</p>
                   <div className="flex justify-between gap-1.5">
                     {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => {
                       const isActive = selectedDays.includes(day);
@@ -1107,8 +1142,8 @@ function ProfileSeccion({
                           key={day}
                           onClick={() => toggleDay(day)}
                           className={`flex-1 py-3 text-[10px] font-bold rounded-xl transition-all duration-300 border ${isActive
-                            ? "bg-cyan-500/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.2)]"
-                            : "bg-white/5 border-transparent text-white/40 hover:bg-white/10"
+                            ? "bg-cyan-500/20 border-cyan-500/40 text-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.15)]"
+                            : "bg-white/5 border-white/5 text-white/40 hover:bg-white/10 hover:border-white/10"
                             }`}
                         >
                           {day.toUpperCase()}
@@ -1119,25 +1154,40 @@ function ProfileSeccion({
                 </div>
               </div>
 
-              {/* Footer con el botón estilo "Premium" que ya usas */}
-              <div className="px-6 pb-8 pt-2">
+              {/* Footer con botón estilo premium */}
+              <div className="px-6 pb-8 pt-4">
                 {availabilitySaveSuccess ? (
-                  <div className="w-full bg-gradient-to-r from-emerald-500 to-green-500 text-white font-bold py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2">
-                    <span>✅ ¡Horario guardado!</span>
-                  </div>
-                ) : availabilityError ? (
-                  <div className="w-full text-center text-red-400 text-sm py-2 mb-2">{availabilityError}</div>
-                ) : null}
-                {!availabilitySaveSuccess && (
-                  <button
-                    onClick={handleSaveAvailability}
-                    disabled={availabilitySaving}
-                    className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold py-4 rounded-2xl shadow-lg shadow-purple-500/20 transition-all active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  <motion.div
+                    initial={{ scale: 0.9, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    className="w-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 font-bold py-4 rounded-2xl flex items-center justify-center gap-2"
                   >
-                    {availabilitySaving ? (
-                      <><span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin"></span> Guardando...</>
-                    ) : "GUARDAR CONFIGURACIÓN"}
-                  </button>
+                    <Check size={18} />
+                    <span>¡HORARIO ACTUALIZADO!</span>
+                  </motion.div>
+                ) : (
+                  <>
+                    {availabilityError && (
+                      <div className="text-center text-red-400 text-xs mb-3 animate-pulse">{availabilityError}</div>
+                    )}
+                    <button
+                      onClick={handleSaveAvailability}
+                      disabled={availabilitySaving}
+                      className="w-full relative group"
+                    >
+                      <div className="absolute -inset-1 bg-gradient-to-r from-[#7000ff]/20 to-[#00f0ff]/20 rounded-2xl blur opacity-25 group-hover:opacity-50 transition duration-300"></div>
+                      <div className="relative w-full bg-gradient-to-r from-[#1c1427] to-[#142122] text-white font-bold py-4 rounded-2xl shadow-xl shadow-[#7000ff]/30 transition-all active:scale-[0.98] disabled:opacity-60 flex items-center justify-center gap-3">
+                        {availabilitySaving ? (
+                          <span className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin"></span>
+                        ) : (
+                          <>
+                            <Zap size={18} />
+                            GUARDAR CONFIGURACIÓN
+                          </>
+                        )}
+                      </div>
+                    </button>
+                  </>
                 )}
               </div>
             </motion.div>
@@ -1366,16 +1416,24 @@ function ProfileSeccion({
                     data-index={index}
                     className="modal-video-item w-full h-full snap-center relative flex items-center justify-center bg-black"
                   >
-                    <video
-                      ref={(el) => (modalVideoRefs.current[index] = el)}
-                      src={video.video}
-                      className="w-full h-full object-cover md:object-contain max-h-screen"
-                      loop
-                      muted={isMuted}
-                      playsInline
-                      onClick={toggleMute}
-                      onTimeUpdate={(e) => handleVideoProgress(e, video.id.toString())}
-                    />
+                    {video.media_type === 'image' ? (
+                      <img
+                        src={video.video}
+                        className="w-full h-full object-cover md:object-contain max-h-screen"
+                        alt="Profile Media Full"
+                      />
+                    ) : (
+                      <video
+                        ref={(el) => (modalVideoRefs.current[index] = el)}
+                        src={video.video}
+                        className="w-full h-full object-cover md:object-contain max-h-screen"
+                        loop
+                        muted={isMuted}
+                        playsInline
+                        onClick={toggleMute}
+                        onTimeUpdate={(e) => handleVideoProgress(e, video.id.toString())}
+                      />
+                    )}
 
                     {/* Overlays del Modal */}
                     {!isMuted && activeModalIndex === index && (

@@ -21,6 +21,7 @@ import ProtectedRoute from "../PrivateRoute";
 import AccountSuccess from "../pages/main/successAcount";
 import AccountCancel from "../pages/main/CancelAccount";
 import SupportForm from "../pages/main/Support";
+import AdsPage from "../pages/main/AdsPage";
 
 export const router = createBrowserRouter(
   createRoutesFromElements(
@@ -116,7 +117,7 @@ export const router = createBrowserRouter(
           </ProtectedRoute>
         }
       />
-       <Route
+      <Route
         path="/success"
         element={
           <ProtectedRoute>
@@ -132,11 +133,19 @@ export const router = createBrowserRouter(
           </ProtectedRoute>
         }
       />
-       <Route
+      <Route
         path="/support"
         element={
           <ProtectedRoute>
             <SupportForm />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/ads"
+        element={
+          <ProtectedRoute>
+            <AdsPage />
           </ProtectedRoute>
         }
       />

@@ -220,7 +220,8 @@ body {
 
 /* Scrollbar styling */
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 4px;
+  height: 4px;
 }
 
 ::-webkit-scrollbar-track {
@@ -229,7 +230,7 @@ body {
 
 ::-webkit-scrollbar-thumb {
   background: linear-gradient(to bottom, #7000ff, #00f0ff);
-  border-radius: 3px;
+  border-radius: 2px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
