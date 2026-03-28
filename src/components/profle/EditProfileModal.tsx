@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, User, Camera, Check, Loader2, Video } from 'lucide-react';
 import { Button } from '../ui/button';
 import { useDispatch } from 'react-redux';
+import { useNavigate } from 'react-router-dom';
 import { updateProfile } from '../../redux/actions/updateProfile';
 import { getBaseUrl } from '../../redux/client/api-client';
 
@@ -14,6 +15,7 @@ interface EditProfileModalProps {
 
 const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onClose, user }) => {
     const dispatch = useDispatch();
+    const navigate = useNavigate();
     const [formData, setFormData] = useState({
         username: user?.username || '',
         first_name: user?.first_name || '',
@@ -26,9 +28,10 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onClose, us
     const getMediaUrl = (path: string | undefined) => {
         if (!path) return null;
         if (path.startsWith('http')) return path;
-        return `${getBaseUrl()}${path}`;
+        const fullPath = path && !path.startsWith("media")
+        return `${getBaseUrl()}${fullPath ? '/media/' : ''}${path}`;
     };
-
+    
     const [previewUrl, setPreviewUrl] = useState<string | null>(getMediaUrl(user?.profile_picture));
     const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(getMediaUrl(user?.profile_video));
     const [loading, setLoading] = useState(false);
@@ -53,7 +56,12 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onClose, us
     }, [isOpen, user]);
 
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-        setFormData({ ...formData, [e.target.name]: e.target.value });
+        const { name, value } = e.target;
+        const normalizedValue = name === 'username'
+            ? value.toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9._]/g, '')
+            : value;
+
+        setFormData({ ...formData, [name]: normalizedValue });
     };
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -115,9 +123,13 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onClose, us
 
         if (result.success) {
             setSuccess(true);
+            const nextUsername = result?.data?.user?.username || formData.username;
             setTimeout(() => {
                 setSuccess(false);
                 onClose();
+                if (nextUsername && nextUsername !== user?.username) {
+                    navigate(`/profile/${nextUsername}`);
+                }
             }, 1500);
         } else {
             setError(result.error);
@@ -203,9 +215,11 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onClose, us
                                 <input
                                     name="username"
                                     value={formData.username}
-                                    readOnly
-                                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-gray-500 cursor-not-allowed focus:outline-none"
+                                    onChange={handleInputChange}
+                                    autoComplete="username"
+                                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-[#7000ff]/50 transition-colors"
                                 />
+                                <p className="text-xs text-gray-500">Solo letras, numeros, punto y guion bajo.</p>
                             </div>
 
                             <div className="space-y-2">

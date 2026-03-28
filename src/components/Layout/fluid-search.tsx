@@ -19,6 +19,7 @@ interface FluidSearchProps {
 type Tab = "populares" | "usuarios" | "videos"
 
 export default function FluidSearch({ onClose, searchTerm, setSearchTerm }: FluidSearchProps) {
+  console.log(searchTerm, "========================")
   const [isTyping, setIsTyping] = useState(false)
   const [activeTab, setActiveTab] = useState<Tab>("populares")
   const inputRef = useRef<HTMLInputElement>(null)
@@ -38,16 +39,26 @@ export default function FluidSearch({ onClose, searchTerm, setSearchTerm }: Flui
 
   // Real search with debounce
   useEffect(() => {
-    if (searchTerm.trim().length > 1) {
-      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current)
-      typingTimeoutRef.current = setTimeout(() => {
-        dispatch(globalSearch(searchTerm))
-      }, 500)
-    }
-    return () => {
-      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current)
-    }
-  }, [searchTerm, dispatch])
+      console.log("Efecto disparado por:", searchTerm); // <--- DEBUG 1
+
+      // Limpiamos el timeout anterior siempre que el usuario escriba
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+      
+      if (searchTerm.trim().length > 1) {
+        typingTimeoutRef.current = setTimeout(() => {
+          console.log("Enviando búsqueda al servidor:", searchTerm); // <--- DEBUG 2
+          globalSearch(searchTerm)(dispatch); // Forma estándar de Redux
+          
+          console.log("------------------------")
+        }, 500);
+      }
+
+      return () => {
+        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      };
+    }, [searchTerm, dispatch])
 
   const handleRecentDelete = (term: string) => {
     dispatch(deleteRecentSearch(term))
@@ -271,7 +282,7 @@ function UserResult({ user, onClose }: { user: any, onClose: () => void }) {
     >
       <div className="relative">
         <img
-          src={user.profile_picture ? `${getBaseUrl()}media/${user.profile_picture}` : "/profile_pics/avatar.webp"}
+          src={user.profile_picture ? `${getBaseUrl()}/media/${user.profile_picture}` : "/profile_pics/avatar.webp"}
           alt={user.username}
           className="w-12 h-12 rounded-full object-cover border-2 border-white/5 group-hover:border-purple-500/50 transition-colors"
         />

@@ -1,17 +1,7 @@
 import axios from "axios";
 
 export const getBaseUrl = (): string => {
-  // @ts-ignore
-  const runtimeUrl = window.__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL;
-
-  let url = (runtimeUrl && !runtimeUrl.includes("NEXT_PUBLIC_BACKEND_URL"))
-    ? runtimeUrl.trim()
-    : (process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000/");
-
-  if (!url.startsWith("http")) {
-    url = `http://${url}`;
-  }
-
+  const url = import.meta.env.VITE_DOMAIN_SERVER || "http://127.0.0.1:8000";
   return url.endsWith("/") ? url : `${url}/`;
 };
 

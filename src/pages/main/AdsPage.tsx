@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Rocket, Plus, Layout, ArrowLeft, Home } from "lucide-react";
+import { Rocket, Plus, Layout, ArrowLeft } from "lucide-react";
 import { Link } from "react-router-dom";
 import axios from "axios";
 import { getBaseUrl } from "../../redux/client/api-client";
@@ -24,6 +24,9 @@ const AdsPage: React.FC = () => {
             gender: "ALL",
             locations: [] as string[],
             interests: [] as string[],
+            latitude: null as number | null,
+            longitude: null as number | null,
+            radius: 50,
         },
         creative: {
             title: "",
@@ -125,6 +128,13 @@ const AdsPage: React.FC = () => {
             complexFormData.append("audience.gender", campaignData.audience.gender);
             complexFormData.append("audience.locations", JSON.stringify(campaignData.audience.locations));
             complexFormData.append("audience.interests", JSON.stringify(campaignData.audience.interests));
+            if (campaignData.audience.latitude !== null) {
+                complexFormData.append("audience.latitude", campaignData.audience.latitude.toString());
+            }
+            if (campaignData.audience.longitude !== null) {
+                complexFormData.append("audience.longitude", campaignData.audience.longitude.toString());
+            }
+            complexFormData.append("audience.radius", (campaignData.audience.radius || 50).toString());
 
             complexFormData.append("creative.title", campaignData.creative.title);
             complexFormData.append("creative.description", campaignData.creative.description);

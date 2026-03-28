@@ -57,7 +57,7 @@ const AdCard: React.FC<AdCardProps> = ({ ad, isVisible, isMuted, toggleMute }) =
         <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="relative rounded-xl overflow-hidden shadow-2xl bg-black h-[725px] w-full border border-cyan-500/20"
+            className="relative h-full w-full rounded-xl overflow-hidden border border-cyan-500/20 bg-black shadow-2xl"
         >
             {/* Video Content */}
             <video

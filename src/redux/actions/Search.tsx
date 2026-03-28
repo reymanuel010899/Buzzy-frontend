@@ -1,6 +1,6 @@
 import axios from "axios";
 import { AppDispatch } from "../../store";
-import { getBaseUrl } from "../client/api-client";
+import { apiClient, getBaseUrl } from "../client/api-client";
 
 // Types
 export const SEARCH_START = "SEARCH_START";
@@ -20,11 +20,14 @@ const getHeaders = () => ({
 export const globalSearch = (query: string) => async (dispatch: AppDispatch) => {
     dispatch({ type: SEARCH_START });
     try {
-        const res = await axios.get(`${getBaseUrl()}api/search/global/?q=${query}`, getHeaders());
+        console.log(getBaseUrl(), "*****")
+        const res = await apiClient.get(`${getBaseUrl()}/api/search/global/?q=${query}`);
+        console.log("/////////---------//////////", res)
         dispatch({ type: SEARCH_SUCCESS, payload: res.data });
         // Refetch recent searches to update the list
         dispatch(getRecentSearch());
     } catch (err) {
+        console.log(err, "****")
         dispatch({ type: SEARCH_FAIL });
     }
 };

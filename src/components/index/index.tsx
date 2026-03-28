@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState, useMemo } from "react"
 import axios from "axios";
+import { useSelector } from 'react-redux';
 import { Link, useNavigate } from "react-router-dom"
 import sendMessageSound from "../../assets/sounds/sendMessage.mp3";
-import { Eye, MessageCircle, Heart, Volume2, VolumeX, Play, Pause, Plus, Loader2, X, MoreVertical, Rocket, ExternalLink } from "lucide-react"
+import { Eye, MessageCircle, Heart, Volume2, VolumeX, Play, Pause, Plus, UserPlus, UserCheck, Loader2, X, MoreVertical } from "lucide-react"
 import AdCard from "../ads/AdCard"
 import BottomNavbar from "../Layout/ButtonNavar"
 import { motion, AnimatePresence } from "framer-motion"
@@ -39,6 +40,9 @@ import InsufficientFundsModal from "../giftModal/InsufficientFundsModal";
 import TokenPurchaseSuccessModal from "../giftModal/TokenPurchaseSuccessModal";
 import { buyTokens } from "../../redux/actions/buyTokens";
 import { getWallet } from "../../redux/actions/getWallet";
+import { useVideoEngagement } from "../../hooks/useVideoEngagement";
+import { getRecommendedFeed } from "../../redux/actions/getMedia";
+
 
 const WS_URL = "ws://localhost:8001/ws";
 interface StreamingUIProps {
@@ -47,6 +51,8 @@ interface StreamingUIProps {
 }
 export interface CommentData {
   uuid: string;
+  is_priority_comment?: boolean;
+  priority_plan_name?: string | null;
   user_id: {
     username: string;
     profile_picture: string;
@@ -57,6 +63,8 @@ export interface CommentData {
   };
   content: string;
   create_at: string;
+  created_at?: string;
+  parent?: { uuid: string } | null;
 }
 const StreamingUI = ({ media }: StreamingUIProps) => {
   const dispatch = useDispatch();
@@ -86,6 +94,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [isGridVideoPlaying, setIsGridVideoPlaying] = useState<Record<string, boolean>>({})
   const [stories, setStories] = useState<StoryList>([]);
   const audioUnlockedRef = useRef(false);
+  const LoginReducer = useSelector((state) => state.LoginReducer);
 
   const [transientIconState, setTransientIconState] = useState<{
     videoId: string
@@ -97,12 +106,50 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [viewedVideos, setViewedVideos] = useState<Set<string>>(new Set());
   // Stabilize user object to prevent unnecessary re-renders and WebSocket reconnections
   const user = useMemo(() => {
-    const defaultUser = { username: 'BuzzyUser', profile_picture: '/avatar.webp', id: null };
-    const storedUser = localStorage.getItem('user');
-    return storedUser ? JSON.parse(storedUser) : defaultUser;
-  }, []);
+  // 1. Valores por defecto si no hay nadie logueado
+  const defaultUser = { 
+    username: 'BuzzyUser', 
+    profile_picture: '/avatar.webp', 
+    id: null 
+  };
+  
+  // 2. Accedemos a la ruta exacta: LoginReducer -> user
+  // (Según tu imagen, los datos están en LoginReducer.user)
+  const userData = LoginReducer?.user; 
+  console.log(userData, "***********")
+  // 3. Si no existe el objeto user, devolvemos el default
+  if (!userData) return defaultUser;
+
+  // 4. Retornamos el usuario combinado
+  return {
+    ...defaultUser,
+    ...userData,
+    // Si profile_picture viene vacío o null en la DB, mantenemos el default
+    profile_picture: userData.profile_picture || defaultUser.profile_picture
+  };
+
+  // IMPORTANTE: Cambiamos la dependencia a LoginReducer.user
+  }, [LoginReducer?.user]);
   const [commentText, setCommentText] = useState("")
   const [comments, setComments] = useState<CommentData[] | null>(null)
+
+  const normalizeIncomingComment = useCallback((comment: any): CommentData => ({
+    ...comment,
+    create_at: comment?.create_at || comment?.created_at || new Date().toISOString(),
+  }), []);
+
+  const upsertComment = useCallback((list: CommentData[] | null, incoming: any) => {
+    const normalized = normalizeIncomingComment(incoming);
+    const nextList = list ? [...list] : [];
+    const existingIndex = nextList.findIndex((comment) => comment.uuid === normalized.uuid);
+
+    if (existingIndex >= 0) {
+      nextList[existingIndex] = { ...nextList[existingIndex], ...normalized };
+      return nextList;
+    }
+
+    return [normalized, ...nextList];
+  }, [normalizeIncomingComment]);
   // New state for Story Upload
   const [isUploadingStory, setIsUploadingStory] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -156,7 +203,8 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [giftAnimation, setGiftAnimation] = useState<{
     type: string;
     sender: string;
-    storyUuid: string;
+    storyUuid?: string;
+    videoId?: string | number;
     giftId: string;
     gift: string;
     amount?: number;
@@ -173,6 +221,51 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [videoLoopCount, setVideoLoopCount] = useState<Record<string, number>>({});
   const lastVideoTimeRef = useRef<Record<string, number>>({});
   const typingAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [showStoriesBar, setShowStoriesBar] = useState(true);
+  const lastFeedScrollTopRef = useRef(0);
+
+  // Custom hook for interest-based recommendation tracking
+  const { interestWeights, onIntersectionChange, recordInteraction } = useVideoEngagement();
+
+  // Infinite Scroll Trigger based on session interests
+  const [isFetchingFeed, setIsFetchingFeed] = useState(false);
+  const lastFetchedLengthRef = useRef<number>(0);
+
+  useEffect(() => {
+    // Threshold: Trigger when user reaches the 5th video from the end
+    const threshold = 5;
+    const currentLength = mediaVideo?.length || 0;
+
+    if (activeVideo !== null && mediaVideo && activeVideo >= currentLength - threshold && !isFetchingFeed) {
+      // Only fetch if we haven't already attempted to fetch for this specific length
+      // or if we have less than 5 videos left to show
+      if (currentLength > lastFetchedLengthRef.current) {
+        const lastCursor = mediaVideo[currentLength - 1]?.created_at;
+
+        console.log("Fetching next batch of recommendations...");
+        setIsFetchingFeed(true);
+        lastFetchedLengthRef.current = currentLength;
+
+        dispatch(getRecommendedFeed(interestWeights, lastCursor) as any)
+          .then((res: any) => {
+            setIsFetchingFeed(false);
+            if (!res || res.length === 0) {
+              console.log("End of feed reached or no more content.");
+              // We keep lastFetchedLengthRef at currentLength to avoid re-triggering 
+              // until more media is added from somewhere else
+            }
+          })
+          .catch(() => {
+            setIsFetchingFeed(false);
+            // On failure, we might want to allow a retry if they scroll more
+            lastFetchedLengthRef.current = 0;
+          });
+      }
+    }
+  }, [activeVideo, mediaVideo, dispatch, isFetchingFeed]);
+  // Removed interestWeights from dependencies to avoid re-triggering the effect 
+  // every time a video leaves the view, but they are still captured by the closure 
+  // when the fetch actually starts.
 
   useEffect(() => {
     fetchAds();
@@ -182,6 +275,21 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     setMedia(media);
   }, [media]);
 
+  const isPlayableAd = (ad: any) => {
+    const mediaFile = ad?.creative?.media_file;
+    return Boolean(ad?.id && typeof mediaFile === "string" && mediaFile.trim());
+  };
+
+  const pickRandomAd = (pool: any[]) => {
+    const validAds = pool.filter(isPlayableAd);
+    if (validAds.length === 0) {
+      return null;
+    }
+
+    const randIndex = Math.floor(Math.random() * validAds.length);
+    return validAds[randIndex];
+  };
+
   const fetchAds = async () => {
     try {
       console.log("Fetching ads from:", `${getBaseUrl()}api/ads/campaigns/serve/`);
@@ -189,7 +297,8 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` }
       });
       console.log("Ads response data:", response.data);
-      setAds(response.data);
+      const validAds = Array.isArray(response.data) ? response.data.filter(isPlayableAd) : [];
+      setAds(validAds);
     } catch (error) {
       console.error("Error fetching ads:", error);
     }
@@ -436,6 +545,19 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         });
       }
     }
+    if (data.event === "video_gift_received") {
+      if (user.id == data.from_user || activeVideo !== null) {
+        setGiftAnimation({
+          type: data.gift_type,
+          giftId: data.gift_uuid,
+          videoId: data.video_id,
+          sender: data.sender,
+          amount: data.amount || 1,
+          gift: data.gift_video,
+          color_premiun: data.color_premiun,
+        });
+      }
+    }
     if (data.event === "new_comment") {
       setComments((prevComments) => {
         if (data && data.user_id) {
@@ -447,7 +569,10 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
               return video;
             }) : prev
           );
-          return [data, ...(prevComments || [])];
+          if (currentVideoId?.toString() === data.video_id?.toString()) {
+            return upsertComment(prevComments, data);
+          }
+          return prevComments;
         }
         return prevComments;
       });
@@ -552,7 +677,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       }
     }
   },
-    [setMedia]);
+    [currentVideoId, setMedia, upsertComment]);
 
   useEffect(() => {
     setMedia(media);
@@ -584,13 +709,21 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const handlePostComment = (parent_uuid: string | null = null) => {
     if (!commentText.trim() || !currentVideoId) return;
 
+    // Record interaction for recommendation system
+    const videoItem = mediaVideo?.find(v => v.id.toString() === currentVideoId);
+    if (videoItem) {
+      recordInteraction(videoItem.category?.id || videoItem.category || null);
+    }
+
     createComment({
       video_id: currentVideoId,
       content: commentText,
       parent_uuid: parent_uuid || null   // << SE ENVÍA SOLO SI EXISTE
     })(dispatch)
       .then((res: any) => {
-        console.log("Comentario publicado:", res);
+        if (res) {
+          setComments((prevComments) => upsertComment(prevComments, res));
+        }
         setCommentText("");
       })
       .catch((error: any) => {
@@ -675,7 +808,14 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         entries.forEach((entry) => {
           const video = entry.target as HTMLVideoElement
           const index = videoRefs.current.findIndex((ref) => ref === video)
+          const videoItem = mergedFeed[index];
+
           if (entry.isIntersecting) {
+            // Track intersection for recommendation system
+            if (videoItem && videoItem.type === 'video') {
+              onIntersectionChange(videoItem.id, true, videoItem.category?.id || videoItem.category || null);
+            }
+
             // Only play if there is no active ad overlay for this video
             if (activeAdIndex !== index) {
               video.play().catch(() => {/* Autoplay ignored */ })
@@ -688,6 +828,10 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
               lastVideoTimeRef.current[vidId] = 0;
             }
           } else {
+            // Track leaving view
+            if (videoItem && videoItem.type === 'video') {
+              onIntersectionChange(videoItem.id, false, videoItem.category?.id || videoItem.category || null);
+            }
             video.pause()
           }
         })
@@ -702,7 +846,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         if (video) observer.unobserve(video)
       })
     }
-  }, [mergedFeed, activeAdIndex])
+  }, [mergedFeed, activeAdIndex, onIntersectionChange])
   // --- New Effect to Pause Videos When Story Modal Opens ---
   useEffect(() => {
     if (viewingStoryUserIndex !== null) {
@@ -727,7 +871,13 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       videoElement.pause();
     }
   };
-  const handleLikeClick = (videoId: string) => {
+  const handleLikeClick = (videoId: string, index: number) => {
+    // Record interaction for recommendation system
+    const videoItem = mediaVideo?.[index];
+    if (videoItem) {
+      recordInteraction(videoItem.category?.id || videoItem.category || null);
+    }
+
     createLike({ video_id: videoId })(dispatch).then((res: any) => {
       console.log("Like action dispatched for video ID:", res);
     }).catch((error: any) => {
@@ -1346,7 +1496,9 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   };
   const sendVideoGiftCount = useRef(false)
   const handleSendVideoGift = async (giftTypeOrGift: string | GiftI, amount?: number) => {
-    let type = typeof giftTypeOrGift === 'string' ? giftTypeOrGift : (giftTypeOrGift.slug || giftTypeOrGift.name);
+    let type = typeof giftTypeOrGift === 'string'
+      ? giftTypeOrGift
+      : (giftTypeOrGift.emoji || giftTypeOrGift.slug || giftTypeOrGift.name);
     const cost = amount || (typeof giftTypeOrGift !== 'string' ? giftTypeOrGift.token_price : 0);
 
     if (walletTokens < cost) {
@@ -1427,6 +1579,22 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     }
   }
 
+  const handleFeedScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const currentScrollTop = e.currentTarget.scrollTop;
+    const previousScrollTop = lastFeedScrollTopRef.current;
+    const scrollDelta = currentScrollTop - previousScrollTop;
+
+    if (currentScrollTop <= 8) {
+      setShowStoriesBar(true);
+    } else if (scrollDelta > 6) {
+      setShowStoriesBar(false);
+    } else if (scrollDelta < -6) {
+      setShowStoriesBar(true);
+    }
+
+    lastFeedScrollTopRef.current = currentScrollTop;
+  };
+
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-black text-white font-sans">
@@ -1443,10 +1611,18 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         <div className="absolute inset-0 bg-black opacity-[0.03]"></div>
         <div className="absolute bottom-1/3 right-1/3 h-60 w-60 rounded-full bg-[#00f0ff]/20 blur-3xl animate-float-delayed"></div>
       </div>
-      <main ref={mainRef} className="h-screen w-full overflow-y-auto pt-30 ">
+      <main
+        ref={mainRef}
+        className="flex h-screen w-full flex-col overflow-hidden pt-30 pb-[calc(env(safe-area-inset-bottom)+4.5rem)]"
+      >
         {/* Search Bar Area */}
-        <div className="w-full border-t border-[#2a2f5e]/50 ">
-          <div className="max-w-7xl mx-auto">
+        <div
+          className={`grid w-full overflow-hidden border-t transition-[grid-template-rows,border-color] duration-500 ease-out ${showStoriesBar ? "border-[#2a2f5e]/50" : "border-transparent"}`}
+          style={{ gridTemplateRows: showStoriesBar ? "1fr" : "0fr" }}
+        >
+          <div
+            className={`min-h-0 overflow-hidden transform-gpu transition-[opacity,transform] duration-500 ease-out ${showStoriesBar ? "translate-y-0 opacity-100" : "-translate-y-3 opacity-0 pointer-events-none"}`}
+          >
             <div className="flex gap-3 overflow-x-auto px-2 py-3 scrollbar-hide snap-x ">
               <motion.div
                 initial={{ opacity: 0, x: -20 }}
@@ -1457,7 +1633,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 <div className="relative">
                   <div className={`relative h-[60px] w-[60px] rounded-full p-[2px] bg-[#0c1033] ${isUploadingStory ? 'animate-pulse' : ''}`}>
                     <img
-                      src={user.profile_picture.startsWith('http') ? user.profile_picture : `${getBaseUrl()}${user.profile_picture}`}
+                      src={!user.profile_picture.startsWith('/media') ? `${getBaseUrl()}/media${user.profile_picture}` : `${getBaseUrl()}${user.profile_picture}`}
                       className={`w-full h-full rounded-full object-cover filter ${isUploadingStory ? 'brightness-50' : 'brightness-90 group-hover:brightness-100'} transition-all`}
                       alt="Tu historia"
                     />
@@ -1498,7 +1674,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                       )}
                       <div className="relative h-[60px] w-[60px] rounded-full p-[2px] bg-[#050718]">
                         <img
-                          src={`${getBaseUrl()}media/${story.user.profile_picture}`}
+                          src={`${getBaseUrl()}/media/${story.user.profile_picture}`}
                           className="w-full h-full rounded-full object-cover group-hover:scale-105 transition-transform duration-300"
                           alt={story.user.username}
                         />
@@ -1518,8 +1694,11 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
             </div>
           </div>
         </div>
-        <section className="">
-          <div className="grid grid-cols-1 sm:grid-cols-2 ml-1 lg:grid-cols-3 xl:grid-cols-4 gap-2 ">
+        <section className="flex-1 min-h-0 pt-px">
+          <div
+            className="flex h-full flex-col overflow-y-auto overscroll-y-contain scroll-smooth snap-y snap-mandatory"
+            onScroll={handleFeedScroll}
+          >
             {mergedFeed.map((data, index) => {
               const videoId = data.type === 'video' ? data.id?.toString() : `ad-${data.id}`;
               const isExpanded = expandedDescriptions[videoId];
@@ -1568,7 +1747,10 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
               if (data.type === 'ad') {
                 return (
-                  <div key={`ad-${data.id}`} className="relative h-[725px]">
+                  <div
+                    key={`ad-${data.id}`}
+                    className="relative h-full min-h-full snap-start snap-always"
+                  >
                     <AdCard
                       ad={data}
                       isVisible={activeVideo === index}
@@ -1589,15 +1771,14 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: index * 0.1 }}
-                  className="relative rounded-xl overflow-hidden shadow-2xl shadow-black/50 border border-[#2a2f5e]/30"
-                  style={{ height: "725px" }}
+                  className="relative h-full min-h-full snap-start snap-always overflow-hidden rounded-t-xl rounded-b-none border border-[#2a2f5e]/30 shadow-2xl shadow-black/50"
                 >
-                  <div className="absolute inset-0 rounded-xl overflow-hidden pt-0 group">
-                    <div className="relative h-[725px] w-full rounded-xl overflow-hidden bg-black">
+                  <div className="absolute inset-0 rounded-t-xl rounded-b-none overflow-hidden pt-0 group">
+                    <div className="relative h-full w-full rounded-t-xl rounded-b-none overflow-hidden bg-black">
                       {data.media_type === 'image' ? (
                         <img
                           src={data.video}
-                          className="h-[725px] w-full object-cover border-[#00f0ff]/5"
+                          className="h-full w-full object-cover border-[#00f0ff]/5"
                           alt="Feed Content"
                           onClick={() => handleVideoClick(index)}
                         />
@@ -1607,7 +1788,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                           muted={isMuted || activeAdIndex === index}
                           loop
                           playsInline
-                          className="h-[725px] w-full object-cover border-[#00f0ff]/5"
+                          className="h-full w-full object-cover border-[#00f0ff]/5"
                           onClick={() => handleVideoClick(index)}
                           onTimeUpdate={(e) => {
                             handleVideoProgress(e, videoId);
@@ -1625,12 +1806,14 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                                 const currentCount = (prev[videoId] || 0) + 1;
                                 if (currentCount >= 3) {
                                   if (ads.length > 0 && activeAdIndex === null) {
-                                    const randIndex = Math.floor(Math.random() * ads.length);
-                                    setSelectedAd(ads[randIndex]);
-                                    setActiveAdIndex(index);
-                                    videoElement.pause();
-                                    setIsMuted(false); // Force unmute for ad
-                                    setAdSequenceCount(1); // Start sequence
+                                    const nextAd = pickRandomAd(ads);
+                                    if (nextAd) {
+                                      setSelectedAd(nextAd);
+                                      setActiveAdIndex(index);
+                                      videoElement.pause();
+                                      setIsMuted(false); // Force unmute for ad
+                                      setAdSequenceCount(1); // Start sequence
+                                    }
                                   }
                                   return { ...prev, [videoId]: 0 }; // Reset count
                                 }
@@ -1640,16 +1823,17 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
                             if (currentTime >= 5 && currentTime < 6 && ads.length > 0 && activeAdIndex === null && index % 3 === 0 && !shownAds.has(videoId) && cooldownPassed) {
                               // Pick a random ad from the pool
-                              const randIndex = Math.floor(Math.random() * ads.length);
-                              setSelectedAd(ads[randIndex]);
-
-                              setActiveAdIndex(index);
-                              setShownAds(prev => new Set(prev).add(videoId));
-                              e.currentTarget.pause();
-                              setIsMuted(false); // Force unmute for ad
-                              setAdSequenceCount(1); // Start sequence
-                              // Auto-collapse description if it's open
-                              setExpandedDescriptions(prev => ({ ...prev, [videoId]: false }));
+                              const nextAd = pickRandomAd(ads);
+                              if (nextAd) {
+                                setSelectedAd(nextAd);
+                                setActiveAdIndex(index);
+                                setShownAds(prev => new Set(prev).add(videoId));
+                                e.currentTarget.pause();
+                                setIsMuted(false); // Force unmute for ad
+                                setAdSequenceCount(1); // Start sequence
+                                // Auto-collapse description if it's open
+                                setExpandedDescriptions(prev => ({ ...prev, [videoId]: false }));
+                              }
                             }
                           }}
                         >
@@ -1673,12 +1857,21 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                                 // Show another different ad
                                 const otherAds = ads.filter(a => a.id !== selectedAd.id);
                                 const nextAdPool = otherAds.length > 0 ? otherAds : ads;
-                                const randIndex = Math.floor(Math.random() * nextAdPool.length);
-                                setSelectedAd(nextAdPool[randIndex]);
-                                setAdSequenceCount(prev => prev + 1);
-                                // Stay in activeAdIndex = index, so AdOverlay remounts with new ad
+                                const nextAd = pickRandomAd(nextAdPool);
+                                if (nextAd) {
+                                  setSelectedAd(nextAd);
+                                  setAdSequenceCount(prev => prev + 1);
+                                  // Stay in activeAdIndex = index, so AdOverlay remounts with new ad
+                                } else {
+                                  setSelectedAd(null);
+                                  setActiveAdIndex(null);
+                                  setAdSequenceCount(0);
+                                  setLastAdTimestamp(Date.now());
+                                  videoRefs.current[index]?.play();
+                                }
                               } else {
                                 // End sequence
+                                setSelectedAd(null);
                                 setActiveAdIndex(null);
                                 setAdSequenceCount(0);
                                 setLastAdTimestamp(Date.now());
@@ -1734,58 +1927,99 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                       </motion.button>
 
                       {/* INICIO DEL CONTENEDOR DE METADATOS INFERIOR UNIFICADO */}
-                      <div className="absolute bottom-0 left-0 right-0 pb-3 pt-20 px-1 z-20 pointer-events-none flex flex-col justify-end bg-gradient-to-t from-black/60 via-black/20 to-transparent">
+                      <div className="absolute -bottom-6 left-0 right-0 px-1 pt-16 pb-[calc(env(safe-area-inset-bottom)+2.2rem)] z-20 pointer-events-none flex flex-col justify-end bg-gradient-to-t from-black/60 via-black/20 to-transparent">
 
-                        <div className="flex flex-col gap-5 pointer-events-auto max-w-[100%]">
+                        <div className="flex flex-col gap-4 pointer-events-auto max-w-[100%]">
                           {/* 2. PERFIL DE USUARIO */}
-                          <div className="flex items-center">
-                            <div className="relative h-10 w-10 overflow-hidden rounded-full flex-shrink-0 group">
-                              <img
-                                className="h-full w-full object-cover rounded-full border border-white/20"
-                                src={`${data.user_id?.profile_picture ? `${getBaseUrl()}media/${data.user_id.profile_picture}` : `${getBaseUrl()}media/profile_pics/avatar.webp`}`}
-                                onError={(e) => {
-                                  (e.target as HTMLImageElement).src = `https://picsum.photos/100/100?random=${index}`;
-                                }}
-                                alt={data.user_id?.username}
-                              />
-                              <div className="absolute inset-0 rounded-full border-2 border-white/5 pointer-events-none" />
-
-                              {!isMuted && videoRefs.current[index]?.paused === false && (
-                                <motion.div
-                                  className="absolute inset-0 rounded-full border-4 border-[#00f0ff]/60"
-                                  animate={{
-                                    boxShadow: [
-                                      "0 0 0 0 rgba(0, 240, 255, 0)",
-                                      "0 0 20px 4px rgba(0, 240, 255, 0.4)",
-                                      "0 0 0 0 rgba(0, 240, 255, 0)",
-                                    ],
-                                    scale: [1, 1.05, 1],
+                          <div className="flex w-full items-center pr-14">
+                            <div className="flex min-w-0 items-center">
+                              <div className="relative h-10 w-10 overflow-hidden rounded-full flex-shrink-0 group">
+                                <img
+                                  className="h-full w-full object-cover rounded-full border border-white/20"
+                                  src={`${data.user_id?.profile_picture ? `${getBaseUrl()}/media/${data.user_id.profile_picture}` : `${getBaseUrl()}/media/profile_pics/avatar.webp`}`}
+                                  onError={(e) => {
+                                    (e.target as HTMLImageElement).src = `https://picsum.photos/100/100?random=${index}`;
                                   }}
-                                  transition={{
-                                    duration: 0.8,
-                                    repeat: Infinity,
-                                    repeatType: "loop",
-                                    ease: "easeInOut",
-                                  }}
+                                  alt={data.user_id?.username}
                                 />
-                              )}
+                                <div className="absolute inset-0 rounded-full border-2 border-white/5 pointer-events-none" />
+
+                                {!isMuted && videoRefs.current[index]?.paused === false && (
+                                  <motion.div
+                                    className="absolute inset-0 rounded-full border-4 border-[#00f0ff]/60"
+                                    animate={{
+                                      boxShadow: [
+                                        "0 0 0 0 rgba(0, 240, 255, 0)",
+                                        "0 0 20px 4px rgba(0, 240, 255, 0.4)",
+                                        "0 0 0 0 rgba(0, 240, 255, 0)",
+                                      ],
+                                      scale: [1, 1.05, 1],
+                                    }}
+                                    transition={{
+                                      duration: 0.8,
+                                      repeat: Infinity,
+                                      repeatType: "loop",
+                                      ease: "easeInOut",
+                                    }}
+                                  />
+                                )}
+                              </div>
+                              <Link
+                                className="ml-3 max-w-[20ch] flex-shrink-0 overflow-hidden whitespace-nowrap text-white font-bold text-shadow-md hover:text-[#00f0ff] transition-colors"
+                                to={`/profile/${data.user_id?.username}`}
+                              >
+                                @{String(data.user_id?.username || "").slice(0, 20)}
+                              </Link>
+                              <AnimatePresence mode="wait">
+                                {data.user_id.username !== user.username && (
+                                  (!followingState[data.user_id.id.toString()] && !data.current_user_followered) ? (
+                                    <motion.button
+                                      key="inline-follow"
+                                      initial={{ opacity: 0, scale: 0.8 }}
+                                      animate={{ opacity: 1, scale: 1 }}
+                                      exit={{ opacity: 0, scale: 0.8, transition: { duration: 0.2 } }}
+                                      whileTap={{ scale: 0.95 }}
+                                      className="ml-2 flex h-8 w-8 flex-shrink-0 items-center justify-center text-white/95 transition-all"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleFollowClick(Number(data.user_id.id), data.user_id.id.toString(), "create");
+                                      }}
+                                      aria-label={`Seguir a ${data.user_id?.username}`}
+                                      title="Seguir"
+                                    >
+                                      <UserPlus className="h-4 w-4 text-white" strokeWidth={2.4} />
+                                    </motion.button>
+                                  ) : (
+                                    <motion.button
+                                      key="inline-following"
+                                      initial={{ opacity: 0, scale: 0.8 }}
+                                      animate={{ opacity: 1, scale: 1, transition: { delay: 0.1 } }}
+                                      exit={{ opacity: 0, scale: 0.8, transition: { duration: 0.2 } }}
+                                      className="ml-2 flex h-8 w-8 flex-shrink-0 items-center justify-center text-white/95 transition-all"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleFollowClick(Number(data.user_id.id), data.user_id.id.toString(), "delete");
+                                      }}
+                                      aria-label={`Siguiendo a ${data.user_id?.username}`}
+                                      title="Siguiendo"
+                                    >
+                                      <UserCheck className="h-4 w-4 text-white" strokeWidth={2.4} />
+                                    </motion.button>
+                                  )
+                                )}
+                              </AnimatePresence>
                             </div>
-                            <Link
-                              className="text-white font-bold text-shadow-md hover:text-[#00f0ff] transition-colors ml-3 truncate"
-                              to={`/profile/${data.user_id?.username}`}
-                            >
-                              @{data.user_id?.username}
-                            </Link>
+
                           </div>
 
                           {/* 1. SECCIÓN DE DESCRIPCIÓN DEL VIDEO (Manejo de @mentions) */}
                           {data.description && (
                             <motion.div
                               className={`
-                                rounded-xl backdrop-blur-md border border-white/10 bg-white/5 shadow-2xl transition-all duration-500 ease-in-out
+                                 backdrop-blur-md border border-white/10 bg-white/5 shadow-2xl transition-all duration-500 ease-in-out
                                 ${isExpanded
-                                  ? 'p-4 max-h-[60vh] overflow-y-auto z-30 w-full'
-                                  : 'p-2 px-3 max-h-[120px] overflow-hidden cursor-pointer hover:bg-white/10'
+                                  ? 'p-4 max-h-[60vh] overflow-hidden shadow-2xl z-30 w-full'
+                                  : 'p-2  max-h-[120px] overflow-hidden cursor-pointer hover:bg-white/10'
                                 }
                               `}
                               onClick={(e) => {
@@ -1862,7 +2096,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                               whileTap={{ scale: 0.9 }}
                               onClick={(e) => {
                                 e.stopPropagation()
-                                handleLikeClick((videoId || "1"))
+                                handleLikeClick((videoId || "1"), index)
                               }}
                               className="relative flex flex-col items-center gap-1"
                             >
@@ -2021,7 +2255,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                         {/* BARRA VERTICAL PEGADA AL BORDE DERECHO - estilo TikTok real */}
                         {/* 3. COLUMNA DE INTERACCIONES (DERECHA) */}
                         <div className={`
-                              absolute right-2 bottom-[120px] flex flex-col items-center gap-6 z-[70]
+                              absolute right-1 bottom-[calc(env(safe-area-inset-bottom)+5.5rem)] flex flex-col items-center gap-3 z-[70]
                               pointer-events-auto
                               pb-[env(safe-area-inset-bottom)+50px]         // evita superposición con navbar inferior
                             `}>
@@ -2031,7 +2265,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                             whileTap={{ scale: 0.9 }}
                             onClick={(e) => {
                               e.stopPropagation()
-                              handleLikeClick((videoId || "1"))
+                              handleLikeClick((videoId || "1"), index)
                             }}
                             className="relative flex flex-col items-center gap-1"
                           >
@@ -2150,109 +2384,34 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                             </span>
                           </motion.button>
 
-                          {/* Seguir / Siguiendo */}
-                          {/* Botón de seguir - ahora como circulito con icono + efecto */}
-                          <AnimatePresence mode="wait">
-                            {(!followingState[data.user_id.id.toString()] &&
-                              !data.current_user_followered &&
-                              data.user_id.username !== user.username) ? (
-                              <motion.button
-                                key="follow"
-                                initial={{ scale: 0.8, opacity: 0 }}
-                                animate={{ scale: 1, opacity: 1 }}
-                                exit={{ scale: 0.8, opacity: 0 }}
-                                whileTap={{ scale: 0.85 }}
-                                transition={{ type: "spring", stiffness: 400, damping: 20 }}
-                                className={`
-                                  mt-3 relative flex h-8 w-8 items-center justify-center rounded-full
-                                  bg-gradient-to-br from-cyan-500 to-purple-600
-                                  shadow-lg shadow-cyan-500/40 border border-white/20 backdrop-blur-md
-                                `}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleFollowClick(Number(data.user_id.id), data.user_id.id.toString(), "create");
-                                }}
-                              >
-                                {/* Icono + cuando NO sigues */}
-                                <Plus className="h-5 w-5 text-white" strokeWidth={3} />
-
-                                {/* Efecto ripple al tocar (opcional pero bonito) */}
-                                <motion.div
-                                  className="absolute inset-0 rounded-full bg-white/20"
-                                  initial={{ scale: 0, opacity: 0.6 }}
-                                  animate={{ scale: 1.8, opacity: 0 }}
-                                  transition={{ duration: 0.6, ease: "easeOut" }}
-                                />
-                              </motion.button>
-                            ) : (
-                              <motion.button
-                                key="following"
-                                initial={{ scale: 0.8, opacity: 0 }}
-                                animate={{ scale: 1, opacity: 1 }}
-                                exit={{ scale: 0.8, opacity: 0 }}
-                                whileTap={{ scale: 0.85 }}
-                                transition={{ type: "spring", stiffness: 400, damping: 20 }}
-                                className={`
-                                mt-3 relative flex h-8 w-8 items-center justify-center rounded-full
-                                                          bg-gradient-to-br from-green-500 to-emerald-600
-                                                          shadow-lg shadow-green-500/40 border border-white/20 backdrop-blur-md
-                                `}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleFollowClick(Number(data.user_id.id), data.user_id.id.toString(), "delete");
-                                }}
-                              >
-                                {/* Icono check cuando YA sigues */}
-                                <svg
-                                  className="h-5 w-5 text-white"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="3"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                >
-                                  <polyline points="20 6 9 17 4 12" />
-                                </svg>
-
-                                {/* Efecto de brillo/confeti sutil al cambiar estado */}
-                                <motion.div
-                                  className="absolute inset-0 rounded-full bg-white/30"
-                                  initial={{ scale: 0, opacity: 0.7 }}
-                                  animate={{ scale: 2, opacity: 0 }}
-                                  transition={{ duration: 0.7, ease: "easeOut" }}
-                                />
-                              </motion.button>
-                            )}
-                          </AnimatePresence>
                         </div>
 
 
-                        {/* 4. BARRA DE PROGRESO DE VIDEO (AL FINAL) */}
-                        {videoDuration[videoId] > 0 && (
-                          (() => {
-                            const progressPercentage = ((videoProgress[videoId] || 0) / (videoDuration[videoId] || 1)) * 100;
-                            const progressStyle = {
-                              '--progress': `${progressPercentage}%`
-                            } as React.CSSProperties;
-                            return (
-                              <div className="relative h-1.5 -mx-1 mt-2">
-                                <input
-                                  type="range"
-                                  min="0"
-                                  max={videoDuration[videoId] || 0}
-                                  value={videoProgress[videoId] || 0}
-                                  step="0.1"
-                                  className="w-full h-full appearance-none cursor-pointer range-slider !bg-transparent hover:h-2 transition-height duration-150"
-                                  onChange={(e) => handleSeek(videoId, parseFloat(e.target.value))}
-                                  onClick={(e) => e.stopPropagation()}
-                                  style={progressStyle}
-                                />
-                              </div>
-                            );
-                          })()
-                        )}
                       </div>
+                      {/* 4. BARRA DE PROGRESO DE VIDEO PEGADA ABAJO */}
+                      {videoDuration[videoId] > 0 && (
+                        (() => {
+                          const progressPercentage = ((videoProgress[videoId] || 0) / (videoDuration[videoId] || 1)) * 100;
+                          const progressStyle = {
+                            '--progress': `${progressPercentage}%`
+                          } as React.CSSProperties;
+                          return (
+                            <div className="pointer-events-none absolute -bottom-1 left-1 right-1 z-30">
+                              <input
+                                type="range"
+                                min="0"
+                                max={videoDuration[videoId] || 0}
+                                value={videoProgress[videoId] || 0}
+                                step="0.1"
+                                className="pointer-events-auto h-1.5 w-full appearance-none cursor-pointer range-slider !bg-transparent hover:h-2 transition-height duration-150"
+                                onChange={(e) => handleSeek(videoId, parseFloat(e.target.value))}
+                                onClick={(e) => e.stopPropagation()}
+                                style={progressStyle}
+                              />
+                            </div>
+                          );
+                        })()
+                      )}
                       {/* FIN DEL CONTENEDOR DE METADATOS INFERIOR UNIFICADO */}
 
                     </div>
@@ -2321,7 +2480,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
               {/* Progress Bars Container - Divided per story item */}
               <div className="flex gap-1 mb-3">
                 {groupedStories[viewingStoryUserIndex].media.map((_: any, idx: number) => (
-                  <div key={idx} className="h-2 flex-1 bg-white/20 rounded-full overflow-hidden">
+                  <div key={idx} className="h-1 flex-1 bg-white/20 rounded-full overflow-hidden">
                     <div
                       className="h-full bg-white rounded-full transition-all duration-300 ease-linear"
                       style={{ width: `${(getCurrentProgress[idx] || 0) * 100}%` }}
@@ -2415,7 +2574,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 <video
                   ref={storyVideoRef}
                   key={`${viewingStoryUserIndex}-${currentStoryItemIndex}`} // Key change forces remount/replay
-                  src={`${getBaseUrl()}media/${groupedStories[viewingStoryUserIndex].media[currentStoryItemIndex].file}`}
+                  src={`${getBaseUrl()}/media/${groupedStories[viewingStoryUserIndex].media[currentStoryItemIndex].file}`}
                   className={`max-h-full max-w-full object-contain ${storyPremiumStates[currentStoryUuid || ''] ? 'premium-media' : ''}`}
                   autoPlay={!isStoryPaused}
                   playsInline
@@ -2427,7 +2586,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                   key={`${viewingStoryUserIndex}-${currentStoryItemIndex}`}
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
-                  src={`${getBaseUrl()}media/${groupedStories[viewingStoryUserIndex].media[currentStoryItemIndex].file}`}
+                  src={`${getBaseUrl()}/media/${groupedStories[viewingStoryUserIndex].media[currentStoryItemIndex].file}`}
                   className={`max-h-full max-w-full object-contain ${storyPremiumStates[currentStoryUuid || ''] ? 'premium-media' : ''}`}
                   alt="Story Content"
                 />
@@ -3083,4 +3242,3 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   )
 }
 export default StreamingUI
-

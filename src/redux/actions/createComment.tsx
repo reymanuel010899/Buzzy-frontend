@@ -10,12 +10,12 @@ type CreateCommentBody = {
 export const createComment = (body: CreateCommentBody) => async (dispatch: any) => {
   try {
     const response = await apiClient.post('/api/create-comment/', body);
-    if (response.status === 200) {
+    if (response.status === 200 || response.status === 201) {
       dispatch({
         type: SUCCEES_CREATE_COMMENT,
-        payload: response.data,
+        payload: response.data?.data ?? response.data,
       });
-      return response.data;
+      return response.data?.data ?? response.data;
     }
 
   } catch {
@@ -25,4 +25,3 @@ export const createComment = (body: CreateCommentBody) => async (dispatch: any) 
     });
   }
 };
-

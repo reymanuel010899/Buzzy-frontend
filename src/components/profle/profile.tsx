@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react"
+import { useEffect, useRef, useState, useCallback, useMemo } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import { motion, AnimatePresence } from "framer-motion"
 import {
@@ -11,6 +11,8 @@ import {
   MessageCircle,
   Heart,
   User,
+  UserPlus,
+  UserCheck,
   Sparkles,
   Pause,
   Eye,
@@ -31,7 +33,7 @@ import {
 import { Button } from "../ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs"
 import BottomNavbar from "../Layout/ButtonNavar"
-import { connect, useDispatch } from "react-redux"
+import { connect, useDispatch, useSelector } from "react-redux"
 import type { RootState } from "../../store"
 import { getUser } from "../../redux/actions/GetUser"
 import { getUserMedia } from "../../redux/actions/GetUserMedia"
@@ -52,7 +54,19 @@ import type { SocialAccount } from "../../redux/reducers/socialAccountsReducer"
 import { FaTiktok } from "react-icons/fa"
 import EditProfileModal from "./EditProfileModal"
 import BankAccountModal from "./BankAccountModal"
+import SocialConnectionsModal from "./SocialConnectionsModal"
 import { div } from "three/src/nodes/TSL.js"
+import { getActiveStories } from "../../redux/actions/history/listActiveHistory"
+import { viewStory } from "../../redux/actions/history/makeViewed"
+import type { StoryList } from "../index/main.interface"
+import VipGiftExperience from "../giftModal/modalGift"
+import TokenShopModal from "../giftModal/TokenShopModal"
+import InsufficientFundsModal from "../giftModal/InsufficientFundsModal"
+import TokenPurchaseSuccessModal from "../giftModal/TokenPurchaseSuccessModal"
+import { getActiveGift } from "../../redux/actions/gift/listGiftActive"
+import { sendVideoGift } from "../../redux/actions/gift/sendVideoGift"
+import { getWallet } from "../../redux/actions/getWallet"
+import type { GiftI } from "../../interfaces/gift"
 
 const WS_URL = "ws://localhost:8001/ws"
 
@@ -74,7 +88,9 @@ interface UserInterface {
   total_social_followers: number
   like_all_count: number
   followed_all_acount: number
+  subscribers_count: number
   is_following?: boolean
+  has_active_stories?: boolean
 }
 
 interface VideoItem {
@@ -95,6 +111,8 @@ interface VideoItem {
 
 interface Comment {
   uuid: string;
+  is_priority_comment?: boolean;
+  priority_plan_name?: string | null;
   user_id: {
     username: string;
     profile_picture: string;
@@ -105,6 +123,8 @@ interface Comment {
   };
   content: string;
   create_at: string;
+  created_at?: string;
+  parent?: { uuid: string } | null;
 }
 
 interface ProfileSeccionProps {
@@ -114,7 +134,7 @@ interface ProfileSeccionProps {
   media_user: VideoItem[]
   getSubscriptionPlans: () => any
   createCheckoutSession: (planId: number, subscribedToId: number) => any
-  startCall: (subscribedToId: number) => any
+  startCall: (subscribedToId: number, callType?: 'voice' | 'video') => any
   subscriptionPlans: any[]
   saveAvailability: (payload: { start_time: string; end_time: string; days: number[] }) => any
   getAvailability: () => any
@@ -155,14 +175,20 @@ function ProfileSeccion({
   const { username } = userParams
   const navigate = useNavigate()
   const dispatch = useDispatch()
+  const activeGifts = useSelector((state: any) => state.activeGiftReducer?.gift);
+  const getWalletReducer = useSelector((state: any) => state.getWalletReducer);
+  const walletTokens = getWalletReducer?.tokens || 0;
 
   // --- Estados Generales ---
   const [isMuted, setIsMuted] = useState(true)
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([])
-  const userref = useRef(false)
-  const mediaref = useRef(false)
   const [activeTab, setActiveTab] = useState("latest")
-  const currentUser = localStorage.getItem('user') ? JSON.parse(localStorage.getItem('user') || '{}') : null;
+  const currentUser = useSelector((state: any) => state.LoginReducer?.user);
+  const isOwnProfile = !!currentUser && !!user && (
+    currentUser.id === user.id ||
+    currentUser.username === username ||
+    currentUser.username === user.username
+  );
 
   // --- Estados Grid ---
   const [isGridVideoPlaying, setIsGridVideoPlaying] = useState<Record<string, boolean>>({})
@@ -176,6 +202,7 @@ function ProfileSeccion({
   const [activeModalIndex, setActiveModalIndex] = useState<number>(0)
   const modalContainerRef = useRef<HTMLDivElement>(null)
   const modalVideoRefs = useRef<(HTMLVideoElement | null)[]>([])
+  const modalScrollSettleTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   // Lógica importada de StreamingUI
   const [localMedia, setLocalMedia] = useState<VideoItem[]>(media_user || []);
@@ -189,6 +216,42 @@ function ProfileSeccion({
   const [comments, setComments] = useState<Comment[] | null>(null)
   const [commentText, setCommentText] = useState("")
   const [currentVideoId, setCurrentVideoId] = useState<string | null>(null);
+  const [expandedDescriptions, setExpandedDescriptions] = useState<Record<string, boolean>>({});
+
+  const normalizeIncomingComment = useCallback((comment: any): Comment => ({
+    ...comment,
+    create_at: comment?.create_at || comment?.created_at || new Date().toISOString(),
+  }), []);
+
+  const upsertComment = useCallback((list: Comment[] | null, incoming: any) => {
+    const normalized = normalizeIncomingComment(incoming);
+    const nextList = list ? [...list] : [];
+    const existingIndex = nextList.findIndex((comment) => comment.uuid === normalized.uuid);
+
+    if (existingIndex >= 0) {
+      nextList[existingIndex] = { ...nextList[existingIndex], ...normalized };
+      return nextList;
+    }
+
+    return [normalized, ...nextList];
+  }, [normalizeIncomingComment]);
+  const [showVideoGiftModal, setShowVideoGiftModal] = useState(false);
+  const [selectedVideoForGift, setSelectedVideoForGift] = useState<string | number | null>(null);
+  const [_fullGifts, setFullGifts] = useState<GiftI[] | GiftI | []>([]);
+  const [showTokenShopModal, setShowTokenShopModal] = useState(false);
+  const [showInsufficientFundsModal, setShowInsufficientFundsModal] = useState(false);
+  const [showTokenPurchaseSuccessModal, setShowTokenPurchaseSuccessModal] = useState(false);
+  const [purchasedTokenAmount, setPurchasedTokenAmount] = useState(0);
+  const [isBlackout, setIsBlackout] = useState(false);
+  const [giftAnimation, setGiftAnimation] = useState<{
+    type: string;
+    sender: string;
+    videoId?: string | number;
+    giftId: string;
+    gift: string;
+    amount?: number;
+    color_premiun?: string;
+  } | null>(null);
 
   // Suscripciones
   const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
@@ -210,14 +273,27 @@ function ProfileSeccion({
   const [showProfileMediaOptions, setShowProfileMediaOptions] = useState(false);
   const [showFullProfileMedia, setShowFullProfileMedia] = useState(false);
   const [showFollowPrompt, setShowFollowPrompt] = useState(false);
+  const [stories, setStories] = useState<StoryList>([]);
+  const [showProfileStoriesViewer, setShowProfileStoriesViewer] = useState(false);
+  const [activeProfileStoryIndex, setActiveProfileStoryIndex] = useState(0);
+  const [profileStoryProgresses, setProfileStoryProgresses] = useState<number[]>([]);
+  const profileStoryVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Social Modal
+  const [showSocialModal, setShowSocialModal] = useState(false);
+  const [socialModalTab, setSocialModalTab] = useState<'followers' | 'following' | 'subscribers'>('followers');
+
   const [availabilityStatus, setAvailabilityStatus] = useState<{
     is_available: boolean;
     can_voice: boolean;
     can_video: boolean;
     remaining_calls: number;
+    remaining_video_calls: number;
     plan_name: string;
     upgrade_required: boolean;
   } | null>(null);
+  const [callAlert, setCallAlert] = useState<string | null>(null);
+  const callAlertTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const weekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -279,10 +355,52 @@ function ProfileSeccion({
     }
   }, [media_user]);
 
+  useEffect(() => {
+    dispatch(getWallet() as any);
+  }, [dispatch]);
+
+  useEffect(() => {
+    if (activeGifts !== null) {
+      const mappedGifts = activeGifts.map((gift: any) => ({
+        id: gift.id?.toString(),
+        name: gift.name,
+        emoji: gift.emoji,
+        cost: gift.token_price,
+        color: "getColorFromSlug(gift.slug)",
+        animation: "getAnimationFromSlug(gift.slug)",
+        video: gift.video ? `${getBaseUrl()}${gift.video}` : "",
+        slug: gift.slug,
+        token_price: gift.token_price || 0,
+        is_active: gift.is_active ?? true,
+        created_at: gift.created_at || new Date().toISOString(),
+      }));
+      setFullGifts(mappedGifts);
+      return;
+    }
+
+    getActiveGift()(dispatch).then((response: any) => {
+      const giftsData = Array.isArray(response?.data) ? response.data : [];
+      const mappedGifts = giftsData.map((gift: GiftI) => ({
+        id: gift?.id?.toString(),
+        name: gift.name,
+        emoji: gift.emoji,
+        cost: gift.token_price,
+        color: "getColorFromSlug(gift.slug)",
+        animation: "getAnimationFromSlug(gift.slug)",
+        video: gift.video ? `${getBaseUrl()}${gift.video}` : "",
+        slug: gift.slug,
+        token_price: gift.token_price || 0,
+        is_active: gift.is_active ?? true,
+        created_at: gift.created_at || new Date().toISOString(),
+      }));
+      setFullGifts(mappedGifts);
+    }).catch(() => null);
+  }, [activeGifts, dispatch]);
+
   const handleWSMessage = useCallback((data: any) => {
     if (data.event === "like_updated") {
       setLocalMedia(prev => prev.map((video) => {
-        if (video.id === data.video_id) {
+        if (video.id?.toString() === data.video_id?.toString()) {
           return { ...video, likes_count: data.likes, liked: data.liked };
         }
         return video;
@@ -291,42 +409,78 @@ function ProfileSeccion({
     if (data.event === "new_comment") {
       if (data && data.user_id) {
         setLocalMedia(prev => prev.map((video) => {
-          if (video.id === data.video_id) {
+          if (video.id?.toString() === data.video_id?.toString()) {
             return { ...video, comments_count: data.comments_count };
           }
           return video;
         }));
-        if (currentVideoId === data.video_id) {
-          setComments((prevComments) => [data, ...(prevComments || [])]);
+        if (currentVideoId?.toString() === data.video_id?.toString()) {
+          setComments((prevComments) => upsertComment(prevComments, data));
         }
       }
     }
     if (data.event === "new_view") {
       setLocalMedia(prev => prev.map((video) => {
-        if (video.id === data.video_id) {
+        if (video.id?.toString() === data.video_id?.toString()) {
           return { ...video, view_acount: data.view_acount };
         }
         return video;
       }));
     }
-  }, [currentVideoId]);
+    if (data.event === "video_gift_received") {
+      const activeVideo = localMedia[activeModalIndex];
+      const isTargetVideoOpen = activeVideo?.id?.toString() === data.video_id?.toString();
+
+      if (currentUser?.id == data.from_user || (currentUser?.id == data.to_user && isTargetVideoOpen)) {
+        setGiftAnimation({
+          type: data.gift_type,
+          giftId: data.gift_uuid,
+          videoId: data.video_id,
+          sender: data.sender,
+          amount: data.amount || 1,
+          gift: data.gift_video,
+          color_premiun: data.color_premiun,
+        });
+      }
+    }
+    if (data.event === "new_follower" || data.event === "delete_follower") {
+      setLocalMedia(prev => prev.map((video) => {
+        if (video.user_id?.id?.toString() === data.channel_profile?.toString()) {
+          return { ...video, current_user_followered: data.current_user_followered };
+        }
+        return video;
+      }));
+    }
+  }, [currentVideoId, currentUser?.id, localMedia, activeModalIndex, upsertComment]);
 
   useWebSocket(WS_URL, handleWSMessage);
 
   // --- 2. Carga Inicial de Usuario ---
   useEffect(() => {
-    if (!userref.current && username) {
+    console.log("ProfileSeccion useEffect triggering for username:", username);
+    if (username) {
+      console.log("Calling getUser and getUserMedia for:", username);
       getUser(username)
-      userref.current = true
-    }
-  }, [getUser, username])
-
-  useEffect(() => {
-    if (!mediaref.current && username) {
       getUserMedia(username)
-      mediaref.current = true
+    } else {
+      console.log("No username found in params");
     }
-  }, [getUserMedia, username])
+  }, [getUser, getUserMedia, username])
+
+  // Sincronizar localMedia cuando cambian los videos de Redux
+  useEffect(() => {
+    console.log("Syncing localMedia with media_user:", media_user);
+    setLocalMedia(media_user || []);
+  }, [media_user]);
+
+  // Limpiar estados locales al cambiar de perfil
+  useEffect(() => {
+    if (username) {
+      setActiveTab("latest");
+      setViewedVideos(new Set());
+      setVideoProgress({});
+    }
+  }, [username]);
 
   useEffect(() => {
     if (username) {
@@ -351,8 +505,7 @@ function ProfileSeccion({
       }, 300);
     }
   };
-  // setLocalMedia(media_user);e
-  console.log(user, "**********")
+  // console.log(user, "**********")
   const handleGridVideoToggle = (videoId: string, videoElement: HTMLVideoElement | null) => {
     if (!videoElement) return;
     const currentlyPlaying = isGridVideoPlaying[videoId] || false;
@@ -379,6 +532,13 @@ function ProfileSeccion({
 
   // --- 4. Lógica de Interacciones ---
   const handleLikeClick = (videoId: string) => {
+    setLocalMedia(prev => prev.map((video) => {
+      if (video.id?.toString() !== videoId) return video;
+      const nextLiked = !video.liked;
+      const nextCount = Math.max(0, (video.likes_count || 0) + (nextLiked ? 1 : -1));
+      return { ...video, liked: nextLiked, likes_count: nextCount };
+    }));
+
     createLike({ video_id: videoId })(dispatch).then(() => {
       ;
     }).catch((error) => console.error("Error like:", error));
@@ -387,6 +547,60 @@ function ProfileSeccion({
     setTimeout(() => {
       setShowLikeAnimation((prev) => ({ ...prev, [videoId]: false }));
     }, 1000);
+  };
+
+  const handleToggleDescription = (videoId: string) => {
+    setExpandedDescriptions(prev => ({
+      ...prev,
+      [videoId]: !prev[videoId],
+    }));
+  };
+
+  const handleModalFollowClick = (targetUserId?: string | number) => {
+    if (!targetUserId || isOwnProfile) return;
+
+    setLocalMedia(prev => prev.map((video) => {
+      if (video.user_id?.id?.toString() !== targetUserId.toString()) return video;
+      return { ...video, current_user_followered: !video.current_user_followered };
+    }));
+
+    createFollower({ follower_user_id: targetUserId.toString() })(dispatch).catch(() => {
+      setLocalMedia(prev => prev.map((video) => {
+        if (video.user_id?.id?.toString() !== targetUserId.toString()) return video;
+        return { ...video, current_user_followered: !video.current_user_followered };
+      }));
+    });
+  };
+
+  const handleVideoGiftClick = (videoId: string | number) => {
+    setSelectedVideoForGift(videoId);
+    const index = localMedia?.findIndex(v => v.id?.toString() === videoId?.toString());
+    if (index !== undefined && index !== -1) {
+      const videoElement = modalVideoRefs.current[index];
+      videoElement?.pause();
+    }
+    setShowVideoGiftModal(true);
+  };
+
+  const handleSendVideoGift = async (giftTypeOrGift: string | GiftI, amount?: number) => {
+    let type = typeof giftTypeOrGift === 'string'
+      ? giftTypeOrGift
+      : (giftTypeOrGift.emoji || giftTypeOrGift.slug || giftTypeOrGift.name);
+    const cost = amount || (typeof giftTypeOrGift !== 'string' ? giftTypeOrGift.token_price : 0);
+
+    if (walletTokens < cost) {
+      setShowTokenShopModal(true);
+      return;
+    }
+
+    if (!selectedVideoForGift) return;
+
+    try {
+      await sendVideoGift({ video_id: Number(selectedVideoForGift), gift_type: type })(dispatch);
+      setShowVideoGiftModal(false);
+    } catch (error) {
+      console.error("Error dispatching video gift:", error);
+    }
   };
 
   const handleVideoProgress = (e: React.SyntheticEvent<HTMLVideoElement>, videoId: string) => {
@@ -438,7 +652,10 @@ function ProfileSeccion({
     createComment({
       video_id: currentVideoId,
       content: commentText
-    })(dispatch).then(() => {
+    })(dispatch).then((res: any) => {
+      if (res) {
+        setComments(prev => upsertComment(prev, res));
+      }
       setCommentText("");
     }).catch(console.error);
   }
@@ -454,15 +671,26 @@ function ProfileSeccion({
     }
   };
 
-  const handleStartCall = () => {
+  const showCallAlert = (message: string) => {
+    setCallAlert(message);
+    if (callAlertTimeoutRef.current) clearTimeout(callAlertTimeoutRef.current);
+    callAlertTimeoutRef.current = setTimeout(() => setCallAlert(null), 2600);
+  };
+
+  const handleStartCall = (callType: 'voice' | 'video' = 'voice') => {
     if (user?.id) {
-      startCall(user.id).then((res: any) => {
-        alert(res.message);
+      startCall(user.id, callType).then((res: any) => {
+        showCallAlert(res.message);
         // Here you would navigate to the call room if implemented
       }).catch((err: string) => {
-        alert(err);
+        showCallAlert(typeof err === 'string' ? err : 'No se pudo iniciar la llamada.');
       });
     }
+  };
+
+  const handleOpenSocialModal = (tab: 'followers' | 'following' | 'subscribers') => {
+    setSocialModalTab(tab);
+    setShowSocialModal(true);
   };
 
   // --- 5. Lógica Modal FullScreen ---
@@ -483,22 +711,36 @@ function ProfileSeccion({
   const toggleMute = () => setIsMuted(!isMuted);
   const generateAudioLevels = () => Array.from({ length: 15 }, () => Math.random() * 100);
 
-  const handleIntersection = useCallback((entries: IntersectionObserverEntry[]) => {
-    entries.forEach((entry) => {
-      if (entry.isIntersecting) {
-        const index = Number(entry.target.getAttribute('data-index'));
-        setActiveModalIndex(index);
-      }
-    });
-  }, []);
-
   useEffect(() => {
-    if (!isModalOpen) return;
-    const observer = new IntersectionObserver(handleIntersection, { threshold: 0.6 });
-    const elements = document.querySelectorAll('.modal-video-item');
-    elements.forEach((el) => observer.observe(el));
-    return () => observer.disconnect();
-  }, [isModalOpen, localMedia, handleIntersection]);
+    if (!isModalOpen || !modalContainerRef.current) return;
+
+    const container = modalContainerRef.current;
+
+    const settleActiveIndex = () => {
+      const containerHeight = container.clientHeight || 1;
+      const nextIndex = Math.round(container.scrollTop / containerHeight);
+      const clampedIndex = Math.max(0, Math.min(nextIndex, localMedia.length - 1));
+      setActiveModalIndex((prev) => (prev === clampedIndex ? prev : clampedIndex));
+    };
+
+    const handleScroll = () => {
+      if (modalScrollSettleTimeoutRef.current) {
+        clearTimeout(modalScrollSettleTimeoutRef.current);
+      }
+      modalScrollSettleTimeoutRef.current = setTimeout(settleActiveIndex, 90);
+    };
+
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    settleActiveIndex();
+
+    return () => {
+      container.removeEventListener('scroll', handleScroll);
+      if (modalScrollSettleTimeoutRef.current) {
+        clearTimeout(modalScrollSettleTimeoutRef.current);
+        modalScrollSettleTimeoutRef.current = null;
+      }
+    };
+  }, [isModalOpen, localMedia.length]);
 
   useEffect(() => {
     if (!isModalOpen) return;
@@ -548,7 +790,7 @@ function ProfileSeccion({
 
   const handleMessageClick = () => {
     // Check if we're viewing someone else's profile and we don't follow them
-    if (currentUser?.username !== username && user && !user.is_following) {
+    if (!isOwnProfile && user && !user.is_following) {
       setShowFollowPrompt(true);
       return;
     }
@@ -580,6 +822,158 @@ function ProfileSeccion({
       });
     }
   };
+
+  const profileStoriesMedia = useMemo(() => {
+    if (!user || !stories?.length) return [];
+
+    return stories
+      .filter((story: any) =>
+        story?.user?.id === user.id ||
+        story?.user?.username === user.username
+      )
+      .sort((a: any, b: any) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime())
+      .flatMap((story: any) =>
+        (story.media || [])
+          .slice()
+          .sort((a: any, b: any) => (a.order || 0) - (b.order || 0))
+          .map((media: any) => ({
+            ...media,
+            storyUuid: media?.uuid || story?.uuid,
+            storyId: story?.id,
+            username: story?.user?.username,
+          }))
+      );
+  }, [stories, user]);
+
+  const closeProfileStoriesViewer = useCallback(() => {
+    setShowProfileStoriesViewer(false);
+    setActiveProfileStoryIndex(0);
+    setProfileStoryProgresses([]);
+  }, []);
+
+  const handleNextProfileStory = useCallback(() => {
+    setActiveProfileStoryIndex((prev) => {
+      setProfileStoryProgresses((current) => {
+        const next = current.length ? [...current] : new Array(profileStoriesMedia.length).fill(0);
+        if (prev >= 0 && prev < next.length) {
+          next[prev] = 1;
+        }
+        return next;
+      });
+
+      if (prev >= profileStoriesMedia.length - 1) {
+        closeProfileStoriesViewer();
+        return 0;
+      }
+      return prev + 1;
+    });
+  }, [profileStoriesMedia.length, closeProfileStoriesViewer]);
+
+  const handlePrevProfileStory = useCallback(() => {
+    setActiveProfileStoryIndex((prev) => {
+      const nextIndex = Math.max(prev - 1, 0);
+      setProfileStoryProgresses((current) => {
+        const next = current.length ? [...current] : new Array(profileStoriesMedia.length).fill(0);
+        if (prev < next.length) {
+          next[prev] = 0;
+        }
+        if (nextIndex < next.length) {
+          next[nextIndex] = 0;
+        }
+        return next;
+      });
+      return nextIndex;
+    });
+  }, [profileStoriesMedia.length]);
+
+  const handleOpenProfileStories = useCallback(async () => {
+    setShowProfileMediaOptions(false);
+
+    let activeStories: any = stories;
+    if (!activeStories?.length) {
+      activeStories = await getActiveStories()(dispatch);
+      if (Array.isArray(activeStories)) {
+        setStories(activeStories);
+      }
+    }
+
+    const currentStories = (Array.isArray(activeStories) ? activeStories : stories)
+      .filter((story: any) =>
+        story?.user?.id === user?.id ||
+        story?.user?.username === user?.username
+      )
+      .sort((a: any, b: any) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime())
+      .flatMap((story: any) =>
+        (story.media || [])
+          .slice()
+          .sort((a: any, b: any) => (a.order || 0) - (b.order || 0))
+      );
+
+    if (!currentStories.length) {
+      return;
+    }
+
+    setProfileStoryProgresses(new Array(currentStories.length).fill(0));
+    setActiveProfileStoryIndex(0);
+    setShowProfileStoriesViewer(true);
+  }, [dispatch, stories, user]);
+
+  useEffect(() => {
+    if (!showProfileStoriesViewer || !profileStoriesMedia.length) return;
+
+    const activeStory = profileStoriesMedia[activeProfileStoryIndex];
+    if (!activeStory?.id) return;
+
+    viewStory({ story_uuid: activeStory.id })(dispatch).catch(() => null);
+  }, [showProfileStoriesViewer, activeProfileStoryIndex, profileStoriesMedia, dispatch]);
+
+  useEffect(() => {
+    if (!showProfileStoriesViewer || !profileStoriesMedia.length) return;
+
+    const activeStory = profileStoriesMedia[activeProfileStoryIndex];
+    if (!activeStory) return;
+
+    if (activeStory.type === "video") {
+      profileStoryVideoRef.current?.play().catch(() => null);
+      return;
+    }
+  }, [showProfileStoriesViewer, activeProfileStoryIndex, profileStoriesMedia]);
+
+  useEffect(() => {
+    if (!showProfileStoriesViewer || !profileStoriesMedia.length) return;
+
+    setProfileStoryProgresses((current) => {
+      const next = current.length === profileStoriesMedia.length
+        ? [...current]
+        : new Array(profileStoriesMedia.length).fill(0);
+
+      for (let i = 0; i < next.length; i += 1) {
+        if (i < activeProfileStoryIndex) next[i] = 1;
+        if (i > activeProfileStoryIndex) next[i] = 0;
+      }
+
+      if (profileStoriesMedia[activeProfileStoryIndex]?.type !== "video") {
+        next[activeProfileStoryIndex] = 0;
+      }
+
+      return next;
+    });
+  }, [showProfileStoriesViewer, activeProfileStoryIndex, profileStoriesMedia]);
+
+  const handleProfileStoryVideoProgress = useCallback((e: React.SyntheticEvent<HTMLVideoElement>) => {
+    const video = e.currentTarget;
+    if (!video.duration || Number.isNaN(video.duration)) return;
+
+    const progress = Math.min(video.currentTime / video.duration, 1);
+    setProfileStoryProgresses((current) => {
+      const next = current.length === profileStoriesMedia.length
+        ? [...current]
+        : new Array(profileStoriesMedia.length).fill(0);
+
+      next[activeProfileStoryIndex] = progress;
+      return next;
+    });
+  }, [activeProfileStoryIndex, profileStoriesMedia.length]);
 
   return (
     <>
@@ -622,10 +1016,10 @@ function ProfileSeccion({
                       loop
                       playsInline
                     />
-                  ) : user?.profile_picture.startsWith("http") ? (
+                  ) : user && !user?.profile_picture.startsWith("media") ? (
                     <img
                       className="w-full h-full object-cover"
-                      src={`${user.profile_picture}`}
+                      src={`${import.meta.env.VITE_DOMAIN_SERVER}/media/${user.profile_picture}`}
                       alt={user.username}
                     />
                   ) : (
@@ -658,7 +1052,10 @@ function ProfileSeccion({
               transition={{ delay: 0.2 }}
               className="flex items-center justify-center gap-8 md:gap-12 py-1 px-6 rounded-2xl bg-white/5 backdrop-blur-md border border-white/10 w-full max-w-sm mt-4 shadow-xl"
             >
-              <div className="flex flex-col items-center cursor-pointer group">
+              <div
+                className="flex flex-col items-center cursor-pointer group"
+                onClick={() => handleOpenSocialModal('followers')}
+              >
                 <span className="text-xl md:text-2xl font-bold text-white group-hover:text-[#00f0ff] transition-colors duration-300">
                   {(user?.follower_all_acount || 0) + (user?.total_social_followers || 0)}
                 </span>
@@ -667,7 +1064,10 @@ function ProfileSeccion({
 
               <div className="w-px h-8 bg-white/10"></div>
 
-              <div className="flex flex-col items-center cursor-pointer group">
+              <div
+                className="flex flex-col items-center cursor-pointer group"
+                onClick={() => handleOpenSocialModal('following')}
+              >
                 <span className="text-xl md:text-2xl font-bold text-white group-hover:text-[#00f0ff] transition-colors duration-300">
                   {user?.followed_all_acount || 0}
                 </span>
@@ -676,11 +1076,16 @@ function ProfileSeccion({
 
               <div className="w-px h-8 bg-white/10"></div>
 
-              <div className="flex flex-col items-center cursor-pointer group">
+              <div
+                className="flex flex-col items-center cursor-pointer group"
+                onClick={() => handleOpenSocialModal('subscribers')}
+              >
                 <span className="text-xl md:text-2xl font-bold text-white group-hover:text-[#00f0ff] transition-colors duration-300">
-                  {user?.like_all_count || 0}
+                  {currentUser?.id === user?.id ? (user?.subscribers_count || 0) : (user?.like_all_count || 0)}
                 </span>
-                <span className="text-xs text-gray-400 group-hover:text-gray-200">Likes</span>
+                <span className="text-xs text-gray-400 group-hover:text-gray-200">
+                  {currentUser?.id === user?.id ? "Suscriptores" : "Likes"}
+                </span>
               </div>
             </motion.div>
 
@@ -724,12 +1129,12 @@ function ProfileSeccion({
                 Mensaje
               </Button>
 
-              {currentUser?.username !== username && (
+              {!isOwnProfile && (
                 <div className="flex gap-2">
                   {/* Icono de Llamada de Voz */}
                   <div className="relative">
                     <Button
-                      onClick={handleStartCall}
+                      onClick={() => handleStartCall('voice')}
                       disabled={!availabilityStatus?.can_voice}
                       variant="ghost"
                       size="icon"
@@ -740,15 +1145,18 @@ function ProfileSeccion({
                     >
                       <Phone size={18} />
                     </Button>
-                    {availabilityStatus?.is_available && (
-                      <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-[#050718] animate-pulse"></div>
+                    {availabilityStatus?.is_available && availabilityStatus?.can_voice && (
+                      <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
+                        <span className="absolute inline-flex h-full w-full rounded-full bg-pink-400/70 blur-[1px] animate-ping"></span>
+                        <span className="relative inline-flex h-3.5 w-3.5 rounded-full border-2 border-[#050718] bg-gradient-to-br from-pink-300 via-fuchsia-400 to-pink-500 shadow-[0_0_12px_rgba(244,114,182,0.85)]"></span>
+                      </span>
                     )}
                   </div>
 
                   {/* Icono de Video Llamada */}
                   <div className="relative">
                     <Button
-                      onClick={handleStartCall}
+                      onClick={() => handleStartCall('video')}
                       disabled={!availabilityStatus?.can_video}
                       variant="ghost"
                       size="icon"
@@ -759,8 +1167,11 @@ function ProfileSeccion({
                     >
                       <Video size={18} />
                     </Button>
-                    {availabilityStatus?.is_available && (
-                      <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-[#050718] animate-pulse"></div>
+                    {availabilityStatus?.is_available && availabilityStatus?.can_video && (
+                      <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
+                        <span className="absolute inline-flex h-full w-full rounded-full bg-pink-400/70 blur-[1px] animate-ping"></span>
+                        <span className="relative inline-flex h-3.5 w-3.5 rounded-full border-2 border-[#050718] bg-gradient-to-br from-pink-300 via-fuchsia-400 to-pink-500 shadow-[0_0_12px_rgba(244,114,182,0.85)]"></span>
+                      </span>
                     )}
                   </div>
                 </div>
@@ -770,7 +1181,7 @@ function ProfileSeccion({
                 <Button variant="ghost" size="icon" className="rounded-xl bg-white/5 hover:bg-white/10 text-white border border-white/5 h-10 w-10">
                   <Share size={18} />
                 </Button>
-                {currentUser?.username === username && (
+                {isOwnProfile && (
                   <Button onClick={() => setShowSettingsModal(true)} variant="ghost" size="icon" className="rounded-xl bg-white/5 hover:bg-white/10 text-white border border-white/5 h-10 w-10">
                     <Settings size={18} />
                   </Button>
@@ -779,7 +1190,7 @@ function ProfileSeccion({
             </motion.div>
 
             {/* Mensaje de Upgrade si es necesario */}
-            {availabilityStatus?.upgrade_required && currentUser?.username !== username && (
+            {availabilityStatus?.upgrade_required && !isOwnProfile && (
               <motion.div
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
@@ -811,15 +1222,15 @@ function ProfileSeccion({
           >
             <Tabs defaultValue="latest" value={activeTab} onValueChange={setActiveTab} className="w-full">
               {/* Tabs Flotantes (Restaurados) */}
-              <div className="sticky top-2 z-30 px-4 mb-6">
-                <div className="relative mx-auto max-w-sm">
+              <div className="sticky top-0 z-30 px-0 pt-2 pb-2 bg-[#050718]/80 backdrop-blur-xl border-b border-white/5 rounded-xl">
+                <div className="relative mx-auto max-w-sm px-1">
                   <div className="absolute -inset-px rounded-full bg-gradient-to-r from-[#7000ff]/30 to-[#00f0ff]/30 opacity-50 blur-sm"></div>
                   <TabsList className="relative grid w-full grid-cols-3 bg-[#0c1033]/90 backdrop-blur-xl border border-white/10 rounded-full p-1 h-auto">
                     {["latest", "popular", "oldest"].map((tab) => (
                       <TabsTrigger
                         key={tab}
                         value={tab}
-                        className={`rounded-full text-xs md:text-sm font-medium py-2 transition-all duration-300 capitalize
+                        className={`rounded-full text-[10px] md:text-sm font-bold py-2 transition-all duration-300 capitalize
                                 data-[state=active]:bg-gradient-to-r data-[state=active]:from-[#7000ff] data-[state=active]:to-[#00f0ff] data-[state=active]:text-white data-[state=active]:shadow-lg
                                 ${activeTab === tab ? "" : "text-gray-400 hover:text-white hover:bg-white/5"}`}
                       >
@@ -830,15 +1241,19 @@ function ProfileSeccion({
                 </div>
               </div>
 
-              <TabsContent value="latest" className="px-1 md:px-4">
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 md:gap-4">
-                  {localMedia.map((video, index) => (
+              <TabsContent value={activeTab} className="px-1 md:px-4">
+                <div className="grid grid-cols-3 gap-1 md:gap-4">
+                  {[...localMedia].sort((a, b) => {
+                    if (activeTab === 'popular') return (b.view_acount || 0) - (a.view_acount || 0);
+                    if (activeTab === 'oldest') return new Date(a.create_at || 0).getTime() - new Date(b.create_at || 0).getTime();
+                    return new Date(b.create_at || 0).getTime() - new Date(a.create_at || 0).getTime();
+                  }).map((video, index) => (
                     <motion.div
                       key={video.id}
                       initial={{ opacity: 0, scale: 0.9 }}
                       animate={{ opacity: 1, scale: 1 }}
                       transition={{ delay: index * 0.05 }}
-                      className="relative group rounded-xl overflow-hidden bg-zinc-900 aspect-[9/16]"
+                      className="relative group rounded-lg overflow-hidden bg-zinc-900 aspect-[3/4]"
                       onClick={() => handleVideoClickOrDoubleClick(video, index)}
                     >
                       <div className="relative h-full w-full">
@@ -895,6 +1310,13 @@ function ProfileSeccion({
       <BankAccountModal
         isOpen={showBankAccountModal}
         onClose={() => setShowBankAccountModal(false)}
+      />
+
+      <SocialConnectionsModal
+        isOpen={showSocialModal}
+        onClose={() => setShowSocialModal(false)}
+        username={username || ''}
+        initialTab={socialModalTab}
       />
 
       {/* ===================== MODAL CONFIGURACIÓN (SETTINGS) ===================== */}
@@ -1406,7 +1828,7 @@ function ProfileSeccion({
 
               <div
                 ref={modalContainerRef}
-                className="w-full h-full overflow-y-scroll snap-y snap-mandatory scroll-smooth no-scrollbar"
+                className="w-full h-full overflow-y-scroll snap-y snap-mandatory no-scrollbar overscroll-contain"
                 style={{ scrollbarWidth: 'none' }}
               >
                 {localMedia.map((video, index) => (
@@ -1435,23 +1857,66 @@ function ProfileSeccion({
                       />
                     )}
 
-                    {/* Overlays del Modal */}
-                    {!isMuted && activeModalIndex === index && (
-                      <div className="absolute bottom-8 left-4 flex h-16 items-end space-x-1 z-10 pointer-events-none">
-                        {generateAudioLevels().map((level, i) => (
-                          <motion.div key={i} className="w-1 bg-gradient-to-t from-[#7000ff] to-[#00f0ff] rounded-full" initial={{ height: "10%" }} animate={{ height: `${level}%` }} transition={{ duration: 0.2, delay: i * 0.05, repeat: Infinity, repeatType: "reverse" }} />
-                        ))}
-                      </div>
-                    )}
-
-                    <div className="absolute bottom-20 left-4 z-10 max-w-[70%] text-left">
+                    <div className="absolute bottom-1 left-0 right-0 z-10 px-1 pb-1 text-left">
                       <div className="flex items-center gap-2 mb-2">
                         <h3 className="text-white font-bold text-lg drop-shadow-md">@{video.user_id?.username || user?.username}</h3>
                         <div className="bg-[#00f0ff] p-0.5 rounded-full"><Sparkles size={8} className="text-black" /></div>
                       </div>
-                      <p className="text-white/90 text-sm line-clamp-2 drop-shadow-md">
-                        {video.content || "Mira este increíble video... #viral #fyp"}
-                      </p>
+                      {!!(video.content || video.user_id?.username) && (
+                        <motion.div
+                          className={`
+                            w-full backdrop-blur-md border border-white/10 bg-black/35 shadow-2xl transition-all duration-500 ease-in-out rounded-none
+                            ${expandedDescriptions[video.id] ? 'px-4 pt-4 pb-5 max-h-[52vh] overflow-hidden' : 'px-4 py-3 max-h-[96px] overflow-hidden cursor-pointer hover:bg-black/40'}
+                          `}
+                          onClick={(e) => {
+                            if (!expandedDescriptions[video.id]) {
+                              e.stopPropagation();
+                              handleToggleDescription(video.id.toString());
+                            }
+                          }}
+                          initial={false}
+                          animate={{
+                            scale: 1,
+                            y: expandedDescriptions[video.id] ? -6 : 0
+                          }}
+                        >
+                          <div className="text-[13px] leading-relaxed text-white/95 drop-shadow-sm font-light">
+                            {expandedDescriptions[video.id] && (
+                              <div className="flex justify-center mb-3">
+                                <div
+                                  className="w-10 h-1 bg-white/30 rounded-full cursor-pointer hover:bg-[#00f0ff]/60 transition-colors"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleToggleDescription(video.id.toString());
+                                  }}
+                                />
+                              </div>
+                            )}
+
+                            {expandedDescriptions[video.id] ? (
+                              <div className="flex flex-col gap-2">
+                                <p className="whitespace-pre-wrap">{video.content || "Sin descripcion."}</p>
+                                <button
+                                  className="text-[#00f0ff] text-xs font-semibold mt-2 self-start hover:underline"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleToggleDescription(video.id.toString());
+                                  }}
+                                >
+                                  Ocultar
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex flex-wrap items-center">
+                                <span className="line-clamp-2">{video.content || "Mira este increíble video... #viral #fyp"}</span>
+                                {(video.content || "").length > 70 && (
+                                  <span className="ml-1 text-[#00f0ff] font-bold text-[11px]">... ver más</span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </motion.div>
+                      )}
                     </div>
 
                     {/* Barra de Progreso del Modal */}
@@ -1476,31 +1941,68 @@ function ProfileSeccion({
                     </div>
 
                     {/* Botones Laterales del Modal */}
-                    <div className="absolute right-2 bottom-20 md:right-4 md:bottom-24 flex flex-col items-center gap-6 z-20">
-                      <div className="relative mb-2">
+                    <div className="absolute right-2 bottom-28 md:right-4 md:bottom-28 flex flex-col items-center gap-4 z-20">
+                      <div className="relative mb-1">
                         <div className="w-12 h-12 rounded-full border-2 border-white overflow-hidden">
-                          <img src={`${getBaseUrl()}${video.user_id?.profile_picture || user?.profile_picture}`} className="w-full h-full object-cover" alt="user" />
+                          <img
+                            src={`${getBaseUrl()}${
+                              (() => {
+                                const pic = video.user_id?.profile_picture || user?.profile_picture;
+                                if (pic && !pic.startsWith('media/')) {
+                                  return `media/${pic}`;
+                                }
+                                return pic;
+                              })()
+                            }`}
+                            className="w-full h-full object-cover"
+                            alt="user"
+                          />
                         </div>
-                        <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-[#ff0050] rounded-full p-0.5 w-5 h-5 flex items-center justify-center text-white text-xs font-bold">+</div>
                       </div>
+
+                      {!isOwnProfile && (
+                        <motion.button
+                          whileTap={{ scale: 0.92 }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleModalFollowClick(video.user_id?.id);
+                          }}
+                          className="flex h-8 w-8 items-center justify-center"
+                        >
+                          {video.current_user_followered ? (
+                            <UserCheck className="h-4 w-4 text-white" strokeWidth={2.4} />
+                          ) : (
+                            <UserPlus className="h-4 w-4 text-white" strokeWidth={2.4} />
+                          )}
+                        </motion.button>
+                      )}
 
                       <div className="flex flex-col items-center gap-1">
                         <motion.button
-                          whileTap={{ scale: 0.8 }}
+                          whileTap={{ scale: 0.9 }}
                           onClick={(e) => { e.stopPropagation(); handleLikeClick(video.id.toString()); }}
-                          className="bg-black/20 p-2 rounded-full backdrop-blur-sm relative"
+                          className="relative flex flex-col items-center gap-1"
                         >
-                          <Heart className={`w-8 h-8 drop-shadow-lg ${video.liked ? "fill-[#ff0050] text-[#ff0050]" : "text-white"}`} />
+                          <motion.div
+                            animate={{ scale: video.liked ? [1, 1.3, 1] : 1 }}
+                            transition={{ duration: 0.3 }}
+                            className={`flex h-10 w-10 items-center justify-center rounded-full ${video.liked ? "bg-red-500/20 text-red-500" : "bg-white/10 text-white"}`}
+                          >
+                            <Heart className={`h-5 w-5 ${video.liked ? "fill-red-500 text-red-500" : "text-white"}`} />
+                          </motion.div>
                           <AnimatePresence>
                             {showLikeAnimation[video.id] && (
-                              [...Array(3)].map((_, i) => (
+                              [...Array(5)].map((_, i) => (
                                 <motion.div
                                   key={i}
-                                  initial={{ opacity: 1, y: 0, scale: 0.5 }}
-                                  animate={{ opacity: 0, y: -60 - Math.random() * 40, x: (Math.random() - 0.5) * 30, scale: 1.2 }}
-                                  className="absolute top-0 left-0 pointer-events-none"
+                                  initial={{ opacity: 1, y: 0, x: 0, scale: 0.5 }}
+                                  animate={{ opacity: 0, y: -50 - Math.random() * 50, x: (Math.random() - 0.5) * 40, scale: 1.5 }}
+                                  exit={{ opacity: 0 }}
+                                  transition={{ duration: 1 + Math.random() * 0.5 }}
+                                  className="absolute text-red-500 pointer-events-none"
+                                  style={{ top: "50%", left: "50%", transform: "translate(-50%, -50%)" }}
                                 >
-                                  <Heart className="w-6 h-6 fill-[#ff0050] text-[#ff0050]" />
+                                  ❤️
                                 </motion.div>
                               ))
                             )}
@@ -1511,27 +2013,43 @@ function ProfileSeccion({
 
                       <div className="flex flex-col items-center gap-1">
                         <motion.button
-                          whileTap={{ scale: 0.8 }}
+                          whileTap={{ scale: 0.92 }}
                           onClick={(e) => { e.stopPropagation(); handleCommentClick(video); }}
-                          className="bg-black/20 p-2 rounded-full backdrop-blur-sm"
+                          className="flex flex-col items-center relative"
                         >
-                          <MessageCircle className="w-8 h-8 text-white drop-shadow-lg" />
+                          <div className="relative flex h-10 w-10 items-center justify-center rounded-full bg-white/10">
+                            <MessageCircle className="h-5 w-5 text-white" />
+                          </div>
                         </motion.button>
                         <span className="text-white text-xs font-bold drop-shadow-md">{video.comments_count || 0}</span>
                       </div>
 
                       <div className="flex flex-col items-center gap-1">
-                        <div className="bg-black/20 p-2 rounded-full backdrop-blur-sm">
-                          <Eye className="w-8 h-8 text-white drop-shadow-lg" />
+                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10">
+                          <Eye className="h-5 w-5 text-white drop-shadow-lg" />
                         </div>
                         <span className="text-white text-xs font-bold drop-shadow-md">{video.view_acount || 0}</span>
                       </div>
 
                       <div className="flex flex-col items-center gap-1">
-                        <motion.button whileTap={{ scale: 0.8 }} className="bg-black/20 p-2 rounded-full backdrop-blur-sm">
-                          <Share2 className="w-8 h-8 text-white drop-shadow-lg" />
+                        <motion.button whileTap={{ scale: 0.9 }} className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 backdrop-blur-sm">
+                          <Share2 className="h-5 w-5 text-white drop-shadow-lg" />
                         </motion.button>
                         <span className="text-white text-xs font-bold drop-shadow-md">Share</span>
+                      </div>
+
+                      <div className="flex flex-col items-center gap-1">
+                        <motion.button
+                          whileTap={{ scale: 0.9 }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleVideoGiftClick(video.id);
+                          }}
+                          className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-pink-500/35 to-purple-500/25 backdrop-blur-md border border-pink-400/40 shadow-md"
+                        >
+                          <svg width="20" height="20" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg"><g><g><g><path d="M94 58H26V104H94V58Z" fill="#FF4F64"></path><path opacity="0.05" d="M94 101.294H26V104H94V101.294Z" fill="black"></path><path opacity="0.1" d="M28.6842 58H26V104H28.6842V58Z" fill="white"></path><path opacity="0.05" d="M94 58H91.3158V104H94V58Z" fill="black"></path><path opacity="0.05" d="M73.8684 58H71.1842V104H73.8684V58Z" fill="black"></path><path d="M71.1842 58H48.5921V104H71.1842V58Z" fill="#FFD4D9"></path></g></g><g><path d="M100 42.665H20V60.0001H100V42.665Z" fill="#FF4F64"></path><path d="M76.9491 42.665H42.8248V60.0001H76.9491V42.665Z" fill="#FFD4D9"></path></g></g></svg>
+                        </motion.button>
+                        <span className="text-[10px] text-pink-300/90 font-medium drop-shadow-md">Regalar</span>
                       </div>
                     </div>
                   </div>
@@ -1542,27 +2060,118 @@ function ProfileSeccion({
         }
       </AnimatePresence >
 
+      <AnimatePresence>
+        {giftAnimation && (
+          <motion.div
+            initial={{ opacity: 0, y: 200, scale: 0.7 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 400, scale: 0.7 }}
+            transition={{ type: "tween", duration: 0.4, ease: "easeInOut" }}
+            className="fixed bottom-32 left-1/2 -translate-x-1/2 z-[100] pointer-events-none w-[90vw] max-w-lg overflow-visible"
+          >
+            <video
+              key={giftAnimation.giftId}
+              src={`${getBaseUrl()}${giftAnimation.gift}`}
+              autoPlay
+              playsInline
+              muted={false}
+              className="w-full drop-shadow-[0_0_30px_rgba(255,255,255,0.3)] rounded-3xl"
+              style={{
+                WebkitMaskImage: `
+                  linear-gradient(to top, transparent 10%, black 50%),
+                  linear-gradient(to bottom, transparent 10%, black 50%),
+                  linear-gradient(to left, transparent 0%, black 30%),
+                  linear-gradient(to right, transparent 0%, black 30%)
+                `,
+                WebkitMaskComposite: "destination-in",
+                maskComposite: "intersect"
+              }}
+              onTimeUpdate={(e) => {
+                const video = e.currentTarget;
+                if (giftAnimation.type === 'Space' || giftAnimation.type === '🪐') {
+                  if (video.currentTime >= 4.0 && video.currentTime < 6.0) {
+                    if (!isBlackout) setIsBlackout(true);
+                  } else if (video.currentTime >= 6.0 && isBlackout) {
+                    setIsBlackout(false);
+                  }
+                }
+              }}
+              onEnded={() => {
+                setIsBlackout(false);
+                setGiftAnimation(null);
+              }}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {isBlackout && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[95] bg-black pointer-events-none"
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {callAlert && (
+          <motion.div
+            initial={{ opacity: 0, y: -12, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -12, scale: 0.98 }}
+            className="fixed top-5 left-1/2 -translate-x-1/2 z-[120] rounded-2xl border border-[#00f0ff]/20 bg-[#08101f]/95 px-4 py-3 text-sm text-white shadow-[0_16px_50px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+          >
+            {callAlert}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* --- MODAL DE COMENTARIOS --- */}
       <AnimatePresence>
         {
           showCommentsModal && (
             <>
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 z-[70]" onClick={() => setShowCommentsModal(false)} />
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 bg-black/80 backdrop-blur-md z-[70]"
+                onClick={() => setShowCommentsModal(false)}
+              />
               <motion.div
                 initial={{ y: "100%" }}
                 animate={{ y: 0 }}
                 exit={{ y: "100%" }}
-                transition={{ type: "spring", damping: 25, stiffness: 200 }}
-                className="fixed bottom-0 left-0 right-0 h-[60vh] z-[80] bg-[#0c1033] rounded-t-3xl flex flex-col border-t border-[#2a2f5e]"
+                transition={{ type: "spring", damping: 30, stiffness: 250 }}
+                className="fixed bottom-0 left-0 right-0 h-[72vh] z-[80] bg-[#0a0a0f]/95 rounded-t-[40px] flex flex-col border-t border-white/10 backdrop-blur-xl shadow-2xl overflow-hidden"
                 onClick={(e) => e.stopPropagation()}
               >
-                <div className="flex items-center justify-between p-4 border-b border-[#2a2f5e]">
-                  <h3 className="text-white font-bold">Comentarios</h3>
-                  <button onClick={() => setShowCommentsModal(false)}><X className="text-gray-400" /></button>
+                <div className="flex justify-center pt-3">
+                  <div className="h-1.5 w-12 rounded-full bg-white/20" />
                 </div>
-                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                <div className="flex items-center justify-between px-6 py-4">
+                  <div>
+                    <h3 className="text-white font-bold text-lg">Comentarios</h3>
+                    <p className="text-xs text-white/45">Conversacion en tiempo real</p>
+                  </div>
+                  <button
+                    onClick={() => setShowCommentsModal(false)}
+                    className="rounded-full bg-white/5 p-2 text-gray-400 transition hover:bg-white/10 hover:text-white"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto px-4 py-5 space-y-4">
                   {(!comments || comments.length === 0) ? (
-                    <div className="h-full flex items-center justify-center text-gray-500">Sé el primero en comentar.</div>
+                    <div className="h-full flex flex-col items-center justify-center text-center text-gray-500 gap-2">
+                      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-white/5 border border-white/10">
+                        <MessageCircle className="h-6 w-6 text-white/40" />
+                      </div>
+                      <p className="text-white/70 font-medium">Aun no hay comentarios</p>
+                      <p className="text-sm text-white/35">Se el primero en comentar esta publicacion.</p>
+                    </div>
                   ) : (
                     [...comments].sort((a, b) => {
                       const planOrder: { [key: string]: number } = {
@@ -1571,12 +2180,14 @@ function ProfileSeccion({
                         'VIP': 2,
                         'NONE': 3
                       };
-                      const aPlan = a.user_id.subscription_status?.plan?.name?.toUpperCase() || 'NONE';
-                      const bPlan = b.user_id.subscription_status?.plan?.name?.toUpperCase() || 'NONE';
-                      return (planOrder[aPlan] ?? 4) - (planOrder[bPlan] ?? 4);
+                      const aPlan = a.is_priority_comment ? (a.priority_plan_name?.toUpperCase() || 'NONE') : 'NONE';
+                      const bPlan = b.is_priority_comment ? (b.priority_plan_name?.toUpperCase() || 'NONE') : 'NONE';
+                      const priorityDiff = (planOrder[aPlan] ?? 4) - (planOrder[bPlan] ?? 4);
+                      if (priorityDiff !== 0) return priorityDiff;
+                      return new Date(b.create_at || b.created_at || 0).getTime() - new Date(a.create_at || a.created_at || 0).getTime();
                     })
                       .map((c, i) => {
-                        const planName = c.user_id.subscription_status?.plan?.name?.toUpperCase() || 'NONE';
+                        const planName = c.is_priority_comment ? (c.priority_plan_name?.toUpperCase() || 'NONE') : 'NONE';
                         const isFriend = planName === 'FRIEND';
                         const isPlus = planName === 'PLUS';
                         const isVip = planName === 'VIP';
@@ -1591,15 +2202,13 @@ function ProfileSeccion({
                                 className="absolute inset-0 z-0 bg-gradient-to-r from-transparent via-cyan-400/10 to-transparent skew-x-12 pointer-events-none"
                               />
                             )}
-                            <div className={`relative p-[1.5px] rounded-full h-fit ${c.user_id.subscription_status?.is_active
-                              ? isFriend
-                                ? 'bg-gradient-to-tr from-[#00f0ff] via-white to-[#00f0ff] shadow-[0_0_8px_rgba(0,240,255,0.4)] transition-transform group-hover:scale-105'
-                                : isVip
-                                  ? 'bg-gradient-to-tr from-amber-300 via-amber-500 to-amber-200 animate-pulse'
-                                  : isPlus
-                                    ? 'bg-gradient-to-tr from-purple-400 to-pink-500'
-                                    : 'bg-transparent'
-                              : 'bg-transparent'
+                            <div className={`relative p-[1.5px] rounded-full h-fit ${isFriend
+                              ? 'bg-gradient-to-tr from-[#00f0ff] via-white to-[#00f0ff] shadow-[0_0_8px_rgba(0,240,255,0.4)] transition-transform group-hover:scale-105'
+                              : isVip
+                                ? 'bg-gradient-to-tr from-amber-300 via-amber-500 to-amber-200 animate-pulse'
+                                : isPlus
+                                  ? 'bg-gradient-to-tr from-purple-400 to-pink-500'
+                                  : 'bg-transparent'
                               }`}>
                               <img src={`${getBaseUrl()}${c.user_id.profile_picture}`} className="w-8 h-8 rounded-full object-cover border border-black" alt="u" />
                               {(isVip || isFriend) && (
@@ -1614,7 +2223,7 @@ function ProfileSeccion({
                                   {c.user_id.username}
                                 </span>
                                 {isFriend && (
-                                  <span className="text-[7px] bg-white/10 backdrop-blur-md text-cyan-300 px-1.5 py-0.5 rounded-full border border-cyan-500/20 font-bold tracking-widest uppercase">DIAMOND</span>
+                                  <span className="text-[7px] bg-white/10 backdrop-blur-md text-cyan-300 px-1.5 py-0.5 rounded-full border border-cyan-500/20 font-bold tracking-widest uppercase">FRIEND</span>
                                 )}
                                 {isVip && (
                                   <span className="text-[8px] bg-amber-400/20 text-amber-400 px-1 rounded-sm font-bold uppercase border border-amber-400/20">VIP</span>
@@ -1622,7 +2231,7 @@ function ProfileSeccion({
                                 {isPlus && (
                                   <span className="text-[8px] bg-purple-400/20 text-purple-400 px-1 rounded-sm font-bold uppercase border border-purple-400/20">PLUS</span>
                                 )}
-                                <span className="text-[10px] text-gray-500">{new Date(c.create_at).toLocaleDateString()}</span>
+                                <span className="text-[10px] text-gray-500">{new Date(c.create_at || c.created_at || 0).toLocaleDateString()}</span>
                               </div>
                               <p className={`text-sm mt-0.5 ${isVip ? 'text-amber-50/90' : 'text-white'}`}>{c.content}</p>
                             </div>
@@ -1631,16 +2240,30 @@ function ProfileSeccion({
                       })
                   )}
                 </div>
-                <div className="p-3 border-t border-[#2a2f5e] bg-[#050718] flex items-center gap-2 pb-6 md:pb-3">
-                  <img src={`${getBaseUrl()}${currentUser?.profile_picture}`} className="w-8 h-8 rounded-full" alt="me" />
-                  <input
-                    className="flex-1 bg-[#1a1f3a] rounded-full px-4 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-[#00f0ff]"
-                    placeholder="Añadir comentario..."
-                    value={commentText}
-                    onChange={(e) => setCommentText(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handlePostComment()}
-                  />
-                  <button onClick={handlePostComment} className="text-[#00f0ff] font-bold text-sm px-2">Publicar</button>
+                <div className="border-t border-white/8 bg-gradient-to-t from-[#0a0a0f] via-[#0a0a0f] to-transparent px-4 py-3 pb-6 md:pb-3">
+                  <div className="flex items-end gap-3 rounded-[28px] border border-white/10 bg-[#1a1a24] p-2 backdrop-blur-xl">
+                    <img
+                      src={`${getBaseUrl()}${currentUser?.profile_picture}`}
+                      className="w-10 h-10 rounded-full object-cover border-2 border-white/10 shadow-lg"
+                      alt="me"
+                    />
+                    <div className="flex-1">
+                      <input
+                        className="w-full bg-transparent px-2 py-2 text-sm text-white placeholder:text-white/35 focus:outline-none"
+                        placeholder="Escribe un comentario..."
+                        value={commentText}
+                        onChange={(e) => setCommentText(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handlePostComment()}
+                      />
+                    </div>
+                    <button
+                      onClick={handlePostComment}
+                      disabled={!commentText.trim()}
+                      className="rounded-xl bg-gradient-to-r from-[#7000ff] to-[#00f0ff] px-4 py-2 text-sm font-bold text-white shadow-lg shadow-cyan-500/10 transition disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      Publicar
+                    </button>
+                  </div>
                 </div>
               </motion.div>
             </>
@@ -1657,39 +2280,60 @@ function ProfileSeccion({
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setShowProfileMediaOptions(false)}
-              className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm"
+              className="fixed inset-0 z-50 bg-black/60 backdrop-blur-md transition-all duration-300"
             />
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="fixed z-50 left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm px-4"
+              className="fixed z-50 left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-[320px] px-4"
             >
-              <div className="bg-[#0c1033] border border-white/10 rounded-2xl shadow-2xl p-4 flex flex-col gap-2">
-                <div className="flex justify-between items-center mb-2 px-2">
-                  <h3 className="text-white font-bold">Opciones de perfil</h3>
-                  <button onClick={() => setShowProfileMediaOptions(false)} className="text-gray-400 hover:text-white">
+              <div className="bg-[#0c1033]/95 border border-white/10 rounded-3xl shadow-[0_0_40px_-10px_rgba(0,0,0,0.5)] overflow-hidden backdrop-blur-xl">
+                {/* Header con gradiente sutil */}
+                <div className="bg-gradient-to-r from-white/5 to-transparent px-5 py-4 flex justify-between items-center border-b border-white/5">
+                  <h3 className="text-white font-semibold text-lg tracking-tight">Opciones de perfil</h3>
+                  <button
+                    onClick={() => setShowProfileMediaOptions(false)}
+                    className="text-white/40 hover:text-white transition-colors p-1 hover:bg-white/5 rounded-full"
+                  >
                     <X size={20} />
                   </button>
                 </div>
-                <button
-                  className="w-full text-left px-4 py-3 rounded-xl text-white hover:bg-white/10 font-medium transition-colors"
-                  onClick={() => {
-                    setShowProfileMediaOptions(false);
-                    setShowFullProfileMedia(true);
-                  }}
-                >
-                  Ver Perfil
-                </button>
-                <button
-                  className="w-full text-left px-4 py-3 rounded-xl text-white hover:bg-white/10 font-medium transition-colors"
-                  onClick={() => {
-                    setShowProfileMediaOptions(false);
-                    navigate("/");
-                  }}
-                >
-                  Ver historias
-                </button>
+
+                <div className="p-2 flex flex-col gap-1">
+                  <button
+                    className="w-full flex items-center gap-3 px-4 py-4 rounded-2xl text-white hover:bg-white/5 group transition-all duration-300"
+                    onClick={() => {
+                      setShowProfileMediaOptions(false);
+                      setShowFullProfileMedia(true);
+                    }}
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-400 group-hover:scale-110 transition-transform duration-300">
+                      <User size={20} />
+                    </div>
+                    <div className="flex flex-col items-start leading-tight">
+                      <span className="font-medium">Ver Perfil</span>
+                      <span className="text-xs text-white/40">Visualizar foto de perfil</span>
+                    </div>
+                  </button>
+
+                  {user?.has_active_stories && (
+                    <button
+                      className="w-full flex items-center gap-3 px-4 py-4 rounded-2xl text-white hover:bg-white/5 group transition-all duration-300"
+                      onClick={handleOpenProfileStories}
+                    >
+                      <div className="w-10 h-10 rounded-xl bg-purple-500/10 flex items-center justify-center text-purple-400 group-hover:scale-110 transition-transform duration-300">
+                        <Sparkles size={20} />
+                      </div>
+                      <div className="flex flex-col items-start leading-tight">
+                        <span className="font-medium">Ver historias</span>
+                        <span className="text-xs text-white/40">Ver momentos recientes</span>
+                      </div>
+                    </button>
+                  )}
+                </div>
+
+                <div className="h-2 bg-gradient-to-t from-white/5 to-transparent opacity-50" />
               </div>
             </motion.div>
           </>
@@ -1720,10 +2364,10 @@ function ProfileSeccion({
                   controls
                   playsInline
                 />
-              ) : user?.profile_picture ? (
+              ) : user && !user?.profile_picture.startsWith('media/') ? (
                 <img
                   className="max-w-full max-h-full object-contain rounded-xl shadow-2xl shadow-[#7000ff]/20"
-                  src={`${user.profile_picture}`}
+                  src={`${getBaseUrl() + '/media/' + user.profile_picture}`}
                   alt={user.username}
                 />
               ) : (
@@ -1733,6 +2377,123 @@ function ProfileSeccion({
               )}
             </div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showProfileStoriesViewer && profileStoriesMedia.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[80] bg-black flex items-center justify-center"
+          >
+            <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-black/20 to-black/80" />
+
+            <div className="relative z-[81] flex h-full w-full max-w-md items-center justify-center overflow-hidden">
+              <button
+                onClick={closeProfileStoriesViewer}
+                className="absolute right-4 top-4 z-[83] rounded-full bg-black/40 p-2 text-white/90 backdrop-blur-md transition hover:bg-black/60"
+              >
+                <X size={20} />
+              </button>
+
+              <div className="absolute left-4 right-4 top-4 z-[83] flex gap-1">
+                {profileStoriesMedia.map((_: any, index: number) => (
+                  <div key={index} className="h-1 flex-1 overflow-hidden rounded-full bg-white/20">
+                    <div
+                      className="h-full rounded-full bg-white transition-all duration-150"
+                      style={{ width: `${Math.max(0, Math.min((profileStoryProgresses[index] || 0) * 100, 100))}%` }}
+                    />
+                  </div>
+                ))}
+              </div>
+
+              <div className="absolute left-4 top-8 z-[83] flex items-center gap-3">
+                <div className="h-10 w-10 overflow-hidden rounded-full border border-white/15">
+                  {user?.profile_picture ? (
+                    <img
+                      className="h-full w-full object-cover"
+                      src={`${user?.profile_picture.startsWith("http") ? user.profile_picture : `${getBaseUrl()}/media/${user.profile_picture}`}`}
+                      alt={user?.username}
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center bg-white/10">
+                      <User className="h-5 w-5 text-white/70" />
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-white">@{user?.username}</p>
+                  <p className="text-xs text-white/55">Historias</p>
+                </div>
+              </div>
+
+              <button
+                onClick={handlePrevProfileStory}
+                className="absolute inset-y-0 left-0 z-[82] w-1/3"
+                aria-label="Historia anterior"
+              />
+              <button
+                onClick={handleNextProfileStory}
+                className="absolute inset-y-0 right-0 z-[82] w-1/3"
+                aria-label="Historia siguiente"
+              />
+
+              {profileStoriesMedia[activeProfileStoryIndex]?.type === "video" ? (
+                <video
+                  ref={profileStoryVideoRef}
+                  key={`profile-story-${activeProfileStoryIndex}`}
+                  src={`${getBaseUrl()}/media/${profileStoriesMedia[activeProfileStoryIndex]?.file}`}
+                  className="h-full w-full object-contain"
+                  autoPlay
+                  playsInline
+                  onTimeUpdate={handleProfileStoryVideoProgress}
+                  onEnded={handleNextProfileStory}
+                />
+              ) : (
+                <img
+                  key={`profile-story-${activeProfileStoryIndex}`}
+                  src={`${getBaseUrl()}/media/${profileStoriesMedia[activeProfileStoryIndex]?.file}`}
+                  className="h-full w-full object-contain"
+                  alt={`Historia de ${user?.username}`}
+                />
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <TokenShopModal
+        isOpen={showTokenShopModal}
+        onClose={() => setShowTokenShopModal(false)}
+        onPurchase={async (amount, _price) => {
+          setPurchasedTokenAmount(amount);
+          setShowTokenShopModal(false);
+          setShowTokenPurchaseSuccessModal(true);
+        }}
+      />
+      <InsufficientFundsModal
+        isOpen={showInsufficientFundsModal}
+        onClose={() => setShowInsufficientFundsModal(false)}
+      />
+      <TokenPurchaseSuccessModal
+        isOpen={showTokenPurchaseSuccessModal}
+        onClose={() => setShowTokenPurchaseSuccessModal(false)}
+        purchasedAmount={purchasedTokenAmount}
+        newTotalBalance={walletTokens + purchasedTokenAmount}
+      />
+      <AnimatePresence>
+        {showVideoGiftModal && (
+          <VipGiftExperience
+            onClose={() => setShowVideoGiftModal(false)}
+            onSendGift={handleSendVideoGift}
+            gifts={Array.isArray(_fullGifts) ? _fullGifts : []}
+            walletTokens={walletTokens}
+            subscriptionStatus={
+              (localMedia?.find(v => v.id == selectedVideoForGift)?.user_id as any)?.subscription_status
+            }
+          />
         )}
       </AnimatePresence>
 
@@ -1757,7 +2518,7 @@ function ProfileSeccion({
                 <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-tr from-[#7000ff] to-[#00f0ff] p-1">
                   <img
                     className="w-full h-full object-cover rounded-full"
-                    src={`${user?.profile_picture || '/profile_pics/avatar.webp'}`}
+                    src={`${user && !user?.profile_picture.startsWith('media') ? getBaseUrl() + '/media/' + user?.profile_picture : ''}`}
                     alt="user"
                   />
                 </div>

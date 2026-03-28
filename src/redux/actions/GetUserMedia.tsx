@@ -5,6 +5,7 @@ import type { AppDispatch } from "../../store";
 import { getBaseUrl } from '../client/api-client'
 // user_seccion?.username
 export const getUserMedia = (username = "") => async (dispatch: AppDispatch) => {
+  console.log("getUserMedia thunk called with username:", username);
   try {
     const response = await axios.get(`${getBaseUrl()}api/get-media-user/${username}/`, {
       headers: {

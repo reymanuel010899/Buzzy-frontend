@@ -33,6 +33,7 @@ import availabilityReducer from "./reducers/availabilityReducer";
 import socialAccountsReducer from "./reducers/socialAccountsReducer";
 import bankReducer from "./reducers/bankReducer";
 import updateProfileReducer from "./reducers/updateProfileReducer";
+import socialConnections from "./reducers/socialConnectionsReducer";
 
 export default combineReducers({
     register,
@@ -69,4 +70,5 @@ export default combineReducers({
     socialAccountsReducer,
     bankReducer,
     updateProfileReducer,
+    socialConnections,
 })

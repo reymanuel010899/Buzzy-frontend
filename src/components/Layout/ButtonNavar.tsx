@@ -9,6 +9,7 @@ import {
 } from "@heroicons/react/24/solid";
 import { Link, useLocation } from "react-router-dom"
 import { motion } from "framer-motion"
+import { useSelector } from "react-redux"
 import profileIconC from "./ProfileIcon";
 import CreateActionModal from "./CreateActionModal";
 
@@ -18,8 +19,8 @@ const BottomNavbar: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false)
 
   // Obtener usuario actual para el link de perfil
-  const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
-  const profilePath = `/profile/${currentUser.username || 'user'}`;
+  const currentUser = useSelector((state: any) => state.LoginReducer?.user);
+  const profilePath = `/profile/${currentUser?.username || 'user'}`;
 
   // Mock subscription status - In a real app, this would come from a global state/hook
   const subStatus = {

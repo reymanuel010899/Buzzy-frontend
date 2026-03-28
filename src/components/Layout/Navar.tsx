@@ -28,6 +28,7 @@ import { getAvailabilityStatus } from "../../redux/actions/saveAvailability"
 import { sendMessage } from "../../redux/actions/message/sendMessage"
 import { useWebSocket } from "../../hooks/useWebSocket"
 import { allEmojis } from "../comments/emojis";
+import { startCall } from "../../redux/actions/subscriptionActions"
 import { useTypingUsers } from "../../context/useTyping";
 import { useUnreadMessages } from "../../context/UnreadAcount";
 import { getBaseUrl } from "../../redux/client/api-client";
@@ -49,9 +50,12 @@ const Navbar: React.FC = () => {
     can_voice: boolean;
     can_video: boolean;
     remaining_calls: number;
+    remaining_video_calls: number;
     plan_name: string;
     upgrade_required: boolean;
   } | null>(null);
+  const [callAlert, setCallAlert] = useState<string | null>(null);
+  const callAlertTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const unreadCounts = useUnreadMessages((state) => state.unreadCounts);
   const [clickedMessage, setClickedMessage] = useState<string | null>(null)
@@ -320,6 +324,25 @@ const Navbar: React.FC = () => {
       setChatAvailability(null);
     }
   }, [selectedChat, currentBackendChat]);
+
+  const handleStartChatCall = (callType: 'voice' | 'video' = 'voice') => {
+    const targetUserId = currentBackendChat?.other_user?.id;
+    if (!targetUserId) return;
+
+    const showChatCallAlert = (message: string) => {
+      setCallAlert(message);
+      if (callAlertTimeoutRef.current) clearTimeout(callAlertTimeoutRef.current);
+      callAlertTimeoutRef.current = setTimeout(() => setCallAlert(null), 2600);
+    };
+
+    startCall(targetUserId, callType)()
+      .then((res: any) => {
+        showChatCallAlert(res.message);
+      })
+      .catch((err: string) => {
+        showChatCallAlert(typeof err === "string" ? err : "No se pudo iniciar la llamada.");
+      });
+  };
   const sendAudioRef = useRef<HTMLAudioElement | null>(null);
   const typingAudioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -614,6 +637,19 @@ const Navbar: React.FC = () => {
 
   return (
     <>
+      <AnimatePresence>
+        {callAlert && (
+          <motion.div
+            initial={{ opacity: 0, y: -12, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -12, scale: 0.98 }}
+            className="fixed top-5 left-1/2 -translate-x-1/2 z-[120] rounded-2xl border border-[#00f0ff]/20 bg-[#08101f]/95 px-4 py-3 text-sm text-white shadow-[0_16px_50px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+          >
+            {callAlert}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* NAVBAR ORIGINAL - SIN CAMBIOS */}
       <nav
         className={`fixed w-full top-0 z-50 px-4 sm:px-6 transition-all duration-300 ${scrollPosition > 20 ? "bg-black backdrop-blur-lg" : "bg-black/80 backdrop-blur-2xl"
@@ -683,7 +719,7 @@ const Navbar: React.FC = () => {
           </div>
         </div>
 
-        <div className="md:hidden px-4 pb-4 pt-1">
+        <div className="md:hidden  pb-4 pt-1">
           <div className="flex items-center bg-gray-800/60 backdrop-blur-md border border-gray-700/50 rounded-full px-4 py-2 cursor-pointer hover:bg-gray-700/50 transition-all"
             onClick={() => setShowSearch(true)}>
             <span className="text-gray-400 px-2">{search || "Buscar en Buzzy..."}</span>
@@ -1154,6 +1190,7 @@ const Navbar: React.FC = () => {
                       <motion.button
                         whileHover={{ scale: 1.1 }}
                         whileTap={{ scale: 0.9 }}
+                        onClick={() => handleStartChatCall('voice')}
                         disabled={!chatAvailability?.can_voice}
                         className={`p-2 rounded-full transition-all ${chatAvailability?.can_voice
                           ? "bg-green-300/20 hover:bg-green-600/40 text-green-400 border border-green-500/30"
@@ -1161,13 +1198,17 @@ const Navbar: React.FC = () => {
                           }`}
                       >
                         <Phone className="w-5 h-5" />
-                        {chatAvailability?.is_available && (
-                          <div className="absolute top-1 right-1 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-gray-900 animate-pulse"></div>
+                        {chatAvailability?.is_available && chatAvailability?.can_voice && (
+                          <span className="absolute top-0.5 right-0.5 flex h-3 w-3">
+                            <span className="absolute inline-flex h-full w-full rounded-full bg-pink-400/70 blur-[1px] animate-ping"></span>
+                            <span className="relative inline-flex h-3 w-3 rounded-full border-2 border-gray-900 bg-gradient-to-br from-pink-300 via-fuchsia-400 to-pink-500 shadow-[0_0_10px_rgba(244,114,182,0.8)]"></span>
+                          </span>
                         )}
                       </motion.button>
                       <motion.button
                         whileHover={{ scale: 1.1 }}
                         whileTap={{ scale: 0.9 }}
+                        onClick={() => handleStartChatCall('video')}
                         disabled={!chatAvailability?.can_video}
                         className={`p-2 rounded-full transition-all ${chatAvailability?.can_video
                           ? "bg-blue-300/20 hover:bg-blue-600/40 text-blue-400 border border-blue-500/30"
@@ -1175,8 +1216,11 @@ const Navbar: React.FC = () => {
                           }`}
                       >
                         <Video className="w-5 h-5" />
-                        {chatAvailability?.is_available && (
-                          <div className="absolute top-1 right-1 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-gray-900 animate-pulse"></div>
+                        {chatAvailability?.is_available && chatAvailability?.can_video && (
+                          <span className="absolute top-0.5 right-0.5 flex h-3 w-3">
+                            <span className="absolute inline-flex h-full w-full rounded-full bg-pink-400/70 blur-[1px] animate-ping"></span>
+                            <span className="relative inline-flex h-3 w-3 rounded-full border-2 border-gray-900 bg-gradient-to-br from-pink-300 via-fuchsia-400 to-pink-500 shadow-[0_0_10px_rgba(244,114,182,0.8)]"></span>
+                          </span>
                         )}
                       </motion.button>
                       <motion.button whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }} onClick={() => { setSelectedChat(null); setShowMessages(false); }}>

@@ -51,10 +51,11 @@ export const createCheckoutSession = (planId: number, subscribedToId: number) =>
     }
 };
 
-export const startCall = (subscribedToId: number) => async () => {
+export const startCall = (subscribedToId: number, callType: 'voice' | 'video' = 'voice') => async () => {
     try {
         const response = await apiClient.post(`/api/subscriptions/start-call/`, {
-            subscribed_to_id: subscribedToId
+            subscribed_to_id: subscribedToId,
+            call_type: callType,
         });
         if (response.status === 200) {
             return response.data;

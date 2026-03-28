@@ -48,23 +48,23 @@ const AdsDashboard: React.FC<AdsDashboardProps> = ({ campaigns, stats, onRefresh
     return (
         <div className="space-y-8">
             {/* Stats Summary */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
                 {[
                     { label: "Alcance Total", value: stats?.total_reach?.toLocaleString() || "0", icon: Users, color: "text-blue-400" },
                     { label: "Interacciones", value: stats?.total_interactions?.toLocaleString() || "0", icon: TrendingUp, color: "text-emerald-400" },
                     { label: "Gasto Total", value: `$${stats?.total_spent?.toFixed(4) || "0.00"}`, icon: DollarSign, color: "text-amber-400" },
                     { label: "Campañas Activas", value: stats?.active_campaigns?.toString() || campaigns.length.toString(), icon: Rocket, color: "text-rose-400" },
                 ].map((stat, i) => (
-                    <div key={i} className="bg-white/5 border border-white/5 p-5 rounded-2xl group hover:bg-white/[0.07] transition-all">
-                        <div className="flex items-center justify-between mb-3">
-                            <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">
+                    <div key={i} className="bg-white/5 border border-white/5 p-4 md:p-5 rounded-2xl group hover:bg-white/[0.07] transition-all">
+                        <div className="flex items-center justify-between mb-2 md:mb-3">
+                            <span className="text-[9px] md:text-[10px] font-black text-gray-500 uppercase tracking-widest">
                                 {stat.label}
                             </span>
-                            <div className={`p-2 rounded-lg bg-white/5 ${stat.color}`}>
-                                <stat.icon className="w-4 h-4" />
+                            <div className={`p-1.5 md:p-2 rounded-lg bg-white/5 ${stat.color}`}>
+                                <stat.icon className="w-3.5 h-3.5 md:w-4 md:h-4" />
                             </div>
                         </div>
-                        <div className="text-xl font-black text-white tracking-tight">
+                        <div className="text-lg md:text-xl font-black text-white tracking-tight">
                             {stat.value}
                         </div>
                     </div>
@@ -81,6 +81,36 @@ const AdsDashboard: React.FC<AdsDashboardProps> = ({ campaigns, stats, onRefresh
                         Ver todas
                     </button>
                 </div>
+
+                {/* Global Progress for Active Campaigns */}
+                {campaigns.filter(c => c.status === "ACTIVE").length > 0 && (
+                    <div className="px-6 py-6 border-b border-white/5 bg-white/[0.01]">
+                        <div className="max-w-md space-y-3">
+                            <div className="flex items-center justify-between">
+                                <h4 className="text-[10px] font-black text-cyan-400 uppercase tracking-[0.2em]">
+                                    Rendimiento Global Activo
+                                </h4>
+                                <span className="text-[10px] font-bold text-gray-500 uppercase">
+                                    {Math.round((campaigns.filter(c => c.status === "ACTIVE").reduce((acc, c) => acc + (c.total_reach || 0), 0) /
+                                        campaigns.filter(c => c.status === "ACTIVE").reduce((acc, c) => acc + (c.audience?.estimated_reach || 1000), 0)) * 100)}% Completado
+                                </span>
+                            </div>
+                            <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden border border-white/5">
+                                <div
+                                    className="h-full bg-gradient-to-r from-cyan-500 via-blue-500 to-indigo-600 rounded-full transition-all duration-1000 ease-out shadow-[0_0_15px_rgba(6,182,212,0.4)]"
+                                    style={{
+                                        width: `${Math.min(100, (campaigns.filter(c => c.status === "ACTIVE").reduce((acc, c) => acc + (c.total_reach || 0), 0) /
+                                            campaigns.filter(c => c.status === "ACTIVE").reduce((acc, c) => acc + (c.audience?.estimated_reach || 1000), 0)) * 100)}%`
+                                    }}
+                                />
+                            </div>
+                            <div className="flex justify-between text-[9px] font-bold text-gray-500 uppercase tracking-widest px-1">
+                                <span>{campaigns.filter(c => c.status === "ACTIVE").reduce((acc, c) => acc + (c.total_reach || 0), 0).toLocaleString()} Alcanzados</span>
+                                <span>Meta: {campaigns.filter(c => c.status === "ACTIVE").reduce((acc, c) => acc + (c.audience?.estimated_reach || 1000), 0).toLocaleString()}</span>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 <div className="overflow-x-auto">
                     <table className="w-full text-left">
@@ -106,12 +136,12 @@ const AdsDashboard: React.FC<AdsDashboardProps> = ({ campaigns, stats, onRefresh
                                         <td className="px-6 py-2.5 whitespace-nowrap">
                                             <span
                                                 className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${campaign.status === "ACTIVE"
-                                                        ? "bg-emerald-500/20 text-emerald-400"
-                                                        : campaign.status === "PAUSED"
-                                                            ? "bg-amber-500/20 text-amber-400"
-                                                            : campaign.status === "DRAFT"
-                                                                ? "bg-cyan-500/20 text-cyan-400"
-                                                                : "bg-white/10 text-gray-400"
+                                                    ? "bg-emerald-500/20 text-emerald-400"
+                                                    : campaign.status === "PAUSED"
+                                                        ? "bg-amber-500/20 text-amber-400"
+                                                        : campaign.status === "DRAFT"
+                                                            ? "bg-cyan-500/20 text-cyan-400"
+                                                            : "bg-white/10 text-gray-400"
                                                     }`}
                                             >
                                                 {campaign.status}
@@ -122,7 +152,7 @@ const AdsDashboard: React.FC<AdsDashboardProps> = ({ campaigns, stats, onRefresh
                                             ${campaign.budget?.total_budget || "0.00"}
                                         </td>
 
-                                        <td className="px-6 py-2.5 text-xs text-gray-300 whitespace-nowrap">
+                                        <td className="px-6 py-2.5 text-xs text-gray-300 whitespace-nowrap uppercase font-bold">
                                             {campaign.objective}
                                         </td>
 

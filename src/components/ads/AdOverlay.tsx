@@ -18,9 +18,34 @@ const AdOverlay: React.FC<AdOverlayProps> = ({ ad, onClose, isMuted, toggleMute,
     const [isSkippable, setIsSkippable] = useState(false);
     const videoRef = useRef<HTMLVideoElement>(null);
     const timerRef = useRef<NodeJS.Timeout | null>(null);
+    const creative = ad?.creative;
+    const mediaFile = creative?.media_file;
+    const destinationUrl = creative?.destination_url;
+    const title = creative?.title || "Publicidad";
+    const hasValidAd = Boolean(ad?.id && mediaFile);
 
-    // Unified effect for play/unmute
+    const isImage = typeof mediaFile === "string" && /\.(jpeg|jpg|gif|png|webp|svg|avif)$/i.test(mediaFile);
+    const mediaSrc = typeof mediaFile === "string"
+        ? (mediaFile.startsWith("http") ? mediaFile : `${getBaseUrl()}media/${mediaFile}`)
+        : "";
+
     useEffect(() => {
+        if (!hasValidAd) {
+            onClose(false);
+        }
+    }, [hasValidAd, onClose]);
+
+    // Unified effect for play/unmute/image timer
+    useEffect(() => {
+        if (!hasValidAd) {
+            return;
+        }
+
+        if (isImage) {
+            setDuration(5);
+            return;
+        }
+
         // 1. Handle Unmute (User wants it unmuted on start)
         if (isMuted && isVisible) {
             toggleMute();
@@ -33,15 +58,13 @@ const AdOverlay: React.FC<AdOverlayProps> = ({ ad, onClose, isMuted, toggleMute,
                     await videoRef.current.play();
                 } catch (error) {
                     console.log("Autoplay blocked or interrupted:", error);
-                    // Often browsers need a user interaction or to start muted then unmute
                 }
             }
         };
 
-        // Small delay to ensure React has fully committed the DOM
         const timeoutId = setTimeout(playVideo, 100);
         return () => clearTimeout(timeoutId);
-    }, [ad.id, isVisible]);
+    }, [ad?.id, hasValidAd, isVisible, isImage, isMuted, toggleMute]);
 
     const skipTime = Math.floor(duration / 6) || 5; // Default to 5s if duration is unknown yet
 
@@ -52,8 +75,21 @@ const AdOverlay: React.FC<AdOverlayProps> = ({ ad, onClose, isMuted, toggleMute,
     }, [currentTime, skipTime]);
 
     useEffect(() => {
+        if (!hasValidAd) {
+            return;
+        }
+
         timerRef.current = setInterval(() => {
-            if (videoRef.current && !videoRef.current.paused) {
+            if (isImage) {
+                setCurrentTime(prev => {
+                    if (prev >= 5) {
+                        if (timerRef.current) clearInterval(timerRef.current);
+                        onClose(true, 5);
+                        return prev;
+                    }
+                    return prev + 1;
+                });
+            } else if (videoRef.current && !videoRef.current.paused) {
                 setCurrentTime(prev => prev + 1);
             }
         }, 1000);
@@ -64,9 +100,13 @@ const AdOverlay: React.FC<AdOverlayProps> = ({ ad, onClose, isMuted, toggleMute,
         return () => {
             if (timerRef.current) clearInterval(timerRef.current);
         };
-    }, []);
+    }, [hasValidAd, isImage, onClose]);
 
     const trackImpression = async () => {
+        if (!ad?.id) {
+            return;
+        }
+
         try {
             const token = localStorage.getItem("accessToken");
             await axios.post(`${getBaseUrl()}api/ads/campaigns/${ad.id}/track_impression/`, {}, {
@@ -84,6 +124,10 @@ const AdOverlay: React.FC<AdOverlayProps> = ({ ad, onClose, isMuted, toggleMute,
     const handleVideoEnded = () => {
         onClose(true, duration);
     };
+
+    if (!hasValidAd) {
+        return null;
+    }
 
     return (
         <motion.div
@@ -104,20 +148,25 @@ const AdOverlay: React.FC<AdOverlayProps> = ({ ad, onClose, isMuted, toggleMute,
                 />
             </div>
 
-            {/* Ad Video */}
-            <video
-                ref={videoRef}
-                src={ad.creative.media_file.startsWith('http')
-                    ? ad.creative.media_file
-                    : `${getBaseUrl()}media/${ad.creative.media_file}`
-                }
-                autoPlay
-                muted={isMuted || !isVisible}
-                onLoadedMetadata={handleVideoMetadata}
-                onEnded={handleVideoEnded}
-                className="w-full h-full object-cover"
-                onClick={toggleMute}
-            />
+            {/* Ad Media */}
+            {isImage ? (
+                <img
+                    src={mediaSrc}
+                    className="w-full h-full object-cover"
+                    alt={title}
+                />
+            ) : (
+                <video
+                    ref={videoRef}
+                    src={mediaSrc}
+                    autoPlay
+                    muted={isMuted || !isVisible}
+                    onLoadedMetadata={handleVideoMetadata}
+                    onEnded={handleVideoEnded}
+                    className="w-full h-full object-cover"
+                    onClick={toggleMute}
+                />
+            )}
 
             {/* Header Area (Floating & Transparent) */}
             <div className="absolute top-8 left-8 right-8 flex items-center justify-between z-10 pointer-events-none">
@@ -126,7 +175,7 @@ const AdOverlay: React.FC<AdOverlayProps> = ({ ad, onClose, isMuted, toggleMute,
                         Ad
                     </div>
                     <p className="text-[11px] font-bold text-white drop-shadow-lg truncate max-w-[150px]">
-                        {ad.creative.title}
+                        {title}
                     </p>
                 </div>
 
@@ -152,8 +201,11 @@ const AdOverlay: React.FC<AdOverlayProps> = ({ ad, onClose, isMuted, toggleMute,
                     whileTap={{ scale: 0.95 }}
                     onClick={(e) => {
                         e.stopPropagation();
-                        window.open(ad.creative.destination_url, '_blank');
+                        if (destinationUrl) {
+                            window.open(destinationUrl, '_blank');
+                        }
                     }}
+                    disabled={!destinationUrl}
                     className="pointer-events-auto px-6 py-3 bg-white text-black rounded-full text-[11px] font-black uppercase tracking-wider shadow-2xl flex items-center gap-2 group transition-transform"
                 >
                     Visitar sitio
