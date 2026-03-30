@@ -21,11 +21,7 @@ export const getMedia = () => async (dispatch: any) => {
 
 export const getRecommendedFeed = (userInterests: any, lastCursor: string | null) => async (dispatch: any) => {
   try {
-    const response = await apiClient.post('/api/v1/feed/next/', {
-      user_interests: userInterests,
-      last_cursor: lastCursor,
-      limit: 10
-    });
+    const response = await apiClient.get('/api/recommendations/feed/');
     if (response.status === 200) {
       dispatch({
         type: APPEND_MEDIA,

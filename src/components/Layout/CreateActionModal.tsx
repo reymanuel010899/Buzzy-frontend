@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { X, Upload, Sparkles, Video, Image as ImageIcon, AlertCircle, Loader2, CheckCircle2, SlidersHorizontal, ChevronDown, HelpCircle, ImagePlus, Paintbrush, Cuboid, Tv2 } from "lucide-react"
+import { X, Upload, Sparkles, Video, Image as ImageIcon, AlertCircle, Loader2, CheckCircle2, SlidersHorizontal, ChevronDown, HelpCircle, ImagePlus, Paintbrush, Cuboid, Tv2, Music, Mic, AudioLines, Type, Wand2, Instagram, Facebook, Play, Pause, Volume2, VolumeX, Smartphone } from "lucide-react"
 import { getBaseUrl } from "../../redux/client/api-client"
+import { useDispatch } from "react-redux"
+import { startUpload } from "../../redux/reducers/uploadProgressReducer"
 
 interface CreateActionModalProps {
     isOpen: boolean
@@ -44,6 +46,7 @@ const getIcon = (name: string) => {
 }
 
 const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose, subscriptionStatus }) => {
+    const dispatch = useDispatch()
     const [selectedOption, setSelectedOption] = useState<'upload' | 'ai' | null>(null)
     const [aiType, setAiType] = useState<'video' | 'image' | 'history'>('image')
     const [history, setHistory] = useState<any[]>([])
@@ -57,6 +60,65 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose, 
     const [referenceImage, setReferenceImage] = useState<File | null>(null)
     const [loading, setLoading] = useState(false)
     const [result, setResult] = useState<{ url?: string; error?: string; credits?: number } | null>(null)
+
+    // PRO CREATION STATION STATES
+    const [uploadFile, setUploadFile] = useState<File | null>(null)
+    const [uploadPreview, setUploadPreview] = useState<string>('')
+    const [uploadDescription, setUploadDescription] = useState('#BuzzyCreator #ProStudio\n')
+    const [syncInstagram, setSyncInstagram] = useState(true)
+    const [syncTikTok1, setSyncTikTok1] = useState(false)
+    const [syncTikTok2, setSyncTikTok2] = useState(false)
+    const [uploadStatus, setUploadStatus] = useState<'idle' | 'pending' | 'processing' | 'ready' | 'blocked' | 'error'>('idle')
+    const [uploadJobId, setUploadJobId] = useState<number | null>(null)
+    const [safetyLabel, setSafetyLabel] = useState('')
+
+    // Cleanup preview URL on unmount or file change
+    useEffect(() => {
+        if (uploadFile) {
+            const objectUrl = URL.createObjectURL(uploadFile)
+            setUploadPreview(objectUrl)
+            return () => URL.revokeObjectURL(objectUrl)
+        }
+    }, [uploadFile])
+
+    const handleVideoSubmit = async () => {
+        if (!uploadFile) return
+        setUploadStatus('pending')
+
+        try {
+            const formData = new FormData()
+            formData.append('video', uploadFile)
+            formData.append('description', uploadDescription)
+
+            const token = localStorage.getItem("accessToken") || ""
+            const response = await fetch(`${getBaseUrl()}api/videos/create/`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` },
+                body: formData
+            })
+
+            if (response.ok) {
+                const data = await response.json()
+                // Start global progress bar and close modal immediately
+                dispatch(startUpload(data.video_id))
+                handleCloseCreation()
+                onClose()
+            } else {
+                setUploadStatus('error')
+            }
+        } catch (error) {
+            setUploadStatus('error')
+        }
+    }
+
+    const handleCloseCreation = () => {
+        setUploadFile(null)
+        setUploadPreview('')
+        setUploadStatus('idle')
+        setUploadJobId(null)
+        setSelectedOption(null)
+    }
+
 
     const canUseAI = subscriptionStatus?.is_active && (subscriptionStatus?.ai_limit > subscriptionStatus?.ai_used)
 
@@ -627,25 +689,246 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose, 
                                 )}
                             </div>
                         ) : (
-                            <div className="space-y-6 text-center py-12 px-2">
-                                <button
-                                    onClick={() => setSelectedOption(null)}
-                                    className="text-gray-400 text-sm font-bold block mx-auto mb-8 hover:text-white transition-colors"
-                                >
-                                    ← Volver al inicio
-                                </button>
-                                <div className="h-24 w-24 mx-auto rounded-[32px] bg-cyan-500/10 flex items-center justify-center text-cyan-400 mb-6 border border-cyan-500/20 shadow-[0_0_30px_rgba(6,182,212,0.15)]">
-                                    <Upload size={48} />
-                                </div>
-                                <h3 className="text-2xl font-black text-white mb-2">Subir Nuevo Video</h3>
-                                <p className="text-gray-400 max-w-xs mx-auto mb-10 leading-relaxed text-[15px]">Selecciona un archivo de tu dispositivo para compartirlo con la comunidad de Buzzy.</p>
-                                <input type="file" id="video-upload" className="hidden" accept="video/*" />
-                                <label
-                                    htmlFor="video-upload"
-                                    className="block w-full py-4 bg-white text-black rounded-[20px] font-black text-lg cursor-pointer shadow-[0_0_20px_rgba(255,255,255,0.2)] hover:scale-[1.02] active:scale-95 transition-all text-center"
-                                >
-                                    Seleccionar Archivo
-                                </label>
+                            <div className="space-y-4 text-center py-2 px-1">
+                                {!uploadFile ? (
+                                    <div className="py-12">
+                                        <button
+                                            onClick={() => setSelectedOption(null)}
+                                            className="text-gray-400 text-sm font-bold block mx-auto mb-8 hover:text-white transition-colors"
+                                        >
+                                            ← Volver al inicio
+                                        </button>
+                                        <div className="h-24 w-24 mx-auto rounded-[32px] bg-cyan-500/10 flex items-center justify-center text-cyan-400 mb-6 border border-cyan-500/20 shadow-[0_0_30px_rgba(6,182,212,0.15)]">
+                                            <Upload size={48} />
+                                        </div>
+                                        <h3 className="text-2xl font-black text-white mb-2">Subir Nuevo Video</h3>
+                                        <p className="text-gray-400 max-w-xs mx-auto mb-10 leading-relaxed text-[15px]">Selecciona un archivo de tu dispositivo para compartirlo con la comunidad de Buzzy.</p>
+                                        <input
+                                            type="file"
+                                            id="video-upload"
+                                            className="hidden"
+                                            accept="video/*"
+                                            onChange={(e) => {
+                                                if (e.target.files && e.target.files[0]) {
+                                                    setUploadFile(e.target.files[0])
+                                                }
+                                            }}
+                                        />
+                                        <label
+                                            htmlFor="video-upload"
+                                            className="block w-full py-4 bg-white text-black rounded-[20px] font-black text-lg cursor-pointer shadow-[0_0_20px_rgba(255,255,255,0.2)] hover:scale-[1.02] active:scale-95 transition-all text-center"
+                                        >
+                                            Seleccionar Archivo
+                                        </label>
+                                    </div>
+                                ) : (
+                                    <div className="relative text-left flex flex-col pt-2 max-w-lg mx-auto">
+                                        {/* HEADER */}
+                                        <div className="flex items-center justify-between mb-5 px-4">
+                                            <h2 className="text-xl font-bold text-white/90 tracking-tight">Estación Pro de Creación</h2>
+                                            <button
+                                                onClick={() => {
+                                                    if (uploadStatus !== 'processing' && uploadStatus !== 'pending') {
+                                                        setUploadFile(null)
+                                                    }
+                                                }}
+                                                className="p-2 rounded-full bg-white/10 text-gray-400 hover:text-white transition-colors disabled:opacity-50 backdrop-blur-md border border-white/10"
+                                                disabled={uploadStatus === 'processing' || uploadStatus === 'pending'}
+                                            >
+                                                <X size={20} />
+                                            </button>
+                                        </div>
+
+                                        <div className="flex flex-col gap-5 h-full relative px-1 pb-10">
+                                            {/* PREVIEW SECTION WITH FLOATING BAR */}
+                                            <div className="relative group">
+                                                <div className="relative w-full aspect-[16/9] bg-black/40 rounded-[32px] overflow-hidden shadow-2xl border border-white/10 backdrop-blur-sm">
+                                                    <video
+                                                        src={uploadPreview}
+                                                        className="w-full h-full object-cover"
+                                                        autoPlay
+                                                        loop
+                                                        muted
+                                                    />
+
+                                                    {/* PLAYBACK OVERLAY */}
+                                                    <div className="absolute inset-0 bg-black/20 flex flex-col justify-center items-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                                        <div className="flex items-center gap-8">
+                                                            <button className="text-white/60 hover:text-white transition-colors"><ChevronDown className="rotate-90" size={28} /></button>
+                                                            <button className="h-16 w-16 bg-white/20 backdrop-blur-xl rounded-full flex items-center justify-center border border-white/20 hover:scale-110 transition-transform">
+                                                                <Play size={32} className="text-white fill-white ml-1" />
+                                                            </button>
+                                                            <button className="text-white/60 hover:text-white transition-colors"><ChevronDown className="-rotate-90" size={28} /></button>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* BOTTOM CONTROLS */}
+                                                    <div className="absolute bottom-0 left-0 right-0 p-5 bg-gradient-to-t from-black/60 to-transparent">
+                                                        <div className="flex items-center gap-4">
+                                                            <div className="flex-1 h-1.5 bg-white/20 rounded-full overflow-hidden backdrop-blur-md">
+                                                                <div className="h-full bg-cyan-400 w-1/3 rounded-full shadow-[0_0_15px_rgba(34,211,238,0.8)]" />
+                                                            </div>
+                                                            <VolumeX size={20} className="text-white/80" />
+                                                        </div>
+                                                    </div>
+
+                                                    {/* UPLOAD STATUS OVERLAY */}
+                                                    <AnimatePresence>
+                                                        {(uploadStatus === 'pending' || uploadStatus === 'processing' || uploadStatus === 'blocked' || uploadStatus === 'error') && (
+                                                            <motion.div
+                                                                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                                                                className="absolute inset-0 bg-black/80 backdrop-blur-md z-50 flex flex-col items-center justify-center p-6 text-center"
+                                                            >
+                                                                {uploadStatus === 'processing' || uploadStatus === 'pending' ? (
+                                                                    <>
+                                                                        <div className="w-16 h-16 relative mb-4">
+                                                                            <div className="absolute inset-0 border-4 border-[#00f0ff]/20 rounded-full"></div>
+                                                                            <div className="absolute inset-0 border-4 border-[#00f0ff] border-t-transparent rounded-full animate-spin"></div>
+                                                                            <Sparkles className="absolute inset-0 m-auto text-[#00f0ff] animate-pulse" size={24} />
+                                                                        </div>
+                                                                        <h3 className="text-white font-black text-lg mb-2">Procesando con Buzzy IA</h3>
+                                                                        <p className="text-xs text-gray-400 max-w-[200px]">Optimizando visualización y moderando contenido...</p>
+                                                                    </>
+                                                                ) : uploadStatus === 'blocked' ? (
+                                                                    <>
+                                                                        <AlertCircle className="text-red-500 mb-4" size={48} />
+                                                                        <h3 className="text-red-500 font-black text-lg mb-2">Contenido Bloqueado</h3>
+                                                                        <p className="text-sm text-red-200">{safetyLabel}</p>
+                                                                        <button onClick={handleCloseCreation} className="mt-6 bg-white/10 px-6 py-2 rounded-full font-bold text-xs border border-white/10 transition-colors">Entendido</button>
+                                                                    </>
+                                                                ) : (
+                                                                    <>
+                                                                        <AlertCircle className="text-amber-500 mb-4" size={48} />
+                                                                        <h3 className="text-amber-500 font-black text-lg mb-2">Error de Conexión</h3>
+                                                                        <button onClick={() => setUploadStatus('idle')} className="mt-6 bg-white/10 px-6 py-2 rounded-full font-bold text-xs border border-white/10 transition-colors">Reintentar</button>
+                                                                    </>
+                                                                )}
+                                                            </motion.div>
+                                                        )}
+                                                    </AnimatePresence>
+                                                </div>
+
+                                                {/* FLOATING VERTICAL BAR (EXTERNAL LOOK) */}
+                                                <div className="absolute -right-4 top-1/2 -translate-y-1/2 flex flex-col gap-2 z-[60]">
+                                                    <div className="bg-white/10 backdrop-blur-2xl border border-white/10 rounded-[30px] p-2 flex flex-col gap-5 items-center shadow-2xl">
+                                                        <button className="p-2 rounded-full text-white/80 hover:bg-white/10 transition-all hover:scale-110"><Music size={22} /></button>
+                                                        <button className="p-2 rounded-full text-white/80 hover:bg-white/10 transition-all hover:scale-110"><AudioLines size={22} /></button>
+                                                        <button className="p-2 rounded-full text-white/60 hover:bg-white/10 transition-all hover:scale-110"><Mic size={22} /></button>
+                                                        <button className="p-2 rounded-full text-white/60 hover:bg-white/10 transition-all hover:scale-110"><Type size={22} /></button>
+                                                        <button className="p-2 rounded-full text-cyan-400 hover:bg-cyan-500/20 transition-all hover:scale-110"><Wand2 size={22} /></button>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* HERRAMIENTAS CREATIVAS */}
+                                            <div className="space-y-3">
+                                                <h3 className="text-[13px] font-bold text-gray-400 uppercase tracking-wider px-2">Herramientas Creativas</h3>
+                                                <div className="grid grid-cols-3 gap-3">
+                                                    <button className="flex flex-col items-center justify-center p-4 rounded-[24px] bg-white/5 border border-white/10 hover:bg-white/10 transition-colors gap-2">
+                                                        <div className="bg-black/40 p-2 rounded-full border border-white/5"><Music className="text-white" size={20} /></div>
+                                                        <span className="text-[10px] font-bold text-gray-300">Música de Fondo</span>
+                                                    </button>
+                                                    <button className="flex flex-col items-center justify-center p-4 rounded-[24px] bg-white/5 border border-white/10 hover:bg-white/10 transition-colors gap-2">
+                                                        <div className="bg-black/40 p-2 rounded-full border border-white/5"><AudioLines className="text-white" size={20} /></div>
+                                                        <span className="text-[10px] font-bold text-gray-300">Efectos de Audio</span>
+                                                    </button>
+                                                    <button className="flex flex-col items-center justify-center p-4 rounded-[24px] bg-white/5 border border-white/10 hover:bg-white/10 transition-colors gap-2">
+                                                        <div className="bg-black/40 p-2 rounded-full border border-white/5"><Mic className="text-white" size={20} /></div>
+                                                        <span className="text-[10px] font-bold text-gray-300">Voz en Off</span>
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            {/* DESCRIPTION BOX */}
+                                            <div className="bg-white/5 rounded-[28px] p-5 border border-white/10 backdrop-blur-md">
+                                                <div className="flex items-center justify-between mb-3 text-gray-400">
+                                                    <span className="text-[12px] font-bold uppercase tracking-wider">Descripción rápida...</span>
+                                                    <div className="flex gap-2">
+                                                        <span className="bg-white/5 px-3 py-1 rounded-lg text-[10px] font-bold border border-white/5 text-gray-400 hover:text-white cursor-pointer">#</span>
+                                                        <span className="bg-white/10 px-3 py-1 rounded-lg text-[10px] font-bold border border-white/5 text-gray-400 hover:text-white cursor-pointer select-none opacity-40">#fww</span>
+                                                    </div>
+                                                </div>
+                                                <textarea
+                                                    value={uploadDescription}
+                                                    onChange={(e) => setUploadDescription(e.target.value)}
+                                                    className="w-full bg-transparent text-[14px] text-white/90 placeholder:text-gray-600 focus:outline-none resize-none font-medium leading-relaxed"
+                                                    rows={3}
+                                                    placeholder="Escribe algo increíble..."
+                                                />
+                                            </div>
+
+                                            {/* SYNC SECTION */}
+                                            <div className="space-y-4">
+                                                <h3 className="text-[13px] font-bold text-gray-400 uppercase tracking-wider px-2">Sincronizar Publicación (Near-Online):</h3>
+
+                                                <div className="space-y-2.5">
+                                                    {/* INSTAGRAM */}
+                                                    <div className="bg-cyan-400/10 border border-cyan-400/20 rounded-full px-5 py-3 flex items-center justify-between shadow-[0_0_20px_rgba(34,211,238,0.05)]">
+                                                        <div className="flex items-center gap-4">
+                                                            <div className="w-9 h-9 bg-white/10 rounded-xl flex items-center justify-center border border-white/10"><Instagram className="text-white" size={20} /></div>
+                                                            <div className="flex flex-col">
+                                                                <span className="text-[13px] font-bold text-white">Sincronizar Instagram</span>
+                                                                <span className="text-[11px] text-cyan-400/70 font-medium">(@rey_test)</span>
+                                                            </div>
+                                                        </div>
+                                                        <div className={`flex items-center gap-3 px-3 py-1.5 rounded-full ${syncInstagram ? 'bg-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.5)]' : 'bg-white/10'}`}>
+                                                            <span className={`text-[10px] font-black ${syncInstagram ? 'text-black' : 'text-gray-500'}`}>{syncInstagram ? 'ON' : 'OFF'}</span>
+                                                            <button onClick={() => setSyncInstagram(!syncInstagram)} className={`w-8 h-4 rounded-full relative transition-colors ${syncInstagram ? 'bg-black/20' : 'bg-white/20'}`}>
+                                                                <motion.div animate={{ x: syncInstagram ? 16 : 0 }} className="absolute left-1 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full" />
+                                                            </button>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* TIKTOK */}
+                                                    <div className="bg-white/5 border border-white/10 rounded-full px-5 py-3 flex items-center justify-between">
+                                                        <div className="flex items-center gap-4">
+                                                            <div className="w-9 h-9 bg-white/10 rounded-xl flex items-center justify-center border border-white/10"><Smartphone className="text-white" size={20} /></div>
+                                                            <div className="flex flex-col">
+                                                                <span className="text-[13px] font-bold text-white">Sincronizar TikTok</span>
+                                                                <span className="text-[11px] text-gray-500 font-medium">(@rey_tiktok)</span>
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex items-center gap-3 px-3 py-1.5 rounded-full bg-white/10">
+                                                            <span className="text-[10px] font-black text-gray-500">OFF</span>
+                                                            <button onClick={() => setSyncTikTok1(!syncTikTok1)} className="w-8 h-4 rounded-full bg-white/20 relative">
+                                                                <div className="absolute left-1 top-1/2 -translate-y-1/2 w-3 h-3 bg-white/60 rounded-full" />
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* FOOTER BUTTONS */}
+                                            <div className="flex items-center justify-between px-2 pt-2">
+                                                <button className="px-8 py-2.5 rounded-full bg-white/10 border border-white/10 text-white font-bold text-xs hover:bg-white/20 transition-colors">Conectar</button>
+                                                <button className="flex items-center gap-2 px-6 py-2.5 rounded-full text-gray-400 font-bold text-xs hover:text-white transition-colors uppercase tracking-widest">
+                                                    Conectar Facebook <Facebook size={18} className="text-gray-500" />
+                                                </button>
+                                            </div>
+
+                                            {/* PUBLISH ACTION */}
+                                            <div className="pt-6">
+                                                <button
+                                                    onClick={handleVideoSubmit}
+                                                    disabled={uploadStatus === 'pending' || uploadStatus === 'processing'}
+                                                    className="w-full py-5 rounded-[24px] bg-gradient-to-r from-cyan-400 via-cyan-500 to-blue-600 text-black font-black text-[18px] tracking-tight shadow-[0_20px_40px_rgba(34,211,238,0.3)] hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3 disabled:opacity-50 group"
+                                                >
+                                                    {uploadStatus === 'pending' || uploadStatus === 'processing' ? (
+                                                        <>
+                                                            <Loader2 size={24} className="animate-spin" />
+                                                            <span>PUBLICANDO...</span>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <span>PUBLICAR ESTRENO</span>
+                                                            <Sparkles size={22} className="group-hover:animate-bounce" />
+                                                        </>
+                                                    )}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         )}
                     </motion.div>

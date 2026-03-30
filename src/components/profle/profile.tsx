@@ -67,6 +67,7 @@ import { getActiveGift } from "../../redux/actions/gift/listGiftActive"
 import { sendVideoGift } from "../../redux/actions/gift/sendVideoGift"
 import { getWallet } from "../../redux/actions/getWallet"
 import type { GiftI } from "../../interfaces/gift"
+import { useCallStore } from "../../store/callStore"
 
 const WS_URL = "ws://localhost:8001/ws"
 
@@ -294,6 +295,18 @@ function ProfileSeccion({
   } | null>(null);
   const [callAlert, setCallAlert] = useState<string | null>(null);
   const callAlertTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { setActiveOutgoingCall, setAgoraData, activeIncomingCall, activeOutgoingCall } = useCallStore();
+  const isCallActive = activeIncomingCall?.status === 'active' || activeOutgoingCall?.status === 'active';
+
+  // Duck video audio if a call is active
+  useEffect(() => {
+    videoRefs.current.forEach(video => {
+      if (video) {
+        video.volume = isCallActive ? 0.05 : 1.0;
+      }
+    });
+  }, [isCallActive, activeModalIndex, isGridVideoPlaying]);
+
 
   const weekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -680,8 +693,16 @@ function ProfileSeccion({
   const handleStartCall = (callType: 'voice' | 'video' = 'voice') => {
     if (user?.id) {
       startCall(user.id, callType).then((res: any) => {
+        setActiveOutgoingCall(res?.call || null);
+        // Guardar datos de Agora en el store global para que GlobalCallWrapper los use
+        if (res.token && res.app_id && res.call?.agora_uid_caller) {
+          setAgoraData({
+            appId: res.app_id,
+            token: res.token,
+            uid: res.call.agora_uid_caller
+          });
+        }
         showCallAlert(res.message);
-        // Here you would navigate to the call room if implemented
       }).catch((err: string) => {
         showCallAlert(typeof err === 'string' ? err : 'No se pudo iniciar la llamada.');
       });
@@ -1945,15 +1966,14 @@ function ProfileSeccion({
                       <div className="relative mb-1">
                         <div className="w-12 h-12 rounded-full border-2 border-white overflow-hidden">
                           <img
-                            src={`${getBaseUrl()}${
-                              (() => {
-                                const pic = video.user_id?.profile_picture || user?.profile_picture;
-                                if (pic && !pic.startsWith('media/')) {
-                                  return `media/${pic}`;
-                                }
-                                return pic;
-                              })()
-                            }`}
+                            src={`${getBaseUrl()}${(() => {
+                              const pic = video.user_id?.profile_picture || user?.profile_picture;
+                              if (pic && !pic.startsWith('media/')) {
+                                return `media/${pic}`;
+                              }
+                              return pic;
+                            })()
+                              }`}
                             className="w-full h-full object-cover"
                             alt="user"
                           />

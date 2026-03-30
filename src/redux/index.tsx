@@ -34,6 +34,7 @@ import socialAccountsReducer from "./reducers/socialAccountsReducer";
 import bankReducer from "./reducers/bankReducer";
 import updateProfileReducer from "./reducers/updateProfileReducer";
 import socialConnections from "./reducers/socialConnectionsReducer";
+import uploadProgressReducer from "./reducers/uploadProgressReducer";
 
 export default combineReducers({
     register,
@@ -71,4 +72,5 @@ export default combineReducers({
     bankReducer,
     updateProfileReducer,
     socialConnections,
+    uploadProgress: uploadProgressReducer,
 })

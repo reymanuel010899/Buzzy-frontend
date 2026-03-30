@@ -7,7 +7,7 @@ import rootReducer from "./redux/index"; // Tu raíz de reducers
 const persistConfig = {
   key: "root",
   storage,
-  whitelist: ["LoginReducer", "getMedia"],
+  whitelist: ["LoginReducer", "getMedia", "uploadProgress"],
 };
 
 const persistedReducer = persistReducer(persistConfig, rootReducer);

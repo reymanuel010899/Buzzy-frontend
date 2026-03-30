@@ -28,12 +28,21 @@ import { getAvailabilityStatus } from "../../redux/actions/saveAvailability"
 import { sendMessage } from "../../redux/actions/message/sendMessage"
 import { useWebSocket } from "../../hooks/useWebSocket"
 import { allEmojis } from "../comments/emojis";
-import { startCall } from "../../redux/actions/subscriptionActions"
+import { startCall, endCall, acceptCall } from "../../redux/actions/subscriptionActions"
+import OutgoingCallScreen from "../calls/OutgoingCallScreen"
+import IncomingCallScreen from "../calls/IncomingCallScreen"
 import { useTypingUsers } from "../../context/useTyping";
 import { useUnreadMessages } from "../../context/UnreadAcount";
 import { getBaseUrl } from "../../redux/client/api-client";
+import { registerFCMToken } from "../../utils/fcm";
+import { onMessage } from "firebase/messaging";
+import { messaging } from "../../firebase";
+import { useAgora } from "../../hooks/useAgora";
+import { useCallStore } from "../../store/callStore";
+import { completeUpload } from "../../redux/reducers/uploadProgressReducer";
 
-const WS_URL = "ws://localhost:8001/ws/chat/";
+
+const WS_URL = "ws://localhost:8001/ws";
 const Navbar: React.FC = () => {
   const [search, setSearch] = useState("")
   const [chatSearchTerm, setChatSearchTerm] = useState("")
@@ -54,8 +63,19 @@ const Navbar: React.FC = () => {
     plan_name: string;
     upgrade_required: boolean;
   } | null>(null);
+
+  const { join: joinAgora, leave: leaveAgora } = useAgora();
+  const {
+    activeOutgoingCall,
+    activeIncomingCall,
+    setActiveOutgoingCall,
+    setAgoraData,
+  } = useCallStore();
   const [callAlert, setCallAlert] = useState<string | null>(null);
   const callAlertTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isCallMinimized, setIsCallMinimized] = useState(false);
+  const [activeCallTime, setActiveCallTime] = useState(0);
+  const activeCallTimerRef = useRef<NodeJS.Timeout | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const unreadCounts = useUnreadMessages((state) => state.unreadCounts);
   const [clickedMessage, setClickedMessage] = useState<string | null>(null)
@@ -308,11 +328,39 @@ const Navbar: React.FC = () => {
   const dispatch = useDispatch()
 
   const { chats: backendChats, loading } = useSelector((state: RootState) => state.listChatRoomsReducer)
+  const loginState = useSelector((state: RootState) => state.LoginReducer);
+  const user = loginState?.user || JSON.parse(localStorage.getItem("user") || "{}");
+
+  useEffect(() => {
+    if (user && user.username) {
+      registerFCMToken();
+
+      // Escuchar notificaciones en primer plano (Push)
+      const unsubscribe = onMessage(messaging, (payload) => {
+        console.log("FCM Foreground Message:", payload);
+        if (payload.data?.type === 'incoming_call' && !activeIncomingCall && !activeOutgoingCall) {
+          const callData = {
+            call_id: payload.data.call_id,
+            call_type: payload.data.call_type,
+            caller: {
+              username: payload.data.caller_username,
+              profile_picture: payload.data.caller_avatar
+            },
+            channel_name: payload.data.channel_name,
+            status: 'ringing'
+          };
+          setActiveIncomingCall(callData);
+          setIsCallMinimized(false);
+        }
+      });
+      return () => unsubscribe();
+    }
+  }, [user, activeIncomingCall, activeOutgoingCall]);
+
   const { messages: backendMessages, loading: messagesLoading } = useSelector(
     (state: RootState) => state.chatMessagesReducer
   )
 
-  const user = JSON.parse(localStorage.getItem("user") || "{}")
   const currentBackendChat = backendChats?.chats.find(c => c.uuid === selectedChat) || null
 
   useEffect(() => {
@@ -337,12 +385,23 @@ const Navbar: React.FC = () => {
 
     startCall(targetUserId, callType)()
       .then((res: any) => {
+        setActiveOutgoingCall(res?.call || null);
+        // Guardar datos de Agora en el store global para unirnos cuando acepten
+        if (res.token && res.app_id && res.call?.agora_uid_caller) {
+          setAgoraData({
+            appId: res.app_id,
+            token: res.token,
+            uid: res.call.agora_uid_caller
+          });
+        }
         showChatCallAlert(res.message);
       })
       .catch((err: string) => {
         showChatCallAlert(typeof err === "string" ? err : "No se pudo iniciar la llamada.");
       });
   };
+
+  // ────────────────────────────────────────────────────────────────
   const sendAudioRef = useRef<HTMLAudioElement | null>(null);
   const typingAudioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -361,17 +420,15 @@ const Navbar: React.FC = () => {
     typingAudioRef.current = new Audio(typingSound);
   }, []);
   // ────────────────────────────────────────────────────────────────
-  // WebSocket - conexión estable por chat
+  // WebSocket - conexión GLOBAL
   // ────────────────────────────────────────────────────────────────
   const wsUrl = useMemo(() => {
-    if (!selectedChat || !showMessages || messagesLoading || !backendMessages?.chat_uuid) {
-      return null
-    }
-    const token = localStorage.getItem("accessToken") || ""
-    return `${WS_URL}${backendMessages.chat_uuid}?token=${token}`
-  }, [selectedChat, showMessages, messagesLoading, backendMessages?.chat_uuid])
+    if (!user?.id) return null;
+    const token = localStorage.getItem("accessToken") || "";
+    return `${WS_URL}?user_id=${user.id}&token=${token}`;
+  }, [user?.id]);
 
-  const shouldConnect = !!wsUrl && !!selectedChat
+  const shouldConnect = !!wsUrl;
   useEffect(() => {
     chatSocketActiveRef.current = !!selectedChat;
   }, [selectedChat]);
@@ -459,6 +516,19 @@ const Navbar: React.FC = () => {
         // manejar online
         break;
       }
+
+      case "video_ready": {
+        dispatch(completeUpload('done'))
+        break;
+      }
+
+      case "video_blocked": {
+        dispatch(completeUpload('blocked', data.safety_label || 'Contenido bloqueado por moderación'))
+        break;
+      }
+
+      // incoming_call, call_accepted, call_rejected, call_ended
+      // are handled globally by GlobalCallWrapper
 
       default:
         break;
@@ -637,6 +707,7 @@ const Navbar: React.FC = () => {
 
   return (
     <>
+
       <AnimatePresence>
         {callAlert && (
           <motion.div
@@ -655,6 +726,16 @@ const Navbar: React.FC = () => {
         className={`fixed w-full top-0 z-50 px-4 sm:px-6 transition-all duration-300 ${scrollPosition > 20 ? "bg-black backdrop-blur-lg" : "bg-black/80 backdrop-blur-2xl"
           }`}
       >
+        <AnimatePresence>
+          {isCallMinimized && (activeOutgoingCall || (activeIncomingCall && activeIncomingCall.status === 'active')) && (
+            <motion.div
+              initial={{ scaleX: 0 }}
+              animate={{ scaleX: 1 }}
+              exit={{ scaleX: 0 }}
+              className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-green-400 via-cyan-500 to-purple-600 origin-left z-50"
+            />
+          )}
+        </AnimatePresence>
         <div className="flex justify-between items-center mx-auto py-5">
           <div className="flex items-center justify-center gap-5 sm:gap-6">
 
@@ -706,6 +787,20 @@ const Navbar: React.FC = () => {
             >
               <Megaphone className="w-10 h-7" />
             </motion.button>
+
+            {isCallMinimized && (activeOutgoingCall || (activeIncomingCall && activeIncomingCall.status === 'active')) && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                onClick={() => setIsCallMinimized(false)}
+                className="flex items-center gap-1.5 px-3 py-1 bg-white/10 hover:bg-white/20 rounded-full cursor-pointer transition-colors border border-white/5"
+              >
+                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                <span className="font-mono font-bold text-sm text-white">
+                  {Math.floor(activeCallTime / 60)}:{(activeCallTime % 60).toString().padStart(2, '0')}
+                </span>
+              </motion.div>
+            )}
 
             <motion.button
               whileHover={{ scale: 1.1 }}

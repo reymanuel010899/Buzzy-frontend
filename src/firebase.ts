@@ -1,5 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
+import { getMessaging } from "firebase/messaging";
 
 // TODO: Reemplaza estos valores con la configuración real de tu proyecto de Firebase
 // Puedes encontrarlos en la consola de Firebase -> Project Settings -> General
@@ -15,3 +16,4 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
+export const messaging = getMessaging(app);

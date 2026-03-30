@@ -42,6 +42,7 @@ import { buyTokens } from "../../redux/actions/buyTokens";
 import { getWallet } from "../../redux/actions/getWallet";
 import { useVideoEngagement } from "../../hooks/useVideoEngagement";
 import { getRecommendedFeed } from "../../redux/actions/getMedia";
+import { useCallStore } from "../../store/callStore";
 
 
 const WS_URL = "ws://localhost:8001/ws";
@@ -106,29 +107,29 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [viewedVideos, setViewedVideos] = useState<Set<string>>(new Set());
   // Stabilize user object to prevent unnecessary re-renders and WebSocket reconnections
   const user = useMemo(() => {
-  // 1. Valores por defecto si no hay nadie logueado
-  const defaultUser = { 
-    username: 'BuzzyUser', 
-    profile_picture: '/avatar.webp', 
-    id: null 
-  };
-  
-  // 2. Accedemos a la ruta exacta: LoginReducer -> user
-  // (Según tu imagen, los datos están en LoginReducer.user)
-  const userData = LoginReducer?.user; 
-  console.log(userData, "***********")
-  // 3. Si no existe el objeto user, devolvemos el default
-  if (!userData) return defaultUser;
+    // 1. Valores por defecto si no hay nadie logueado
+    const defaultUser = {
+      username: 'BuzzyUser',
+      profile_picture: '/avatar.webp',
+      id: null
+    };
 
-  // 4. Retornamos el usuario combinado
-  return {
-    ...defaultUser,
-    ...userData,
-    // Si profile_picture viene vacío o null en la DB, mantenemos el default
-    profile_picture: userData.profile_picture || defaultUser.profile_picture
-  };
+    // 2. Accedemos a la ruta exacta: LoginReducer -> user
+    // (Según tu imagen, los datos están en LoginReducer.user)
+    const userData = LoginReducer?.user;
+    console.log(userData, "***********")
+    // 3. Si no existe el objeto user, devolvemos el default
+    if (!userData) return defaultUser;
 
-  // IMPORTANTE: Cambiamos la dependencia a LoginReducer.user
+    // 4. Retornamos el usuario combinado
+    return {
+      ...defaultUser,
+      ...userData,
+      // Si profile_picture viene vacío o null en la DB, mantenemos el default
+      profile_picture: userData.profile_picture || defaultUser.profile_picture
+    };
+
+    // IMPORTANTE: Cambiamos la dependencia a LoginReducer.user
   }, [LoginReducer?.user]);
   const [commentText, setCommentText] = useState("")
   const [comments, setComments] = useState<CommentData[] | null>(null)
@@ -274,6 +275,18 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   useEffect(() => {
     setMedia(media);
   }, [media]);
+
+  const { activeIncomingCall, activeOutgoingCall } = useCallStore();
+  const isCallActive = activeIncomingCall?.status === 'active' || activeOutgoingCall?.status === 'active';
+
+  // Duck video audio if a call is active
+  useEffect(() => {
+    videoRefs.current.forEach(video => {
+      if (video) {
+        video.volume = isCallActive ? 0.05 : 1.0;
+      }
+    });
+  }, [isCallActive, activeVideo]);
 
   const isPlayableAd = (ad: any) => {
     const mediaFile = ad?.creative?.media_file;
@@ -1514,6 +1527,8 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       setShowVideoGiftModal(false);
     } catch (error) {
       console.error("Error dispatching video gift:", error);
+    } finally {
+      sendVideoGiftCount.current = false;
     }
   };
   // Preload sounds
