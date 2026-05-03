@@ -1,6 +1,7 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Check, X } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 interface WithdrawSuccessModalProps {
     isOpen: boolean;
@@ -8,6 +9,7 @@ interface WithdrawSuccessModalProps {
 }
 
 const WithdrawSuccessModal: React.FC<WithdrawSuccessModalProps> = ({ isOpen, onClose }) => {
+    const { t } = useTranslation('wallet');
     return (
         <AnimatePresence>
             {isOpen && (
@@ -50,21 +52,20 @@ const WithdrawSuccessModal: React.FC<WithdrawSuccessModalProps> = ({ isOpen, onC
                             </motion.div>
 
                             <h3 className="text-2xl font-black italic text-white tracking-tighter uppercase mb-2">
-                                ¡Retiro en Proceso!
+                                {t('withdrawSuccess.title')}
                             </h3>
 
                             <p className="text-sm text-gray-400 mb-8 px-4">
-                                El dinero estará disponible en tu cuenta de destino en un plazo de{' '}
-                                <span className="font-bold text-white">2 a 5 días laborables</span>.
+                                {t('withdrawSuccess.description')}
                             </p>
 
-                            <motion.button
+                                <motion.button
                                 whileHover={{ scale: 1.05 }}
                                 whileTap={{ scale: 0.95 }}
                                 onClick={onClose}
                                 className="w-full py-4 rounded-2xl bg-emerald-500 text-white font-black italic uppercase tracking-[0.2em] text-xs shadow-[0_0_20px_rgba(16,185,129,0.4)]"
-                            >
-                                Entendido
+                                >
+                                {t('withdrawSuccess.cta')}
                             </motion.button>
                         </div>
                     </motion.div>

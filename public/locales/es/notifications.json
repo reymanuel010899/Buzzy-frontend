@@ -1,0 +1,27 @@
+{
+  "title": "Notificaciones",
+  "empty": "Aún no tienes notificaciones",
+  "markAllRead": "Marcar todo como leído",
+  "loading": "Cargando…",
+  "types": {
+    "like": "{{username}} le dio me gusta a tu video",
+    "comment": "{{username}} comentó en tu video",
+    "comment_reply": "{{username}} respondió tu comentario",
+    "follow": "{{username}} empezó a seguirte",
+    "profile_visit": "{{username}} visitó tu perfil",
+    "story_like": "{{username}} le dio me gusta a tu historia",
+    "mention": "{{username}} te mencionó en un comentario",
+    "gift": "{{username}} te envió un regalo"
+  },
+  "settings": {
+    "title": "Preferencias de notificaciones",
+    "push": "Notificaciones push",
+    "email": "Notificaciones por correo",
+    "likes": "Me gusta",
+    "comments": "Comentarios",
+    "follows": "Nuevos seguidores",
+    "mentions": "Menciones",
+    "liveAlerts": "Alertas de en vivo",
+    "marketing": "Promociones y ofertas"
+  }
+}

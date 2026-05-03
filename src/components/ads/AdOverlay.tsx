@@ -103,10 +103,7 @@ const AdOverlay: React.FC<AdOverlayProps> = ({ ad, onClose, isMuted, toggleMute,
     }, [hasValidAd, isImage, onClose]);
 
     const trackImpression = async () => {
-        if (!ad?.id) {
-            return;
-        }
-
+        if (!ad?.id) return;
         try {
             const token = localStorage.getItem("accessToken");
             await axios.post(`${getBaseUrl()}api/ads/campaigns/${ad.id}/track_impression/`, {}, {
@@ -114,6 +111,18 @@ const AdOverlay: React.FC<AdOverlayProps> = ({ ad, onClose, isMuted, toggleMute,
             });
         } catch (error) {
             console.error("Error tracking impression:", error);
+        }
+    };
+
+    const trackClick = async () => {
+        if (!ad?.id) return;
+        try {
+            const token = localStorage.getItem("accessToken");
+            await axios.post(`${getBaseUrl()}api/ads/campaigns/${ad.id}/track_click/`, {}, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+        } catch (error) {
+            console.error("Error tracking click:", error);
         }
     };
 
@@ -202,6 +211,7 @@ const AdOverlay: React.FC<AdOverlayProps> = ({ ad, onClose, isMuted, toggleMute,
                     onClick={(e) => {
                         e.stopPropagation();
                         if (destinationUrl) {
+                            trackClick();
                             window.open(destinationUrl, '_blank');
                         }
                     }}

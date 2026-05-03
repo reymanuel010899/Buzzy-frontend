@@ -2,7 +2,11 @@ import { useRef, useCallback } from 'react';
 import axios from 'axios';
 import { getBaseUrl } from '../redux/client/api-client';
 
-type EventType = 'video_start' | 'video_engagement' | 'video_view_valid';
+type EventType = 'video_start' | 'video_engagement' | 'video_view_valid' | 'video_view_monetizable';
+
+// Minimum seconds the 50% mark must represent for a view to be monetizable.
+// If 50% of the video is less than 10 s, the view counts but doesn't pay the creator.
+const MIN_MONETIZABLE_SECONDS = 10;
 
 /**
  * useVideoMetrics
@@ -12,10 +16,11 @@ type EventType = 'video_start' | 'video_engagement' | 'video_view_valid';
  * request spam regardless of how many times onTimeUpdate is called.
  *
  * Events fired:
- *   - video_start         → on first play
- *   - video_engagement    → when playback reaches 3 seconds
- *   - video_view_valid    → when playback reaches 30% of total duration
- *                           (or immediately via triggerViewFromInteraction)
+ *   - video_start              → on first play
+ *   - video_engagement         → when playback reaches 3 seconds
+ *   - video_view_valid         → when playback reaches 50% of total duration
+ *   - video_view_monetizable   → same trigger, but only when 50% >= 10 s
+ *                                (prevents monetization of very short videos)
  */
 export function useVideoMetrics() {
     // Map<videoId, Set<eventType>> — tracks which events have already been sent
@@ -54,7 +59,8 @@ export function useVideoMetrics() {
 
     /**
      * Call this from the video element's onTimeUpdate event.
-     * Automatically fires video_engagement at 3 s and video_view_valid at 30%.
+     * Fires video_engagement at 3 s, video_view_valid at 50%, and
+     * video_view_monetizable at 50% only when that mark is >= 10 s.
      */
     const onTimeUpdate = useCallback(
         (videoId: string, currentTime: number, duration: number) => {
@@ -65,22 +71,28 @@ export function useVideoMetrics() {
                 sendEvent(videoId, 'video_engagement');
             }
 
-            // 30% valid view
-            const thirtyPercent = duration * 0.3;
-            if (currentTime >= thirtyPercent) {
+            // 50% mark — always registers the view
+            const fiftyPercent = duration * 0.5;
+            if (currentTime >= fiftyPercent) {
                 sendEvent(videoId, 'video_view_valid');
+
+                // Monetizable only if 50% of the video is at least 10 real seconds
+                if (fiftyPercent >= MIN_MONETIZABLE_SECONDS) {
+                    sendEvent(videoId, 'video_view_monetizable');
+                }
             }
         },
         [sendEvent]
     );
 
     /**
-     * Call this when the user likes or comments before reaching 30%.
-     * Immediately fires video_view_valid as an interaction shortcut.
+     * Interaction shortcut (like/comment): registers the view as valid but NOT
+     * monetizable — we can't confirm the user actually watched enough.
      */
     const triggerViewFromInteraction = useCallback((videoId: string | null | undefined) => {
         if (!videoId) return;
         sendEvent(videoId, 'video_view_valid');
+        // Deliberately does NOT send video_view_monetizable
     }, [sendEvent]);
 
     /**

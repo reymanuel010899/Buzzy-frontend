@@ -2,6 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { XCircle, ArrowLeft, LifeBuoy } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 interface WithdrawCancelProps {
     isOpen: boolean;
@@ -11,6 +12,7 @@ interface WithdrawCancelProps {
 
 const WithdrawCancel: React.FC<WithdrawCancelProps> = ({ isOpen, onClose, message }) => {
     const navigate = useNavigate();
+    const { t } = useTranslation('wallet');
 
     // 🔹 Si no está abierto, no renderiza nada
     if (!isOpen) return null;
@@ -37,7 +39,7 @@ const WithdrawCancel: React.FC<WithdrawCancelProps> = ({ isOpen, onClose, messag
                 </motion.div>
 
                 <h1 className="text-3xl font-black text-white mb-4">
-                    Ocurrio un Error !
+                    {t('withdrawFailure.title')}
                 </h1>
 
                 <p className="text-gray-400 text-lg mb-8">
@@ -54,14 +56,14 @@ const WithdrawCancel: React.FC<WithdrawCancelProps> = ({ isOpen, onClose, messag
                         }}
                         className="w-full bg-white/10 hover:bg-white/20 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 border border-white/10"
                     >
-                        <ArrowLeft size={20} /> Volver a mi Wallet
+                        <ArrowLeft size={20} /> {t('withdrawFailure.ctaBack')}
                     </motion.button>
 
                     <button
                         onClick={() => navigate('/support')}
                         className="w-full flex items-center justify-center gap-2 text-gray-500 hover:text-white text-sm font-medium"
                     >
-                        <LifeBuoy size={16} /> ¿Necesitas ayuda? Contacta a soporte
+                        <LifeBuoy size={16} /> {t('withdrawFailure.contactSupport')}
                     </button>
                 </div>
             </motion.div>

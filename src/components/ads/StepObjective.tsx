@@ -1,53 +1,81 @@
 import React from "react";
-import { Globe, Users, DollarSign, Plus } from "lucide-react";
+import { motion } from "framer-motion";
+import { Globe, Users, DollarSign, UserPlus } from "lucide-react";
 
 interface StepObjectiveProps {
     data: any;
     setData: (data: any) => void;
+    errors?: Record<string, boolean>;
+    shakeTrigger?: number;
 }
 
-const StepObjective: React.FC<StepObjectiveProps> = ({ data, setData }) => {
-    const objectives = [
-        { id: 'TRAFFIC', title: 'Tráfico', desc: 'Envía más personas a tu sitio web o aplicación.', icon: Globe },
-        { id: 'AWARENESS', title: 'Reconocimiento', desc: 'Llega al mayor número de personas posible.', icon: Users },
-        { id: 'SALES', title: 'Ventas', desc: 'Encuentra personas con probabilidades de comprar.', icon: DollarSign },
-        { id: 'FOLLOWERS', title: 'Seguidores', desc: 'Haz crecer tu comunidad en Buzzy.', icon: Plus },
-    ];
+const objectives = [
+    { id: 'TRAFFIC',   title: 'Tráfico',       desc: 'Envía personas a tu sitio web o app.',   icon: Globe,     color: 'from-cyan-500 to-blue-500',    cta: 'LEARN_MORE' },
+    { id: 'AWARENESS', title: 'Reconocimiento', desc: 'Llega al mayor número de personas.',     icon: Users,     color: 'from-violet-500 to-purple-500', cta: 'LEARN_MORE' },
+    { id: 'SALES',     title: 'Ventas',         desc: 'Personas con intención de compra.',      icon: DollarSign,color: 'from-emerald-500 to-teal-500',  cta: 'SHOP_NOW'   },
+    { id: 'FOLLOWERS', title: 'Seguidores',     desc: 'Haz crecer tu comunidad en Buzzy.',      icon: UserPlus,  color: 'from-rose-500 to-pink-500',     cta: 'SIGN_UP'    },
+]
 
+const shake = {
+    x: [0, -8, 8, -8, 8, -4, 4, 0],
+    transition: { duration: 0.45 }
+}
+
+const StepObjective: React.FC<StepObjectiveProps> = ({ data, setData, errors = {}, shakeTrigger = 0 }) => {
     return (
-        <div className="space-y-6">
-            <div className="text-center mb-8">
-                <h3 className="text-lg font-black text-white uppercase tracking-wider">¿Cuál es tu objetivo?</h3>
-                <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-1">Selecciona lo que quieres lograr</p>
+        <div className="flex flex-col h-full gap-2">
+            <div className="text-center flex-shrink-0">
+                <h3 className="text-xs font-black text-white uppercase tracking-wider">¿Cuál es tu objetivo?</h3>
+                <p className="text-[8px] text-gray-500 font-bold uppercase tracking-widest mt-0.5">Selecciona lo que quieres lograr</p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {objectives.map((obj) => (
-                    <div
-                        key={obj.id}
-                        onClick={() => setData({ ...data, objective: obj.id })}
-                        className={`p-6 rounded-2xl border-2 cursor-pointer transition-all duration-300 ${data.objective === obj.id
-                            ? 'bg-cyan-500/10 border-cyan-500 shadow-lg shadow-cyan-500/10'
-                            : 'bg-white/5 border-white/5 hover:border-white/20'
+            {/* Objectives — fixed height, no flex-1 stretch */}
+            <div className="flex flex-col gap-2 flex-shrink-0">
+                {objectives.map((obj) => {
+                    const active = data.objective === obj.id
+                    return (
+                        <div
+                            key={obj.id}
+                            onClick={() => setData({ ...data, objective: obj.id, creative: { ...data.creative, cta_text: obj.cta } })}
+                            className={`flex items-center gap-3 px-3 py-8 rounded-xl border cursor-pointer transition-all duration-200 ${
+                                active
+                                    ? 'bg-white/5 border-cyan-500 shadow shadow-cyan-500/10'
+                                    : 'bg-white/[0.03] border-white/5 hover:border-white/15'
                             }`}
-                    >
-                        <div className={`p-2.5 w-fit rounded-xl mb-4 ${data.objective === obj.id ? 'bg-cyan-500 text-white shadow-lg shadow-cyan-500/20' : 'bg-white/10 text-gray-400'}`}>
-                            <obj.icon className="w-5 h-5" />
+                        >
+                            <div className={`p-2 rounded-xl flex-shrink-0 bg-gradient-to-br ${obj.color} shadow-lg`}>
+                                <obj.icon className="w-4 h-4 text-white" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                                <h4 className="text-xs font-black text-white uppercase tracking-tight leading-none">{obj.title}</h4>
+                                <p className="text-[10px] text-gray-500 mt-0.5 leading-tight">{obj.desc}</p>
+                            </div>
+                            {active && (
+                                <div className="w-2 h-2 rounded-full bg-cyan-400 flex-shrink-0 shadow shadow-cyan-400/50" />
+                            )}
                         </div>
-                        <h4 className="text-[13px] font-black text-white uppercase tracking-tight mb-1">{obj.title}</h4>
-                        <p className="text-[10px] text-gray-500 font-medium leading-relaxed">{obj.desc}</p>
-                    </div>
-                ))}
+                    )
+                })}
             </div>
 
-            <div className="mt-8 space-y-2">
-                <label className="text-xs font-bold text-gray-500 uppercase tracking-widest pl-1">Nombre de la campaña</label>
-                <input
+            {/* Spacer to push input to bottom */}
+            <div className="flex-1" />
+
+            {/* Campaign name */}
+            <div className="flex-shrink-0 space-y-1.5">
+                <label className="text-[9px] font-black text-gray-500 uppercase tracking-widest pl-1">Nombre de la campaña</label>
+                <motion.input
+                    key={`name-${shakeTrigger}`}
+                    animate={errors.name ? shake : {}}
                     type="text"
                     value={data.name}
                     onChange={(e) => setData({ ...data, name: e.target.value })}
                     placeholder="Ej: Lanzamiento Colección Verano"
-                    className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-white focus:outline-none focus:border-cyan-500 transition-all"
+                    className={`w-full bg-white/5 border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none transition-all ${
+                        errors.name
+                            ? 'border-red-500 focus:border-red-500'
+                            : 'border-white/10 focus:border-cyan-500'
+                    }`}
                 />
             </div>
         </div>

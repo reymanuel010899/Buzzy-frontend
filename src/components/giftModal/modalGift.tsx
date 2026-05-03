@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Crown, Zap, Star, ChevronLeft, ChevronRight } from 'lucide-react';
 import { GiftI } from '../../interfaces/gift';
+import { useTranslation } from 'react-i18next';
 
 // --- Types ---
 
@@ -19,6 +20,22 @@ interface VipGiftExperienceProps {
     } | null;
 }
 
+interface GiftPanelLabels {
+    giftPresential: string;
+    vipMessageLabel: string;
+    vipMessagePlaceholder: string;
+    giftCost: string;
+    available: string;
+    tokensLabel: string;
+}
+
+interface SuccessOverlayLabels {
+    title: string;
+    subtitle: string;
+    newBalance: string;
+    button: string;
+}
+
 // --- Sub-components ---
 
 const getPlanTheme = (subscriptionStatus: VipGiftExperienceProps['subscriptionStatus']) => {
@@ -34,8 +51,7 @@ const getPlanTheme = (subscriptionStatus: VipGiftExperienceProps['subscriptionSt
                 bgGradient: 'from-amber-700 via-amber-600 to-amber-800',
                 buttonBorder: 'border-amber-400/20',
                 tokenColor: 'text-amber-500',
-                icon: <Crown className="text-amber-400" size={36} />,
-                powerText: 'EL PODER (VIP)'
+                icon: <Crown className="text-amber-400" size={36} />
             };
         case 'PLUS':
             return {
@@ -46,8 +62,7 @@ const getPlanTheme = (subscriptionStatus: VipGiftExperienceProps['subscriptionSt
                 bgGradient: 'from-purple-700 via-purple-600 to-purple-800',
                 buttonBorder: 'border-purple-400/20',
                 tokenColor: 'text-purple-500',
-                icon: <Zap className="text-purple-400" size={36} />,
-                powerText: 'EL PODER (PLUS)'
+                icon: <Zap className="text-purple-400" size={36} />
             };
         case 'FRIEND':
             return {
@@ -58,8 +73,7 @@ const getPlanTheme = (subscriptionStatus: VipGiftExperienceProps['subscriptionSt
                 bgGradient: 'from-cyan-700 via-cyan-600 to-cyan-800',
                 buttonBorder: 'border-cyan-400/20',
                 tokenColor: 'text-cyan-500',
-                icon: <Star className="text-cyan-400" size={36} />,
-                powerText: 'EL PODER (FRIEND)'
+                icon: <Star className="text-cyan-400" size={36} />
             };
         default:
             return {
@@ -70,8 +84,7 @@ const getPlanTheme = (subscriptionStatus: VipGiftExperienceProps['subscriptionSt
                 bgGradient: 'from-yellow-700 via-yellow-600 to-yellow-800',
                 buttonBorder: 'border-yellow-400/20',
                 tokenColor: 'text-yellow-500',
-                icon: <Crown className="text-yellow-400" size={36} />,
-                powerText: 'EL PODER (VIP)'
+                icon: <Crown className="text-yellow-400" size={36} />
             };
     }
 };
@@ -100,14 +113,14 @@ const SpaceBackground: React.FC = () => (
     </div>
 );
 
-const Header: React.FC<{ onClose: () => void }> = ({ onClose }) => (
+const Header: React.FC<{ onClose: () => void; title: string }> = ({ onClose, title }) => (
     <div className="absolute top-10 left-3 right-12 flex justify-between items-center z-10 w-full max-w-7xl px-4 md:px-8">
         <div className="flex items-center gap-3">
             <div className="p-2 bg-gradient-to-br from-purple-400 to-blue-500 rounded-lg shadow-[0_0_15px_rgba(147,51,234,0.4)]">
                 <Star size={20} className="text-white fill-white" />
             </div>
             <h1 className="text-2xl md:text-4xl font-black italic tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-white via-blue-100 to-purple-200 uppercase drop-shadow-xl">
-                REGALOS ESPECIALES
+                {title}
             </h1>
         </div>
         <button
@@ -306,9 +319,9 @@ const VipPowerButton: React.FC<{
                         <div className="flex flex-col items-end justify-center min-w-[50px]">
                             <span className={`text-lg font-black italic ${theme.primaryColor}`}>2s</span>
                             <div className="w-12 h-1 bg-white/10 rounded-full mt-1.5 overflow-hidden">
-                                <motion.div
-                                    className={`h-full`}
-                                    style={{ width: `${progress}%`, backgroundColor: theme.primaryColor.replace('text-', '') }}
+                                <div
+                                    className="h-full transition-all duration-75 ease-linear"
+                                    style={{ width: `${progress}%`, backgroundColor: theme.glowColor }}
                                 />
                             </div>
                         </div>
@@ -383,8 +396,10 @@ const VipGiftExperience: React.FC<VipGiftExperienceProps> = ({ onClose, onSendGi
     const [isSent, setIsSent] = useState(false);
     const [selectedIndex, setSelectedIndex] = useState(2);
     const [message, setMessage] = useState("");
+    const { t } = useTranslation('videos');
 
     const theme = getPlanTheme(subscriptionStatus);
+    const powerLabel = t('videos:giftExperience.powerLabel', { plan: theme.name });
 
     const displayGifts = parentGifts && parentGifts.length > 0 ? parentGifts : [
         { id: '1', name: 'Tokens', token_price: 100, slug: '1', emoji: '🪙', video: null, is_active: true, created_at: '' },
@@ -421,7 +436,7 @@ const VipGiftExperience: React.FC<VipGiftExperienceProps> = ({ onClose, onSendGi
     return (
         <div className="fixed inset-0 z-[100] bg-[#020408] text-white font-sans overflow-hidden flex flex-col items-center justify-center p-4">
             <SpaceBackground />
-            <Header onClose={onClose} />
+            <Header onClose={onClose} title={t('videos:giftExperience.specialGiftsTitle')} />
 
             <div className="flex flex-col items-center w-full max-w-2xl z-10 scale-[0.9] md:scale-100 transition-transform">
                 <GiftCarousel

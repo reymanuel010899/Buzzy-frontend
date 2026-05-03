@@ -29,13 +29,13 @@ const SocialConnectionsModal: React.FC<SocialConnectionsModalProps> = ({
         initialTab === 'subscribers' && !isOwner ? 'suggestions' : initialTab as any
     );
 
-    // Redux selectors for social connections
     const socialData = useSelector((state: any) => state.socialConnections);
     const [loading, setLoading] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
+    // optimisticFollow: userId -> { is_following, unfollowed_at }
+    const [optimisticFollow, setOptimisticFollow] = useState<Record<string, { is_following: boolean; unfollowed_at: number | null }>>({});
 
-    // Derive list from Redux store based on activeTab and username
-    const getListFromStore = () => {
+    const getListFromStore = useCallback(() => {
         if (!username) return [];
         switch (activeTab) {
             case 'followers': return socialData.followers[username] || [];
@@ -44,44 +44,38 @@ const SocialConnectionsModal: React.FC<SocialConnectionsModalProps> = ({
             case 'suggestions': return socialData.suggestions[username] || [];
             default: return [];
         }
-    };
+    }, [activeTab, username, socialData]);
 
     const list = getListFromStore();
 
     const fetchData = useCallback(async () => {
         const currentData = getListFromStore();
-        // Only show loader if we don't have data cached
-        if (currentData.length === 0) {
-            setLoading(true);
-        }
-
-        if (activeTab === 'followers') {
-            await dispatch(getFollowers(username) as any);
-        } else if (activeTab === 'following') {
-            await dispatch(getFollowing(username) as any);
-        } else if (activeTab === 'subscribers') {
-            await dispatch(getSubscribers(username) as any);
-        } else if (activeTab === 'suggestions') {
-            await dispatch(getSuggestions(username) as any);
-        }
+        if (currentData.length === 0) setLoading(true);
+        if (activeTab === 'followers') await dispatch(getFollowers(username) as any);
+        else if (activeTab === 'following') await dispatch(getFollowing(username) as any);
+        else if (activeTab === 'subscribers') await dispatch(getSubscribers(username) as any);
+        else if (activeTab === 'suggestions') await dispatch(getSuggestions(username) as any);
         setLoading(false);
-    }, [activeTab, username, dispatch, socialData]);
+    }, [activeTab, username, dispatch]);
 
     useEffect(() => {
-        if (isOpen) {
-            fetchData();
-        }
-    }, [isOpen, fetchData]);
+        if (isOpen) fetchData();
+    }, [isOpen, activeTab, username]);
 
     useEffect(() => {
-        if (isOpen) {
-            setActiveTab(initialTab);
-        }
+        if (isOpen) setActiveTab(initialTab);
     }, [isOpen, initialTab]);
 
-    const handleFollowToggle = async (targetUserId: string) => {
+    const handleFollowToggle = async (targetUserId: string, currentlyFollowing: boolean) => {
+        const nowFollowing = !currentlyFollowing;
+        setOptimisticFollow(prev => ({
+            ...prev,
+            [targetUserId]: {
+                is_following: nowFollowing,
+                unfollowed_at: !nowFollowing ? Date.now() : null,
+            },
+        }));
         await dispatch(createFollower({ follower_user_id: targetUserId }) as any);
-        // The Redux reducer now handles updating the is_following status in the cached lists
     };
 
     const getMediaUrl = (path: string | undefined) => {
@@ -90,10 +84,21 @@ const SocialConnectionsModal: React.FC<SocialConnectionsModalProps> = ({
         return `${getBaseUrl()}${path}`;
     };
 
-    const filteredList = list.filter((item: any) => {
-        const user = item.user;
-        return user?.username?.toLowerCase().includes(searchTerm.toLowerCase());
-    });
+    const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+
+    const filteredList = list
+        .map((item: any) => {
+            const opt = optimisticFollow[item.user?.id?.toString()];
+            return opt ? { ...item, is_following: opt.is_following, unfollowed_at: opt.unfollowed_at } : item;
+        })
+        .filter((item: any) => {
+            const user = item.user;
+            if (!user?.username?.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+            if (!item.is_following && item.unfollowed_at) {
+                return Date.now() - item.unfollowed_at < TWENTY_FOUR_HOURS;
+            }
+            return true;
+        });
 
     const handleUserClick = (targetUsername: string) => {
         onClose();
@@ -211,12 +216,15 @@ const SocialConnectionsModal: React.FC<SocialConnectionsModalProps> = ({
                                                 <button
                                                     onClick={(e) => {
                                                         e.stopPropagation();
-                                                        handleFollowToggle(item.user.id.toString());
+                                                        handleFollowToggle(item.user.id.toString(), item.is_following);
                                                     }}
-                                                    className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 flex items-center gap-2 ${item.is_following
-                                                        ? 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10'
-                                                        : 'bg-gradient-to-r from-[#7000ff] to-[#00f0ff] text-white shadow-lg shadow-[#7000ff]/20 hover:scale-105 active:scale-95'
-                                                        }`}
+                                                    className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 flex items-center gap-2 ${
+                                                        item.is_following
+                                                            ? 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10'
+                                                            : item.unfollowed_at
+                                                                ? 'bg-white/5 text-gray-500 border border-white/10 hover:bg-gradient-to-r hover:from-[#7000ff] hover:to-[#00f0ff] hover:text-white hover:scale-105 active:scale-95'
+                                                                : 'bg-gradient-to-r from-[#7000ff] to-[#00f0ff] text-white shadow-lg shadow-[#7000ff]/20 hover:scale-105 active:scale-95'
+                                                    }`}
                                                 >
                                                     {item.is_following ? (
                                                         <>

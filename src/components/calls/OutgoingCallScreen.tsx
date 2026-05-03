@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { Mic, MicOff, Minimize2, PhoneOff, Video, VideoOff, Volume2, VolumeX, User } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { getBaseUrl } from "../../redux/client/api-client";
+import { getMediaUrl } from "../../redux/client/api-client";
 import { IAgoraRTCRemoteUser, ICameraVideoTrack } from "agora-rtc-sdk-ng";
 import AgoraVideoPlayer from "./AgoraVideoPlayer";
 
@@ -157,13 +157,8 @@ export default function OutgoingCallScreen({
   const remoteUserWithVideo = remoteUsers?.find((u) => u.hasVideo);
   const remoteVideoTrack = remoteUserWithVideo?.videoTrack;
 
-  const avatarSrc = avatar
-    ? avatar.startsWith("http") ? avatar : `${getBaseUrl()}${avatar.replace(/^\//, "")}`
-    : `${getBaseUrl()}media/profile_pics/avatar.webp`;
-
-  const localAvatarSrc = localAvatar
-    ? localAvatar.startsWith("http") ? localAvatar : `${getBaseUrl()}${localAvatar.replace(/^\//, "")}`
-    : `${getBaseUrl()}media/profile_pics/avatar.webp`;
+  const avatarSrc = getMediaUrl(avatar) || getMediaUrl("profile_pics/avatar.webp");
+  const localAvatarSrc = getMediaUrl(localAvatar) || getMediaUrl("profile_pics/avatar.webp");
 
   // Only show the centered avatar view if it's NOT an active video call
   // Or if we decide to show avatars as fallbacks, the background will handle it in the video layout
@@ -261,35 +256,39 @@ export default function OutgoingCallScreen({
             )}
 
             {/* Bottom Controls */}
-            <div className="mb-4 flex items-center gap-4 pointer-events-auto">
+            <div className="mb-6 flex items-center gap-3 pointer-events-auto">
               <button
                 onClick={() => toggleSpeaker && toggleSpeaker()}
-                className={`rounded-full p-4 transition-all shadow-xl backdrop-blur-md ${isSpeakerMuted ? 'bg-red-500 text-white border-2 border-red-400' : 'bg-white/20 text-white hover:bg-white/30 border border-white/20'}`}
+                title={isSpeakerMuted ? "Activar altavoz" : "Silenciar altavoz"}
+                className={`flex h-11 w-11 items-center justify-center rounded-full transition-all duration-200 backdrop-blur-md shadow-lg active:scale-90 ${isSpeakerMuted ? 'bg-red-500/90 text-white border border-red-400/60' : 'bg-white/15 text-white/80 hover:bg-white/25 border border-white/15'}`}
               >
-                {isSpeakerMuted ? <VolumeX size={24} /> : <Volume2 size={24} />}
+                {isSpeakerMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
               </button>
 
               {isVideoCall && (
                 <button
                   onClick={() => toggleCamera && toggleCamera()}
-                  className={`rounded-full p-4 transition-all shadow-xl backdrop-blur-md ${isCameraOn === false ? 'bg-red-500 text-white border-2 border-red-400' : 'bg-white/20 text-white hover:bg-white/30 border border-white/20'}`}
+                  title={isCameraOn === false ? "Activar cámara" : "Apagar cámara"}
+                  className={`flex h-11 w-11 items-center justify-center rounded-full transition-all duration-200 backdrop-blur-md shadow-lg active:scale-90 ${isCameraOn === false ? 'bg-red-500/90 text-white border border-red-400/60' : 'bg-white/15 text-white/80 hover:bg-white/25 border border-white/15'}`}
                 >
-                  {isCameraOn === false ? <VideoOff size={24} /> : <Video size={24} />}
+                  {isCameraOn === false ? <VideoOff size={16} /> : <Video size={16} />}
                 </button>
               )}
 
               <button
                 onClick={() => toggleMic && toggleMic()}
-                className={`rounded-full p-4 transition-all shadow-xl backdrop-blur-md ${isMicMuted ? 'bg-red-500 text-white border-2 border-red-400' : 'bg-white/20 text-white hover:bg-white/30 border border-white/20'}`}
+                title={isMicMuted ? "Activar micrófono" : "Silenciar micrófono"}
+                className={`flex h-11 w-11 items-center justify-center rounded-full transition-all duration-200 backdrop-blur-md shadow-lg active:scale-90 ${isMicMuted ? 'bg-red-500/90 text-white border border-red-400/60' : 'bg-white/15 text-white/80 hover:bg-white/25 border border-white/15'}`}
               >
-                {isMicMuted ? <MicOff size={24} /> : <Mic size={24} />}
+                {isMicMuted ? <MicOff size={16} /> : <Mic size={16} />}
               </button>
 
               <button
                 onClick={() => onHangUp("ended_by_caller", consumedSeconds)}
-                className="rounded-[2rem] bg-red-600 px-6 py-4 text-white shadow-[0_12px_35px_rgba(220,38,38,0.5)] transition-all hover:bg-red-500 hover:scale-105 active:scale-95 border-2 border-red-500/50"
+                title="Colgar"
+                className="flex h-11 w-11 items-center justify-center rounded-full bg-red-600 text-white shadow-[0_4px_20px_rgba(220,38,38,0.45)] transition-all duration-200 hover:bg-red-500 active:scale-90 border border-red-500/50"
               >
-                <PhoneOff size={28} />
+                <PhoneOff size={16} />
               </button>
             </div>
           </div>

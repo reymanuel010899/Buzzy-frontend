@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react"
+import { useRingtoneStore, RINGTONE_OPTIONS } from "../../store/ringtoneStore"
 import { useParams, useNavigate } from "react-router-dom"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   Share,
   Settings,
-  Link as LinkIcon,
   Play,
   X,
   Share2,
@@ -37,29 +37,31 @@ import { connect, useDispatch, useSelector } from "react-redux"
 import type { RootState } from "../../store"
 import { getUser } from "../../redux/actions/GetUser"
 import { getUserMedia } from "../../redux/actions/GetUserMedia"
-import { useWebSocket } from "../../hooks/useWebSocket"
+import { useWsEvent } from "../../context/WebSocketContext"
 import { createLike } from "../../redux/actions/createLike"
 import { createView } from "../../redux/actions/createView"
 import { getComment } from "../../redux/actions/getComment"
 import { createComment } from "../../redux/actions/createComment"
-import { getBaseUrl } from "../../redux/client/api-client"
+import { getBaseUrl, getMediaUrl } from "../../redux/client/api-client"
 import { createFollower } from "../../redux/actions/createFollower"
 import SubscriptionModal from "./SubscriptionModal"
 import { getSubscriptionPlans, createCheckoutSession, startCall } from "../../redux/actions/subscriptionActions"
 import { saveAvailability, getAvailability, getAvailabilityStatus } from "../../redux/actions/saveAvailability"
-import { getSocialAccounts, initSocialOAuth, disconnectSocialAccount, SocialPlatform } from "../../redux/actions/socialAccountsActions"
+import { getSocialAccounts, initSocialOAuth, disconnectSocialAccount, refreshSocialFollowers, SocialPlatform } from "../../redux/actions/socialAccountsActions"
 import { useChat } from "../../context/ChatContext"
 import { logout } from "../../redux/actions/Login"
 import type { SocialAccount } from "../../redux/reducers/socialAccountsReducer"
 import { FaTiktok } from "react-icons/fa"
 import EditProfileModal from "./EditProfileModal"
+import ChatPrivacyModal from "./ChatPrivacyModal"
 import BankAccountModal from "./BankAccountModal"
 import SocialConnectionsModal from "./SocialConnectionsModal"
-import { div } from "three/src/nodes/TSL.js"
 import { getActiveStories } from "../../redux/actions/history/listActiveHistory"
 import { viewStory } from "../../redux/actions/history/makeViewed"
+import { LanguageSwitcher } from "../Layout/LanguageSwitcher"
 import type { StoryList } from "../index/main.interface"
 import VipGiftExperience from "../giftModal/modalGift"
+import BuzzyBannerSpace from "../banner/BuzzyBannerSpace"
 import TokenShopModal from "../giftModal/TokenShopModal"
 import InsufficientFundsModal from "../giftModal/InsufficientFundsModal"
 import TokenPurchaseSuccessModal from "../giftModal/TokenPurchaseSuccessModal"
@@ -68,8 +70,9 @@ import { sendVideoGift } from "../../redux/actions/gift/sendVideoGift"
 import { getWallet } from "../../redux/actions/getWallet"
 import type { GiftI } from "../../interfaces/gift"
 import { useCallStore } from "../../store/callStore"
-
-const WS_URL = "ws://localhost:8001/ws"
+import { useTranslation } from "react-i18next"
+import { useVideoMetrics } from "../../hooks/useVideoMetrics"
+import axios from "axios"
 
 // --- Interfaces ---
 interface UserInterface {
@@ -92,6 +95,7 @@ interface UserInterface {
   subscribers_count: number
   is_following?: boolean
   has_active_stories?: boolean
+  is_buzzy_premium?: boolean
 }
 
 interface VideoItem {
@@ -142,6 +146,7 @@ interface ProfileSeccionProps {
   initSocialOAuth: (platform: SocialPlatform) => any
   disconnectSocialAccount: (platform: SocialPlatform) => any
   getSocialAccounts: () => any
+  refreshSocialFollowers: () => Promise<void>
   // Availability Redux state
   availabilitySaving: boolean
   availabilitySaved: boolean
@@ -151,6 +156,7 @@ interface ProfileSeccionProps {
   socialAccounts: SocialAccount[]
   socialLoading: boolean
   getAvailabilityStatus: (username: string) => any
+  notFoundUsername: string | null
 }
 
 function ProfileSeccion({
@@ -169,13 +175,16 @@ function ProfileSeccion({
   socialAccounts,
   getAvailabilityStatus: _getAvailabilityStatus,
   getSocialAccounts: _getSocialAccounts,
+  refreshSocialFollowers: _refreshSocialFollowers,
   initSocialOAuth,
   disconnectSocialAccount,
+  notFoundUsername,
 }: ProfileSeccionProps) {
   const userParams = useParams<{ username?: string }>()
   const { username } = userParams
   const navigate = useNavigate()
   const dispatch = useDispatch()
+  const { t } = useTranslation(['profile', 'videos', 'common'])
   const activeGifts = useSelector((state: any) => state.activeGiftReducer?.gift);
   const getWalletReducer = useSelector((state: any) => state.getWalletReducer);
   const walletTokens = getWalletReducer?.tokens || 0;
@@ -184,6 +193,7 @@ function ProfileSeccion({
   const [isMuted, setIsMuted] = useState(true)
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([])
   const [activeTab, setActiveTab] = useState("latest")
+  const [isLoggingOut, setIsLoggingOut] = useState(false)
   const currentUser = useSelector((state: any) => state.LoginReducer?.user);
   const isOwnProfile = !!currentUser && !!user && (
     currentUser.id === user.id ||
@@ -210,6 +220,7 @@ function ProfileSeccion({
   const [viewedVideos, setViewedVideos] = useState<Set<string>>(new Set());
   const [videoProgress, setVideoProgress] = useState<Record<string, number>>({});
   const [videoDuration, setVideoDuration] = useState<Record<string, number>>({});
+  const { onVideoPlay, onTimeUpdate: trackTimeUpdate, resetVideo } = useVideoMetrics();
   const [showLikeAnimation, setShowLikeAnimation] = useState<Record<string, boolean>>({});
 
   // Comentarios
@@ -217,6 +228,7 @@ function ProfileSeccion({
   const [comments, setComments] = useState<Comment[] | null>(null)
   const [commentText, setCommentText] = useState("")
   const [currentVideoId, setCurrentVideoId] = useState<string | null>(null);
+  const [currentVideoUuid, setCurrentVideoUuid] = useState<string | null>(null);
   const [expandedDescriptions, setExpandedDescriptions] = useState<Record<string, boolean>>({});
 
   const normalizeIncomingComment = useCallback((comment: any): Comment => ({
@@ -259,6 +271,41 @@ function ProfileSeccion({
 
   // Wallet
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showPremiumModal, setShowPremiumModal] = useState(false);
+  const [premiumLoading, setPremiumLoading] = useState(false);
+
+  const handlePremiumCheckout = async () => {
+    setPremiumLoading(true)
+    try {
+      const token = localStorage.getItem('accessToken')
+      const res = await axios.post(`${getBaseUrl()}api/premium/checkout/`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (res.data.checkout_url) window.location.href = res.data.checkout_url
+    } catch (e: any) {
+      alert(e?.response?.data?.error || 'Error al iniciar el pago.')
+    } finally {
+      setPremiumLoading(false)
+    }
+  }
+  const [showRingtonePanel, setShowRingtonePanel] = useState(false);
+  const { selectedId: ringtoneId, setRingtone } = useRingtoneStore();
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const stopRingtonePreview = useCallback(() => {
+    if (previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      previewAudioRef.current.currentTime = 0;
+      previewAudioRef.current = null;
+    }
+  }, []);
+  const previewRingtone = useCallback((file: string) => {
+    stopRingtonePreview();
+    const a = new Audio(file);
+    a.volume = 0.7;
+    previewAudioRef.current = a;
+    a.play().catch(() => {});
+    a.addEventListener('ended', () => { previewAudioRef.current = null; });
+  }, [stopRingtonePreview]);
   const [showConnectSocialModal, setShowConnectSocialModal] = useState(false);
   // === NUEVOS ESTADOS PARA HORARIO DE DISPONIBILIDAD ===
   const [showAvailabilityModal, setShowAvailabilityModal] = useState(false);
@@ -270,7 +317,8 @@ function ProfileSeccion({
   const [availabilitySaveSuccess, setAvailabilitySaveSuccess] = useState(false);
   const [showEditProfileModal, setShowEditProfileModal] = useState(false);
   const [showBankAccountModal, setShowBankAccountModal] = useState(false);
-  const { setShowMessages, setSelectedChat } = useChat();
+  const [showChatPrivacyModal, setShowChatPrivacyModal] = useState(false);
+  const { setShowMessages, setSelectedChat, setPendingFolder } = useChat();
   const [showProfileMediaOptions, setShowProfileMediaOptions] = useState(false);
   const [showFullProfileMedia, setShowFullProfileMedia] = useState(false);
   const [showFollowPrompt, setShowFollowPrompt] = useState(false);
@@ -410,63 +458,77 @@ function ProfileSeccion({
     }).catch(() => null);
   }, [activeGifts, dispatch]);
 
-  const handleWSMessage = useCallback((data: any) => {
-    if (data.event === "like_updated") {
-      setLocalMedia(prev => prev.map((video) => {
-        if (video.id?.toString() === data.video_id?.toString()) {
-          return { ...video, likes_count: data.likes, liked: data.liked };
-        }
-        return video;
-      }));
-    }
-    if (data.event === "new_comment") {
-      if (data && data.user_id) {
-        setLocalMedia(prev => prev.map((video) => {
-          if (video.id?.toString() === data.video_id?.toString()) {
-            return { ...video, comments_count: data.comments_count };
-          }
-          return video;
-        }));
-        if (currentVideoId?.toString() === data.video_id?.toString()) {
-          setComments((prevComments) => upsertComment(prevComments, data));
-        }
-      }
-    }
-    if (data.event === "new_view") {
-      setLocalMedia(prev => prev.map((video) => {
-        if (video.id?.toString() === data.video_id?.toString()) {
-          return { ...video, view_acount: data.view_acount };
-        }
-        return video;
-      }));
-    }
-    if (data.event === "video_gift_received") {
-      const activeVideo = localMedia[activeModalIndex];
-      const isTargetVideoOpen = activeVideo?.id?.toString() === data.video_id?.toString();
+  // ─── WebSocket events (via singleton context) ─────────────────────────────
 
-      if (currentUser?.id == data.from_user || (currentUser?.id == data.to_user && isTargetVideoOpen)) {
-        setGiftAnimation({
-          type: data.gift_type,
-          giftId: data.gift_uuid,
-          videoId: data.video_id,
-          sender: data.sender,
-          amount: data.amount || 1,
-          gift: data.gift_video,
-          color_premiun: data.color_premiun,
-        });
-      }
-    }
-    if (data.event === "new_follower" || data.event === "delete_follower") {
-      setLocalMedia(prev => prev.map((video) => {
-        if (video.user_id?.id?.toString() === data.channel_profile?.toString()) {
-          return { ...video, current_user_followered: data.current_user_followered };
-        }
-        return video;
-      }));
-    }
-  }, [currentVideoId, currentUser?.id, localMedia, activeModalIndex, upsertComment]);
+  useWsEvent("like_updated", useCallback((ev) => {
+    const data = ev as { event: string; video_id: string; likes: number; liked: boolean };
+    setLocalMedia(prev => prev.map(video =>
+      video.id?.toString() === data.video_id?.toString()
+        ? { ...video, likes_count: data.likes, liked: data.liked }
+        : video
+    ));
+  }, []));
 
-  useWebSocket(WS_URL, handleWSMessage);
+  useWsEvent("new_comment", useCallback((ev) => {
+    const data = ev as { event: string; video_id: string; comments_count: number; user_id: unknown };
+    if (!data?.user_id) return;
+    setLocalMedia(prev => prev.map(video =>
+      video.id?.toString() === data.video_id?.toString()
+        ? { ...video, comments_count: data.comments_count }
+        : video
+    ));
+    if (currentVideoId?.toString() === data.video_id?.toString()) {
+      setComments(prev => upsertComment(prev, data));
+    }
+  }, [currentVideoId, upsertComment]));
+
+  useWsEvent("new_view", useCallback((ev) => {
+    const data = ev as { event: string; video_id: string; view_acount: number };
+    setLocalMedia(prev => prev.map(video =>
+      video.id?.toString() === data.video_id?.toString()
+        ? { ...video, view_acount: data.view_acount }
+        : video
+    ));
+  }, []));
+
+  useWsEvent("video_gift_received", useCallback((ev) => {
+    const data = ev as {
+      event: string; video_id: string; from_user: number; to_user: number;
+      gift_type: string; gift_uuid: string; sender: string;
+      amount: number; gift_video: string; color_premiun: string;
+    };
+    const activeVideo = localMedia[activeModalIndex];
+    const isTargetVideoOpen = activeVideo?.id?.toString() === data.video_id?.toString();
+    if (currentUser?.id == data.from_user || (currentUser?.id == data.to_user && isTargetVideoOpen)) {
+      setGiftAnimation({
+        type: data.gift_type,
+        giftId: data.gift_uuid,
+        videoId: data.video_id,
+        sender: data.sender,
+        amount: data.amount || 1,
+        gift: data.gift_video,
+        color_premiun: data.color_premiun,
+      });
+    }
+  }, [currentUser?.id, localMedia, activeModalIndex]));
+
+  useWsEvent("new_follower", useCallback((ev) => {
+    const data = ev as { event: string; channel_profile: string; current_user_followered: boolean };
+    setLocalMedia(prev => prev.map(video =>
+      video.user_id?.id?.toString() === data.channel_profile?.toString()
+        ? { ...video, current_user_followered: data.current_user_followered }
+        : video
+    ));
+  }, []));
+
+  useWsEvent("delete_follower", useCallback((ev) => {
+    const data = ev as { event: string; channel_profile: string; current_user_followered: boolean };
+    setLocalMedia(prev => prev.map(video =>
+      video.user_id?.id?.toString() === data.channel_profile?.toString()
+        ? { ...video, current_user_followered: data.current_user_followered }
+        : video
+    ));
+  }, []));
 
   // --- 2. Carga Inicial de Usuario ---
   useEffect(() => {
@@ -501,8 +563,9 @@ function ProfileSeccion({
         setAvailabilityStatus(data);
       }).catch(console.error);
       _getSocialAccounts();
+      _refreshSocialFollowers();
     }
-  }, [_getAvailabilityStatus, _getSocialAccounts, username]);
+  }, [_getAvailabilityStatus, _getSocialAccounts, _refreshSocialFollowers, username]);
 
   // --- 3. Lógica Grid ---
   const handleVideoClickOrDoubleClick = (video: any, index: number) => {
@@ -621,6 +684,9 @@ function ProfileSeccion({
     const currentTime = videoElement.currentTime;
     const duration = videoElement.duration;
 
+    // Monetization tracking — 50% mark, min 10s for monetizable
+    trackTimeUpdate(videoId, currentTime, duration);
+
     setVideoProgress(prev => ({ ...prev, [videoId]: currentTime }));
     if (videoDuration[videoId] !== duration && isFinite(duration)) {
       setVideoDuration(prev => ({ ...prev, [videoId]: duration }));
@@ -652,8 +718,8 @@ function ProfileSeccion({
 
   const handleCommentClick = (video: VideoItem) => {
     if (!video) return;
-    const vidId = video.id.toString();
-    setCurrentVideoId(vidId);
+    setCurrentVideoId(video.id.toString());
+    setCurrentVideoUuid(video.uuid || null);
     setShowCommentsModal(true);
     getComment({ video_id: video.uuid || "" })(dispatch).then((res) => {
       setComments(Array.isArray(res) ? res : [])
@@ -661,9 +727,9 @@ function ProfileSeccion({
   }
 
   const handlePostComment = () => {
-    if (!commentText.trim() || !currentVideoId) return;
+    if (!commentText.trim() || !currentVideoUuid) return;
     createComment({
-      video_id: currentVideoId,
+      video_id: currentVideoUuid,
       content: commentText
     })(dispatch).then((res: any) => {
       if (res) {
@@ -792,6 +858,8 @@ function ProfileSeccion({
   const handleEditOption = (option: string) => {
     if (option === "Editar perfil") {
       setShowEditProfileModal(true);
+    } else if (option === "Privacidad de chats") {
+      setShowChatPrivacyModal(true);
     } else {
       alert(`✏️ Opción seleccionada: ${option} (listo para conectar con tu backend)`);
     }
@@ -810,39 +878,44 @@ function ProfileSeccion({
     socialAccounts?.find(a => a.platform === platform);
 
   const handleMessageClick = () => {
-    // Check if we're viewing someone else's profile and we don't follow them
     if (!isOwnProfile && user && !user.is_following) {
       setShowFollowPrompt(true);
       return;
     }
-
-    // If we follow them or it's our profile or there is no clear state, just try to open chat
+    setPendingFolder("request");
     setShowMessages(true);
-    setSelectedChat(user?.chat_uuid)
-    navigate("/")
+    setSelectedChat(user?.chat_uuid ?? null);
+    navigate("/");
   };
 
   const handleFollowAndMessage = () => {
     if (user?.id) {
       createFollower({ follower_user_id: user.id.toString() })(dispatch).then((res) => {
         setShowFollowPrompt(false);
-        // Force opening messages after following
-
+        setPendingFolder("request");
         setShowMessages(true);
-        setSelectedChat(res?.data.chat_uuid)
-        navigate("/")
-
-        // We could theoretically set user.is_following = true locally to prevent prompt next time
-        if (user) {
-          user.is_following = true;
-        }
+        setSelectedChat(res?.data.chat_uuid ?? null);
+        navigate("/");
+        if (user) user.is_following = true;
       }).catch(err => {
         console.error("Error following:", err);
         setShowFollowPrompt(false);
-        setShowMessages(true); // fall back to showing messages anyway
+        setPendingFolder("request");
+        setShowMessages(true);
+        navigate("/");
       });
     }
   };
+
+  const handleLogout = useCallback(() => {
+    if (isLoggingOut) return;
+    setIsLoggingOut(true);
+
+    // Espera un frame para que el estado visual cambie antes de limpiar la sesión.
+    window.requestAnimationFrame(() => {
+      logout()(dispatch);
+    });
+  }, [dispatch, isLoggingOut]);
 
   const profileStoriesMedia = useMemo(() => {
     if (!user || !stories?.length) return [];
@@ -996,6 +1069,66 @@ function ProfileSeccion({
     });
   }, [activeProfileStoryIndex, profileStoriesMedia.length]);
 
+  if (isLoggingOut) {
+    return (
+      <div className="min-h-screen w-full bg-[#050718] flex items-center justify-center overflow-hidden">
+        {/* Background glow blobs */}
+        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 w-72 h-72 rounded-full bg-purple-600/20 blur-[80px] pointer-events-none" />
+        <div className="absolute bottom-1/3 left-1/2 -translate-x-1/2 w-56 h-56 rounded-full bg-cyan-500/15 blur-[60px] pointer-events-none" />
+
+        <div className="relative flex flex-col items-center gap-6 text-center px-8">
+          {/* Rings */}
+          <div className="relative flex items-center justify-center w-24 h-24">
+            {/* Outer slow ring */}
+            <div className="absolute inset-0 rounded-full border border-white/5" />
+            <div
+              className="absolute inset-0 rounded-full border-2 border-transparent"
+              style={{
+                background: "linear-gradient(#050718, #050718) padding-box, linear-gradient(135deg, #7000ff, #00f0ff) border-box",
+                animation: "spin 2.4s linear infinite",
+              }}
+            />
+            {/* Inner fast ring */}
+            <div
+              className="absolute inset-3 rounded-full border-2 border-transparent"
+              style={{
+                background: "linear-gradient(#050718, #050718) padding-box, linear-gradient(225deg, #00f0ff, #7000ff) border-box",
+                animation: "spin 1.1s linear infinite reverse",
+              }}
+            />
+            {/* Center dot */}
+            <div className="w-3 h-3 rounded-full bg-gradient-to-br from-purple-400 to-cyan-400 shadow-[0_0_12px_rgba(112,0,255,0.8)]" />
+          </div>
+
+          {/* Text */}
+          <div className="flex flex-col items-center gap-1">
+            <p className="text-white font-semibold text-base tracking-wide">Cerrando sesión</p>
+            <p className="text-white/30 text-xs">Hasta pronto 👋</p>
+          </div>
+
+          {/* Animated dots */}
+          <div className="flex gap-1.5">
+            {[0, 1, 2].map(i => (
+              <div
+                key={i}
+                className="w-1.5 h-1.5 rounded-full bg-gradient-to-r from-purple-400 to-cyan-400"
+                style={{ animation: `bounce 1.2s ease-in-out ${i * 0.2}s infinite` }}
+              />
+            ))}
+          </div>
+        </div>
+
+        <style>{`
+          @keyframes spin { to { transform: rotate(360deg); } }
+          @keyframes bounce {
+            0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+            40% { transform: translateY(-6px); opacity: 1; }
+          }
+        `}</style>
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="min-h-screen text-white flex flex-col items-center bg-[#050718] font-sans">
@@ -1011,12 +1144,37 @@ function ProfileSeccion({
         <div className="relative z-10 w-full max-w-3xl mx-auto flex flex-col items-center pb-24">
 
           {/* Banner Curvo */}
-          <div className="w-full h-30 md:h-52 relative overflow-hidden rounded-b-[2.5rem] shadow-2xl shadow-[#7000ff]/20">
+          <div className="w-full h-20 md:h-52 relative overflow-hidden rounded-b-[2.5rem] shadow-2xl shadow-[#7000ff]/20">
             <div className="absolute inset-0 bg-gradient-to-r from-[#7000ff] via-[#4c1d95] to-[#00f0ff] opacity-90"></div>
             <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20"></div>
+
+            {/* Buzzy Banner Space — dentro del header curvo */}
+            <div className="absolute inset-0 z-20">
+              <BuzzyBannerSpace />
+            </div>
+
+            {/* Banner usuario no encontrado */}
+            {notFoundUsername && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 z-10 px-6 -translate-y-2">
+                <div className="flex items-center gap-2 mb-1">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                    <line x1="11" y1="8" x2="11" y2="14"/><line x1="11" y1="16" x2="11.01" y2="16"/>
+                  </svg>
+                  <span className="text-white/60 text-[11px] font-medium uppercase tracking-widest">Usuario no encontrado</span>
+                </div>
+                <p className="text-white text-center text-sm font-semibold leading-snug drop-shadow">
+                  <span className="text-white/50">@</span>{notFoundUsername}{" "}
+                  <span className="text-white/70 font-normal">no existe en Buzzy.</span>
+                </p>
+                <p className="text-white/45 text-[11px] text-center mt-0.5">
+                  Te mostramos el perfil oficial de Buzzy.
+                </p>
+              </div>
+            )}
           </div>
 
-          <div className="px-4 w-full flex flex-col items-center -mt-16 md:-mt-20 space-y-4">
+          <div className="px-4 w-full flex flex-col items-center -mt-5 md:-mt-20 space-y-4 relative z-30">
 
             {/* Foto de Perfil (Restaurada) */}
             <motion.div
@@ -1027,7 +1185,7 @@ function ProfileSeccion({
               onClick={() => setShowProfileMediaOptions(true)}
             >
               <div className="rounded-full p-1 bg-[#050718]">
-                <div className="relative w-28 h-28 md:w-36 md:h-36 rounded-full overflow-hidden">
+                <div className="relative w-20 h-20 md:w-36 md:h-36 rounded-full overflow-hidden">
                   {user?.profile_video ? (
                     <video
                       className="w-full h-full object-cover"
@@ -1037,10 +1195,10 @@ function ProfileSeccion({
                       loop
                       playsInline
                     />
-                  ) : user && !user?.profile_picture.startsWith("media") ? (
+                  ) : user ? (
                     <img
                       className="w-full h-full object-cover"
-                      src={`${import.meta.env.VITE_DOMAIN_SERVER}/media/${user.profile_picture}`}
+                      src={getMediaUrl(user.profile_picture)}
                       alt={user.username}
                     />
                   ) : (
@@ -1059,10 +1217,10 @@ function ProfileSeccion({
             {/* Texto de Información (Restaurado) */}
             <div className="text-center space-y-1">
               <motion.h1 className="text-3xl md:text-4xl font-bold text-white tracking-tight">
-                {user?.first_name || "Usuario"}
+                {user?.first_name || t('profile:placeholders.user')}
               </motion.h1>
               <motion.p className="text-[#a2b0ff] font-medium">
-                @{user?.username || user?.email?.split('@')[0] || "anonimo"}
+                @{user?.username || user?.email?.split('@')[0] || t('profile:placeholders.anonymous')}
               </motion.p>
             </div>
 
@@ -1080,7 +1238,7 @@ function ProfileSeccion({
                 <span className="text-xl md:text-2xl font-bold text-white group-hover:text-[#00f0ff] transition-colors duration-300">
                   {(user?.follower_all_acount || 0) + (user?.total_social_followers || 0)}
                 </span>
-                <span className="text-xs text-gray-400 group-hover:text-gray-200">Seguidores</span>
+                <span className="text-xs text-gray-400 group-hover:text-gray-200">{t('profile:header.followers')}</span>
               </div>
 
               <div className="w-px h-8 bg-white/10"></div>
@@ -1092,7 +1250,7 @@ function ProfileSeccion({
                 <span className="text-xl md:text-2xl font-bold text-white group-hover:text-[#00f0ff] transition-colors duration-300">
                   {user?.followed_all_acount || 0}
                 </span>
-                <span className="text-xs text-gray-400 group-hover:text-gray-200">Seguidos</span>
+                <span className="text-xs text-gray-400 group-hover:text-gray-200">{t('profile:header.following')}</span>
               </div>
 
               <div className="w-px h-8 bg-white/10"></div>
@@ -1105,7 +1263,7 @@ function ProfileSeccion({
                   {currentUser?.id === user?.id ? (user?.subscribers_count || 0) : (user?.like_all_count || 0)}
                 </span>
                 <span className="text-xs text-gray-400 group-hover:text-gray-200">
-                  {currentUser?.id === user?.id ? "Suscriptores" : "Likes"}
+                  {currentUser?.id === user?.id ? t('profile:stats.subscribers') : t('profile:header.likes')}
                 </span>
               </div>
             </motion.div>
@@ -1118,37 +1276,35 @@ function ProfileSeccion({
               className="text-center max-w-md px-4 pt-2"
             >
               <p className="text-gray-300 leading-relaxed text-sm md:text-base">
-                {user?.bio || 'Creativo digital compartiendo momentos únicos.'}
+                {user?.bio || t('profile:bio.default')}
               </p>
 
-              <div className="flex items-center justify-center gap-4 mt-3 text-sm text-[#00f0ff]">
-                <a href="#" className="flex items-center gap-1.5 hover:underline decoration-[#00f0ff]/50">
-                  <LinkIcon size={14} />
-                  <span>website.com</span>
-                </a>
-              </div>
             </motion.div>
 
-            {/* Botones de Acción (Restaurados - ESTO FALTABA EN TU SEGUNDA FOTO) */}
+            {/* Botones de Acción */}
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.4 }}
               className="flex items-center gap-3 pt-2 w-full max-w-xs justify-center"
             >
-              <Button
-                onClick={handleOpenSubscriptionModal}
-                className="flex-1 bg-white text-black hover:bg-gray-200 font-semibold rounded-xl h-10 transition-transform active:scale-95"
-              >
-                Suscribirte
-              </Button>
+              {isOwnProfile ? null : (
+                <Button
+                  onClick={handleOpenSubscriptionModal}
+                  className="flex-1 bg-white text-black hover:bg-gray-200 font-semibold rounded-xl h-10 transition-transform active:scale-95"
+                >
+                  {t('profile:actions.subscribe')}
+                </Button>
+              )}
+              {!isOwnProfile && (
               <Button
                 variant="outline"
                 onClick={handleMessageClick}
                 className="flex-1 bg-white/5 border-white/10 hover:bg-white/10 hover:border-[#00f0ff]/50 text-white rounded-xl h-10 backdrop-blur-md transition-all duration-300"
               >
-                Mensaje
+                {t('profile:actions.message')}
               </Button>
+              )}
 
               {!isOwnProfile && (
                 <div className="flex gap-2">
@@ -1198,16 +1354,6 @@ function ProfileSeccion({
                 </div>
               )}
 
-              <div className="flex gap-2">
-                <Button variant="ghost" size="icon" className="rounded-xl bg-white/5 hover:bg-white/10 text-white border border-white/5 h-10 w-10">
-                  <Share size={18} />
-                </Button>
-                {isOwnProfile && (
-                  <Button onClick={() => setShowSettingsModal(true)} variant="ghost" size="icon" className="rounded-xl bg-white/5 hover:bg-white/10 text-white border border-white/5 h-10 w-10">
-                    <Settings size={18} />
-                  </Button>
-                )}
-              </div>
             </motion.div>
 
             {/* Mensaje de Upgrade si es necesario */}
@@ -1217,18 +1363,16 @@ function ProfileSeccion({
                 animate={{ opacity: 1, scale: 1 }}
                 className="w-full max-w-xs mt-4 relative"
               >
-                {/* Glow Effect */}
                 <div className="absolute -inset-1 rounded-2xl bg-gradient-to-r from-[#7000ff] to-[#00f0ff] opacity-40 blur-md group-hover:opacity-75 transition-opacity duration-500"></div>
-
                 <Button
                   onClick={handleOpenSubscriptionModal}
                   className="relative w-full h-11 bg-black/40 backdrop-blur-xl border border-white/20 text-white font-bold rounded-2xl shadow-2xl overflow-hidden group transition-all duration-300 hover:border-[#00f0ff]/50 active:scale-95"
                 >
                   <div className="absolute inset-0 bg-gradient-to-r from-[#7000ff]/20 to-[#00f0ff]/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-                  <span className="relative flex items-center justify-center gap-2 text-[10px] tracking-widest uppercase">
-                    <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
-                    UPGRADE PLAN OR WAIT NEXT MONTH
-                  </span>
+                    <span className="relative flex items-center justify-center gap-2 text-[10px] tracking-widest uppercase">
+                      <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+                      {t('profile:subscription.upgradeMessage')}
+                    </span>
                 </Button>
               </motion.div>
             )}
@@ -1239,23 +1383,47 @@ function ProfileSeccion({
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.6 }}
-            className="w-full mt-8 px-2 md:px-0"
+            className="w-full mt-3 px-2 md:px-0"
           >
             <Tabs defaultValue="latest" value={activeTab} onValueChange={setActiveTab} className="w-full">
-              {/* Tabs Flotantes (Restaurados) */}
-              <div className="sticky top-0 z-30 px-0 pt-2 pb-2 bg-[#050718]/80 backdrop-blur-xl border-b border-white/5 rounded-xl">
-                <div className="relative mx-auto max-w-sm px-1">
-                  <div className="absolute -inset-px rounded-full bg-gradient-to-r from-[#7000ff]/30 to-[#00f0ff]/30 opacity-50 blur-sm"></div>
-                  <TabsList className="relative grid w-full grid-cols-3 bg-[#0c1033]/90 backdrop-blur-xl border border-white/10 rounded-full p-1 h-auto">
+              {/* Botones de acción + Tabs — sticky al hacer scroll */}
+              <div className="sticky top-0 z-30 backdrop-blur-xl  pb-3 rounded-xl flex flex-col gap-4">
+                {/* Botones de acción sticky */}
+                <div className="flex justify-center gap-4 pb-3">
+                  {/* <Button variant="ghost" size="icon" className="rounded-xl bg-white/5 hover:bg-white/10 text-white border border-white/5 h-10 w-10">
+                    <Share size={18} />
+                  </Button> */}
+                  {isOwnProfile && (
+                    <>
+                      <Button
+                        onClick={() => setShowPremiumModal(true)}
+                        variant="ghost"
+                        size="icon"
+                        className="rounded-xl h-10 w-10 border-0 relative overflow-hidden"
+                        style={{ background: 'linear-gradient(135deg, #7c3aed, #a855f7, #ec4899)' }}
+                      >
+                        <span className="relative z-10 text-white font-black text-base">✦</span>
+                      </Button>
+                      <Button onClick={() => setShowEditProfileModal(true)} variant="ghost" size="icon" className="rounded-xl bg-white/5 hover:bg-white/10 text-white border border-white/5 h-10 w-10">
+                        <UserCog size={18} />
+                      </Button>
+                      <Button onClick={() => setShowSettingsModal(true)} variant="ghost" size="icon" className="rounded-xl bg-white/5 hover:bg-white/10 text-white border border-white/5 h-10 w-10">
+                        <Settings size={18} />
+                      </Button>
+                    </>
+                  )}
+                </div>
+                <div className="relative mx-auto max-w-sm px-1 w-full">
+                  <TabsList className="relative grid w-full grid-cols-3 gap-2 bg-transparent h-auto p-0">
                     {["latest", "popular", "oldest"].map((tab) => (
                       <TabsTrigger
                         key={tab}
                         value={tab}
-                        className={`rounded-full text-[10px] md:text-sm font-bold py-2 transition-all duration-300 capitalize
-                                data-[state=active]:bg-gradient-to-r data-[state=active]:from-[#7000ff] data-[state=active]:to-[#00f0ff] data-[state=active]:text-white data-[state=active]:shadow-lg
-                                ${activeTab === tab ? "" : "text-gray-400 hover:text-white hover:bg-white/5"}`}
+                        className={`rounded-2xl text-[10px] md:text-sm font-semibold py-2.5 transition-all duration-300 capitalize
+                                data-[state=active]:bg-gradient-to-r data-[state=active]:from-[#1c1427] data-[state=active]:to-[#142122] data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-[#7000ff]/30 data-[state=active]:border data-[state=active]:border-white/8
+                                ${activeTab === tab ? "" : "bg-gradient-to-r from-[#1c1427] to-[#142122] border border-white/5 text-white/30 hover:text-white/60"}`}
                       >
-                        {tab}
+                        {t(`profile:orderTabs.${tab}`)}
                       </TabsTrigger>
                     ))}
                   </TabsList>
@@ -1324,9 +1492,15 @@ function ProfileSeccion({
         <EditProfileModal
           isOpen={showEditProfileModal}
           onClose={() => setShowEditProfileModal(false)}
+          onSaveSuccess={() => getUser(username)}
           user={user || currentUser}
         />
       )}
+
+      <ChatPrivacyModal
+        isOpen={showChatPrivacyModal}
+        onClose={() => setShowChatPrivacyModal(false)}
+      />
 
       <BankAccountModal
         isOpen={showBankAccountModal}
@@ -1340,6 +1514,170 @@ function ProfileSeccion({
         initialTab={socialModalTab}
       />
 
+      {/* ===================== MODAL BUZZY PREMIUM ===================== */}
+      <AnimatePresence>
+        {showPremiumModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[80] flex items-end justify-center bg-black/70 backdrop-blur-md"
+            onClick={() => setShowPremiumModal(false)}
+          >
+            <motion.div
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 28, stiffness: 220 }}
+              onClick={e => e.stopPropagation()}
+              className="w-full max-w-md rounded-t-[2rem] overflow-hidden"
+              style={{ background: 'linear-gradient(180deg, #1a0533 0%, #0d0118 100%)' }}
+            >
+              {/* Handle */}
+              <div className="flex justify-center pt-3 pb-1">
+                <div className="h-1.5 w-12 rounded-full bg-white/20" />
+              </div>
+
+              {(currentUser?.is_buzzy_premium || user?.is_buzzy_premium) ? (
+                <>
+                  {/* Header — activo */}
+                  <div className="relative px-6 pt-4 pb-6 text-center overflow-hidden">
+                    <div className="absolute inset-0 bg-gradient-to-b from-purple-600/20 to-transparent pointer-events-none" />
+                    <motion.div
+                      animate={{ scale: [1, 1.15, 1] }}
+                      transition={{ repeat: Infinity, duration: 2.5, ease: 'easeInOut' }}
+                      className="text-5xl mb-3"
+                    >👑</motion.div>
+                    <h2 className="text-2xl font-black text-white tracking-tight">¡Eres Premium!</h2>
+                    <p className="text-purple-300/70 text-sm mt-1">Disfruta de todos tus beneficios exclusivos</p>
+                  </div>
+
+                  {/* Beneficios activos */}
+                  <div className="px-6 pb-4 space-y-3">
+                    {[
+                      { icon: '🚫', title: 'Sin anuncios', desc: 'Tu feed siempre limpio y sin interrupciones' },
+                      { icon: '🎬', title: 'Videos más largos', desc: 'Sube videos de hasta 5 minutos' },
+                      { icon: '🎁', title: 'Regalos exclusivos', desc: 'Envía y recibe regalos que solo los Premium tienen' },
+                      { icon: '⚡', title: 'Prioridad en comentarios', desc: 'Tus comentarios destacan sobre el resto' },
+                    ].map((b, i) => (
+                      <motion.div
+                        key={i}
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: i * 0.07 }}
+                        className="flex items-center gap-4 bg-purple-500/10 border border-purple-400/20 rounded-2xl px-4 py-3"
+                      >
+                        <span className="text-2xl flex-shrink-0">{b.icon}</span>
+                        <div>
+                          <p className="text-white font-semibold text-sm">{b.title}</p>
+                          <p className="text-purple-300/60 text-xs">{b.desc}</p>
+                        </div>
+                        <div className="ml-auto flex-shrink-0 h-5 w-5 rounded-full bg-purple-500 flex items-center justify-center">
+                          <span className="text-white text-[10px]">✓</span>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+
+                  {/* Botón cerrar */}
+                  <div className="px-6 pb-8 pt-2">
+                    <motion.button
+                      whileTap={{ scale: 0.97 }}
+                      onClick={() => setShowSubscriptionModal(false)}
+                      className="w-full h-14 rounded-2xl font-black text-white text-base relative overflow-hidden"
+                      style={{ background: 'linear-gradient(135deg, #7c3aed, #a855f7, #ec4899)' }}
+                    >
+                      <motion.span
+                        className="absolute inset-0 bg-white/15"
+                        animate={{ x: ['-100%', '200%'] }}
+                        transition={{ repeat: Infinity, duration: 2, ease: 'linear' }}
+                        style={{ skewX: '-20deg' }}
+                      />
+                      <span className="relative">¡Seguir disfrutando!</span>
+                    </motion.button>
+                    <p className="text-center text-white/25 text-xs mt-3">Renovación automática mensual · Cancela cuando quieras</p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {/* Header — no activo */}
+                  <div className="relative px-6 pt-4 pb-6 text-center overflow-hidden">
+                    <div className="absolute inset-0 bg-gradient-to-b from-purple-600/20 to-transparent pointer-events-none" />
+                    <motion.div
+                      animate={{ rotate: [0, 10, -10, 0] }}
+                      transition={{ repeat: Infinity, duration: 3, ease: 'easeInOut' }}
+                      className="text-5xl mb-3"
+                    >✦</motion.div>
+                    <h2 className="text-2xl font-black text-white tracking-tight">Buzzy Premium</h2>
+                    <p className="text-purple-300/70 text-sm mt-1">Lleva tu experiencia al siguiente nivel</p>
+                    <div className="mt-4 inline-flex items-baseline gap-1">
+                      <span className="text-4xl font-black text-white">$5.99</span>
+                      <span className="text-white/40 text-sm">/mes</span>
+                    </div>
+                  </div>
+
+                  {/* Benefits */}
+                  <div className="px-6 pb-4 space-y-3">
+                    {[
+                      { icon: '🚫', title: 'Sin anuncios', desc: 'Disfruta el feed sin interrupciones' },
+                      { icon: '🎬', title: 'Videos más largos', desc: 'Sube videos de hasta 5 minutos' },
+                      { icon: '🎁', title: 'Envía regalos exclusivos', desc: 'Accede a regalos Premium que nadie más puede enviar' },
+                      { icon: '👑', title: 'Recibe regalos exclusivos', desc: 'Desbloquea regalos especiales de tus fans Premium' },
+                    ].map((b, i) => (
+                      <motion.div
+                        key={i}
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: i * 0.07 }}
+                        className="flex items-center gap-4 bg-white/5 border border-white/8 rounded-2xl px-4 py-3"
+                      >
+                        <span className="text-2xl flex-shrink-0">{b.icon}</span>
+                        <div>
+                          <p className="text-white font-semibold text-sm">{b.title}</p>
+                          <p className="text-white/40 text-xs">{b.desc}</p>
+                        </div>
+                        <div className="ml-auto flex-shrink-0 h-5 w-5 rounded-full bg-purple-500/30 border border-purple-400/50 flex items-center justify-center">
+                          <span className="text-purple-300 text-[10px]">✓</span>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+
+                  {/* CTA */}
+                  <div className="px-6 pb-8 pt-2">
+                    {(() => {
+                      const alreadyPremium = currentUser?.is_buzzy_premium || user?.is_buzzy_premium;
+                      return (
+                        <motion.button
+                          whileTap={alreadyPremium ? {} : { scale: 0.97 }}
+                          onClick={alreadyPremium ? undefined : handlePremiumCheckout}
+                          disabled={premiumLoading || alreadyPremium}
+                          className="w-full h-14 rounded-2xl font-black text-white text-base relative overflow-hidden disabled:cursor-default"
+                          style={{ background: alreadyPremium ? 'linear-gradient(135deg, #4a4a6a, #6b6b8a)' : 'linear-gradient(135deg, #7c3aed, #a855f7, #ec4899)' }}
+                        >
+                          {!alreadyPremium && (
+                            <motion.span
+                              className="absolute inset-0 bg-white/15"
+                              animate={{ x: ['-100%', '200%'] }}
+                              transition={{ repeat: Infinity, duration: 2, ease: 'linear' }}
+                              style={{ skewX: '-20deg' }}
+                            />
+                          )}
+                          <span className="relative">
+                            {alreadyPremium ? '✦ Disfrutando Premium' : premiumLoading ? 'Redirigiendo...' : 'Activar Premium — $5.99/mes'}
+                          </span>
+                        </motion.button>
+                      );
+                    })()}
+                    <p className="text-center text-white/25 text-xs mt-3">Cancela cuando quieras · Renovación automática mensual</p>
+                  </div>
+                </>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* ===================== MODAL CONFIGURACIÓN (SETTINGS) ===================== */}
       <AnimatePresence>
         {showSettingsModal && (
@@ -1348,7 +1686,7 @@ function ProfileSeccion({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-xl p-4"
-            onClick={() => setShowSettingsModal(false)}
+            onClick={() => { stopRingtonePreview(); setShowRingtonePanel(false); setShowSettingsModal(false); }}
           >
             <motion.div
               initial={{ scale: 0.88, y: 30, opacity: 0 }}
@@ -1365,10 +1703,10 @@ function ProfileSeccion({
                   <div className="w-9 h-9 bg-gradient-to-brrounded-2xl flex items-center justify-center">
                     <Settings className="w-5 h-5 text-white" />
                   </div>
-                  <h2 className="text-2xl font-bold text-white">Configuración</h2>
+                  <h2 className="text-2xl font-bold text-white">{t('profile:settings.title')}</h2>
                 </div>
                 <button
-                  onClick={() => setShowSettingsModal(false)}
+                  onClick={() => { stopRingtonePreview(); setShowRingtonePanel(false); setShowSettingsModal(false); }}
                   className="w-9 h-9 flex items-center justify-center text-white/70 hover:text-white hover:bg-white/10 rounded-full transition-all"
                 >
                   <X size={22} />
@@ -1386,36 +1724,25 @@ function ProfileSeccion({
                     <CreditCard size={26} />
                   </div>
                   <div className="flex-1">
-                    <p className="font-semibold text-lg text-white group-hover:text-emerald-400 transition-colors">Cuenta Bancaria</p>
-                    <p className="text-xs text-gray-400">Donde recibirás el dinero de tu wallet</p>
+                    <p className="font-semibold text-lg text-white group-hover:text-emerald-400 transition-colors">{t('profile:settings.bankAccount')}</p>
+                    <p className="text-xs text-gray-400">{t('profile:settings.bankSubtitle')}</p>
                   </div>
                   <div className="text-emerald-400">
-                    <span className="text-xs font-medium">AGREGAR</span>
+                    <span className="text-xs font-medium">{t('profile:settings.add')}</span>
                   </div>
                 </div>
 
-                {/* Otras opciones de edición */}
-                <div
-                  onClick={() => handleEditOption("Editar perfil")}
-                  className="group flex items-center gap-4 px-5 py-4 rounded-2xl hover:bg-white/5 cursor-pointer transition-all active:scale-[0.985]"
-                >
-                  <div className="w-11 h-11 bg-[#7000ff]/10 text-[#7000ff] rounded-2xl flex items-center justify-center">
-                    <UserCog size={26} />
-                  </div>
-                  <div className="flex-1">
-                    <p className="font-semibold text-white group-hover:text-[#7000ff]">Editar perfil</p>
-                  </div>
-                </div>
 
                 <div
-                  onClick={() => handleEditOption("Privacidad y seguridad")}
+                  onClick={() => handleEditOption("Privacidad de chats")}
                   className="group flex items-center gap-4 px-5 py-4 rounded-2xl hover:bg-white/5 cursor-pointer transition-all active:scale-[0.985]"
                 >
                   <div className="w-11 h-11 bg-amber-500/10 text-amber-400 rounded-2xl flex items-center justify-center">
                     <Shield size={26} />
                   </div>
                   <div className="flex-1">
-                    <p className="font-semibold text-white group-hover:text-amber-400">Privacidad y seguridad</p>
+                    <p className="font-semibold text-white group-hover:text-amber-400">{t('profile:settings.privacy', 'Privacidad de chats')}</p>
+                    <p className="text-xs text-gray-400">PIN de 6 dígitos para ocultos</p>
                   </div>
                 </div>
 
@@ -1427,7 +1754,7 @@ function ProfileSeccion({
                     <Bell size={26} />
                   </div>
                   <div className="flex-1">
-                    <p className="font-semibold text-white group-hover:text-sky-400">Notificaciones</p>
+                    <p className="font-semibold text-white group-hover:text-sky-400">{t('profile:settings.notifications')}</p>
                   </div>
                 </div>
 
@@ -1455,12 +1782,79 @@ function ProfileSeccion({
                     setTimeout(() => handleOpenAvailabilityModal(), 280);
                   }}
                   >
-                    <p className="font-semibold text-white group-hover:text-violet-400">Horario de disponibilidad</p>
-                    <p className="text-xs text-gray-400">Define cuándo pueden agendarte llamadas tus suscriptores</p>
+                    <p className="font-semibold text-white group-hover:text-violet-400">{t('profile:settings.availability')}</p>
+                    <p className="text-xs text-gray-400">{t('profile:settings.availabilitySubtitle')}</p>
                   </div>
                   <div className="text-violet-400">
-                    <span className="text-xs font-medium">EDITAR</span>
+                    <span className="text-xs font-medium">{t('profile:settings.edit')}</span>
                   </div>
+                </div>
+
+                {/* Sonido de llamada */}
+                <div className="rounded-2xl overflow-hidden">
+                  <div
+                    onClick={() => { stopRingtonePreview(); setShowRingtonePanel(p => !p); }}
+                    className="group flex items-center gap-4 px-5 py-4 hover:bg-white/5 cursor-pointer transition-all active:scale-[0.985]"
+                  >
+                    <div className="w-11 h-11 bg-pink-500/10 text-pink-400 rounded-2xl flex items-center justify-center">
+                      <Phone size={22} />
+                    </div>
+                    <div className="flex-1">
+                      <p className="font-semibold text-white group-hover:text-pink-400 transition-colors">Sonido de llamada</p>
+                      <p className="text-xs text-gray-400">{RINGTONE_OPTIONS.find(r => r.id === ringtoneId)?.label ?? '—'}</p>
+                    </div>
+                    <span className={`text-white/40 transition-transform duration-200 ${showRingtonePanel ? 'rotate-180' : ''}`}>▾</span>
+                  </div>
+
+                  <AnimatePresence>
+                    {showRingtonePanel && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.22 }}
+                        className="overflow-hidden"
+                      >
+                        <div className="px-4 pb-3 grid grid-cols-1 gap-1">
+                          {RINGTONE_OPTIONS.map(opt => {
+                            const active = opt.id === ringtoneId;
+                            return (
+                              <div
+                                key={opt.id}
+                                className={`flex items-center gap-3 px-4 py-2.5 rounded-xl cursor-pointer transition-all ${active ? 'bg-pink-500/15 border border-pink-500/30' : 'hover:bg-white/5 border border-transparent'}`}
+                                onClick={() => {
+                                  setRingtone(opt.id);
+                                  previewRingtone(opt.file);
+                                }}
+                              >
+                                <div className={`w-2 h-2 rounded-full flex-shrink-0 ${active ? 'bg-pink-400' : 'bg-white/20'}`} />
+                                <span className={`text-sm flex-1 ${active ? 'text-pink-300 font-semibold' : 'text-white/70'}`}>{opt.label}</span>
+                                <button
+                                  type="button"
+                                  onClick={e => { e.stopPropagation(); previewRingtone(opt.file); }}
+                                  className="text-white/30 hover:text-white/80 transition-colors text-xs px-2 py-0.5 rounded-lg hover:bg-white/10"
+                                >
+                                  ▶
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+
+                {/* Idioma */}
+                <div className="flex items-center gap-4 px-5 py-4 rounded-2xl hover:bg-white/5 transition-all">
+                  <div className="w-11 h-11 bg-indigo-500/10 text-indigo-400 rounded-2xl flex items-center justify-center text-xl">
+                    🌐
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-semibold text-white">{t('profile:settings.language')}</p>
+                    <p className="text-xs text-gray-400">{t('profile:settings.languageSubtitle')}</p>
+                  </div>
+                  <LanguageSwitcher isAuthenticated={!!currentUser} compact />
                 </div>
 
                 {/* ===================== BOTÓN CONECTAR REDES (item de abajo) ===================== */}
@@ -1472,23 +1866,23 @@ function ProfileSeccion({
                   className="mt-6 mx-auto flex items-center justify-center gap-3 bg-gradient-to-r from-[#1c1427] to-[#142122] text-white font-semibold py-4 px-8 rounded-2xl shadow-xl shadow-[#7000ff]/30 hover:scale-105 active:scale-95 transition-all cursor-pointer"
                 >
                   <Share2 size={20} />
-                  CONECTAR REDES SOCIALES
+                  {t('profile:settings.connectSocial')}
                 </div>
               </div>
 
               <div className="px-8 py-6 flex items-center justify-between text-[10px] text-white/40">
                 <div className="flex flex-col">
-                  <span>Versión 1.4.2</span>
-                  <span>Soporte wallet activa</span>
+                  <span>{t('profile:settings.version', { version: '1.4.2' })}</span>
+                  <span>{t('profile:settings.walletSupport')}</span>
                 </div>
-                <button
-                  onClick={() => logout()(dispatch)}
-                  className="flex items-center gap-2 px-3 py-2 bg-red-500/5 hover:bg-red-500/10 border border-red-500/10 rounded-xl text-red-500/70 hover:text-red-500 transition-all active:scale-95"
-                  title="Cerrar sesión"
-                >
-                  <LogOut size={16} />
-                  <span className="font-bold uppercase tracking-tighter">Salir</span>
-                </button>
+                  <button
+                    onClick={handleLogout}
+                    className="flex items-center gap-2 px-3 py-2 bg-red-500/5 hover:bg-red-500/10 border border-red-500/10 rounded-xl text-red-500/70 hover:text-red-500 transition-all active:scale-95"
+                    title={t('profile:settings.logout')}
+                  >
+                    <LogOut size={16} />
+                    <span className="font-bold uppercase tracking-tighter">{t('profile:settings.logoutButton')}</span>
+                  </button>
               </div>
             </motion.div>
           </motion.div>
@@ -1520,7 +1914,7 @@ function ProfileSeccion({
                   <div className="w-9 h-9 bg-violet-500/10 text-violet-400 rounded-2xl flex items-center justify-center">
                     <Clock className="w-5 h-5" />
                   </div>
-                  <h2 className="text-2xl font-bold text-white">Disponibilidad</h2>
+                  <h2 className="text-2xl font-bold text-white">{t('profile:availability.title')}</h2>
                 </div>
                 <button
                   onClick={() => setShowAvailabilityModal(false)}
@@ -1537,7 +1931,7 @@ function ProfileSeccion({
                     <Clock size={26} />
                   </div>
                   <div className="flex-1">
-                    <p className="text-[11px] uppercase tracking-widest text-emerald-400/80 font-bold mb-1">Hora de inicio</p>
+                    <p className="text-[11px] uppercase tracking-widest text-emerald-400/80 font-bold mb-1">{t('profile:availability.startLabel')}</p>
                     <input
                       type="time"
                       value={startTime}
@@ -1546,7 +1940,7 @@ function ProfileSeccion({
                     />
                   </div>
                   <div className="flex flex-col items-end border-l border-white/10 pl-4 h-10 justify-center">
-                    <span className="text-[10px] text-white/40 leading-none">MODO</span>
+                    <span className="text-[10px] text-white/40 leading-none">{t('profile:availability.mode')}</span>
                     <span className="text-sm font-bold text-emerald-400">{formatTime12h(startTime).split(" ")[1]}</span>
                   </div>
                 </div>
@@ -1557,7 +1951,7 @@ function ProfileSeccion({
                     <Clock size={26} />
                   </div>
                   <div className="flex-1">
-                    <p className="text-[11px] uppercase tracking-widest text-red-400/80 font-bold mb-1">Hora de fin</p>
+                    <p className="text-[11px] uppercase tracking-widest text-red-400/80 font-bold mb-1">{t('profile:availability.endLabel')}</p>
                     <input
                       type="time"
                       value={endTime}
@@ -1566,7 +1960,7 @@ function ProfileSeccion({
                     />
                   </div>
                   <div className="flex flex-col items-end border-l border-white/10 pl-4 h-10 justify-center">
-                    <span className="text-[10px] text-white/40 leading-none">MODO</span>
+                    <span className="text-[10px] text-white/40 leading-none">{t('profile:availability.mode')}</span>
                     <span className="text-sm font-bold text-red-400">{formatTime12h(endTime).split(" ")[1]}</span>
                   </div>
                 </div>
@@ -1576,7 +1970,7 @@ function ProfileSeccion({
 
                 {/* Selección de Días (Estilo Mejorado) */}
                 <div className="px-5 py-3">
-                  <p className="text-white/50 text-xs font-medium mb-4 ml-1">Repetir estos días:</p>
+                  <p className="text-white/50 text-xs font-medium mb-4 ml-1">{t('profile:availability.repeat')}</p>
                   <div className="flex justify-between gap-1.5">
                     {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => {
                       const isActive = selectedDays.includes(day);
@@ -1589,7 +1983,7 @@ function ProfileSeccion({
                             : "bg-white/5 border-white/5 text-white/40 hover:bg-white/10 hover:border-white/10"
                             }`}
                         >
-                          {day.toUpperCase()}
+                          {t(`profile:availability.days.${day}`)}
                         </button>
                       );
                     })}
@@ -1606,7 +2000,7 @@ function ProfileSeccion({
                     className="w-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 font-bold py-4 rounded-2xl flex items-center justify-center gap-2"
                   >
                     <Check size={18} />
-                    <span>¡HORARIO ACTUALIZADO!</span>
+                    <span>{t('profile:availability.updated')}</span>
                   </motion.div>
                 ) : (
                   <>
@@ -1625,7 +2019,7 @@ function ProfileSeccion({
                         ) : (
                           <>
                             <Zap size={18} />
-                            GUARDAR CONFIGURACIÓN
+                            {t('profile:availability.saveSettings')}
                           </>
                         )}
                       </div>
@@ -1655,7 +2049,7 @@ function ProfileSeccion({
               onClick={(e) => e.stopPropagation()}
             >
               <div className="px-6 pt-6 pb-2 flex items-center justify-between">
-                <h3 className="text-xl font-bold text-white tracking-tight">Conectar redes</h3>
+                <h3 className="text-xl font-bold text-white tracking-tight">{t('profile:connectSocial.title')}</h3>
                 <button
                   onClick={() => setShowConnectSocialModal(false)}
                   className="w-8 h-8 flex items-center justify-center bg-white/5 hover:bg-white/10 rounded-full text-white/60 hover:text-white transition-all transform hover:rotate-90"
@@ -1678,7 +2072,7 @@ function ProfileSeccion({
                           <p className="font-bold text-sm text-white">Instagram</p>
                           <div className="flex items-center gap-2">
                             <p className="text-[10px] text-white/40 font-medium">
-                              {connected ? `@${connected.platform_username}` : 'Sin conectar'}
+                              {connected ? `@${connected.platform_username}` : t('profile:connectSocial.notConnected')}
                             </p>
                             {connected && (
                               <span className="text-[9px] text-emerald-400 font-bold bg-emerald-400/10 px-1.5 py-0.5 rounded-md">
@@ -1691,13 +2085,13 @@ function ProfileSeccion({
                       <div className="flex items-center gap-2">
                         {connected ? (
                           <>
-                            <div className="w-8 h-8 flex items-center justify-center bg-emerald-500/10 rounded-full text-emerald-400" title="Conectado">
+                            <div className="w-8 h-8 flex items-center justify-center bg-emerald-500/10 rounded-full text-emerald-400" title={t('profile:connectSocial.connected')}>
                               <Check size={14} />
                             </div>
                             <button
                               onClick={() => handleDisconnectSocial('instagram')}
                               className="w-8 h-8 flex items-center justify-center bg-white/5 hover:bg-red-500/10 rounded-full text-white/40 hover:text-red-400 transition-colors"
-                              title="Desconectar"
+                              title={t('profile:connectSocial.disconnect')}
                             >
                               <Trash2 size={14} />
                             </button>
@@ -1707,7 +2101,7 @@ function ProfileSeccion({
                             onClick={() => handleConnectSocial('instagram')}
                             className="bg-white text-black hover:bg-gray-200 font-bold px-4 py-1.5 rounded-xl text-xs transition-all active:scale-95"
                           >
-                            Conectar
+                            {t('profile:connectSocial.connect')}
                           </button>
                         )}
                       </div>
@@ -1728,7 +2122,7 @@ function ProfileSeccion({
                           <p className="font-bold text-sm text-white">TikTok</p>
                           <div className="flex items-center gap-2">
                             <p className="text-[10px] text-white/40 font-medium">
-                              {connected ? `@${connected.platform_username}` : 'Sin conectar'}
+                              {connected ? `@${connected.platform_username}` : t('profile:connectSocial.notConnected')}
                             </p>
                             {connected && (
                               <span className="text-[9px] text-emerald-400 font-bold bg-emerald-400/10 px-1.5 py-0.5 rounded-md">
@@ -1741,13 +2135,13 @@ function ProfileSeccion({
                       <div className="flex items-center gap-2">
                         {connected ? (
                           <>
-                            <div className="w-8 h-8 flex items-center justify-center bg-emerald-500/10 rounded-full text-emerald-400" title="Conectado">
+                            <div className="w-8 h-8 flex items-center justify-center bg-emerald-500/10 rounded-full text-emerald-400" title={t('profile:connectSocial.connected')}>
                               <Check size={14} />
                             </div>
                             <button
                               onClick={() => handleDisconnectSocial('tiktok')}
                               className="w-8 h-8 flex items-center justify-center bg-white/5 hover:bg-red-500/10 rounded-full text-white/40 hover:text-red-400 transition-colors"
-                              title="Desconectar"
+                              title={t('profile:connectSocial.disconnect')}
                             >
                               <Trash2 size={14} />
                             </button>
@@ -1757,7 +2151,7 @@ function ProfileSeccion({
                             onClick={() => handleConnectSocial('tiktok')}
                             className="bg-white text-black hover:bg-gray-200 font-bold px-4 py-1.5 rounded-xl text-xs transition-all active:scale-95"
                           >
-                            Conectar
+                            {t('profile:connectSocial.connect')}
                           </button>
                         )}
                       </div>
@@ -1778,7 +2172,7 @@ function ProfileSeccion({
                           <p className="font-bold text-sm text-white">Facebook</p>
                           <div className="flex items-center gap-2">
                             <p className="text-[10px] text-white/40 font-medium">
-                              {connected ? `@${connected.platform_username}` : 'Sin conectar'}
+                              {connected ? `@${connected.platform_username}` : t('profile:connectSocial.notConnected')}
                             </p>
                             {connected && (
                               <span className="text-[9px] text-emerald-400 font-bold bg-emerald-400/10 px-1.5 py-0.5 rounded-md">
@@ -1791,13 +2185,13 @@ function ProfileSeccion({
                       <div className="flex items-center gap-2">
                         {connected ? (
                           <>
-                            <div className="w-8 h-8 flex items-center justify-center bg-emerald-500/10 rounded-full text-emerald-400" title="Conectado">
+                            <div className="w-8 h-8 flex items-center justify-center bg-emerald-500/10 rounded-full text-emerald-400" title={t('profile:connectSocial.connected')}>
                               <Check size={14} />
                             </div>
                             <button
                               onClick={() => handleDisconnectSocial('facebook')}
                               className="w-8 h-8 flex items-center justify-center bg-white/5 hover:bg-red-500/10 rounded-full text-white/40 hover:text-red-400 transition-colors"
-                              title="Desconectar"
+                              title={t('profile:connectSocial.disconnect')}
                             >
                               <Trash2 size={14} />
                             </button>
@@ -1807,7 +2201,7 @@ function ProfileSeccion({
                             onClick={() => handleConnectSocial('facebook')}
                             className="bg-white text-black hover:bg-gray-200 font-bold px-4 py-1.5 rounded-xl text-xs transition-all active:scale-95"
                           >
-                            Conectar
+                            {t('profile:connectSocial.connect')}
                           </button>
                         )}
                       </div>
@@ -1822,7 +2216,7 @@ function ProfileSeccion({
                     <Zap size={14} className="text-purple-400" />
                   </div>
                   <p className="text-[10px] text-white/40 leading-snug font-medium">
-                    Tu alcance total suma tus seguidores de Buzzy y redes externas.
+                    {t('profile:connectSocial.note')}
                   </p>
                 </div>
               </div>
@@ -1874,6 +2268,8 @@ function ProfileSeccion({
                         muted={isMuted}
                         playsInline
                         onClick={toggleMute}
+                        onPlay={() => onVideoPlay(video.id.toString())}
+                        onEnded={() => resetVideo(video.id.toString())}
                         onTimeUpdate={(e) => handleVideoProgress(e, video.id.toString())}
                       />
                     )}
@@ -1966,14 +2362,7 @@ function ProfileSeccion({
                       <div className="relative mb-1">
                         <div className="w-12 h-12 rounded-full border-2 border-white overflow-hidden">
                           <img
-                            src={`${getBaseUrl()}${(() => {
-                              const pic = video.user_id?.profile_picture || user?.profile_picture;
-                              if (pic && !pic.startsWith('media/')) {
-                                return `media/${pic}`;
-                              }
-                              return pic;
-                            })()
-                              }`}
+                            src={getMediaUrl(video.user_id?.profile_picture || user?.profile_picture)}
                             className="w-full h-full object-cover"
                             alt="user"
                           />
@@ -2069,7 +2458,7 @@ function ProfileSeccion({
                         >
                           <svg width="20" height="20" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg"><g><g><g><path d="M94 58H26V104H94V58Z" fill="#FF4F64"></path><path opacity="0.05" d="M94 101.294H26V104H94V101.294Z" fill="black"></path><path opacity="0.1" d="M28.6842 58H26V104H28.6842V58Z" fill="white"></path><path opacity="0.05" d="M94 58H91.3158V104H94V58Z" fill="black"></path><path opacity="0.05" d="M73.8684 58H71.1842V104H73.8684V58Z" fill="black"></path><path d="M71.1842 58H48.5921V104H71.1842V58Z" fill="#FFD4D9"></path></g></g><g><path d="M100 42.665H20V60.0001H100V42.665Z" fill="#FF4F64"></path><path d="M76.9491 42.665H42.8248V60.0001H76.9491V42.665Z" fill="#FFD4D9"></path></g></g></svg>
                         </motion.button>
-                        <span className="text-[10px] text-pink-300/90 font-medium drop-shadow-md">Regalar</span>
+                        <span className="text-[10px] text-pink-300/90 font-medium drop-shadow-md">{t('videos:actions.sendGift')}</span>
                       </div>
                     </div>
                   </div>
@@ -2384,10 +2773,10 @@ function ProfileSeccion({
                   controls
                   playsInline
                 />
-              ) : user && !user?.profile_picture.startsWith('media/') ? (
+              ) : user ? (
                 <img
                   className="max-w-full max-h-full object-contain rounded-xl shadow-2xl shadow-[#7000ff]/20"
-                  src={`${getBaseUrl() + '/media/' + user.profile_picture}`}
+                  src={getMediaUrl(user.profile_picture)}
                   alt={user.username}
                 />
               ) : (
@@ -2434,7 +2823,7 @@ function ProfileSeccion({
                   {user?.profile_picture ? (
                     <img
                       className="h-full w-full object-cover"
-                      src={`${user?.profile_picture.startsWith("http") ? user.profile_picture : `${getBaseUrl()}/media/${user.profile_picture}`}`}
+                      src={getMediaUrl(user?.profile_picture)}
                       alt={user?.username}
                     />
                   ) : (
@@ -2464,7 +2853,7 @@ function ProfileSeccion({
                 <video
                   ref={profileStoryVideoRef}
                   key={`profile-story-${activeProfileStoryIndex}`}
-                  src={`${getBaseUrl()}/media/${profileStoriesMedia[activeProfileStoryIndex]?.file}`}
+                  src={getMediaUrl(profileStoriesMedia[activeProfileStoryIndex]?.file)}
                   className="h-full w-full object-contain"
                   autoPlay
                   playsInline
@@ -2474,7 +2863,7 @@ function ProfileSeccion({
               ) : (
                 <img
                   key={`profile-story-${activeProfileStoryIndex}`}
-                  src={`${getBaseUrl()}/media/${profileStoriesMedia[activeProfileStoryIndex]?.file}`}
+                  src={getMediaUrl(profileStoriesMedia[activeProfileStoryIndex]?.file)}
                   className="h-full w-full object-contain"
                   alt={`Historia de ${user?.username}`}
                 />
@@ -2538,13 +2927,13 @@ function ProfileSeccion({
                 <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-tr from-[#7000ff] to-[#00f0ff] p-1">
                   <img
                     className="w-full h-full object-cover rounded-full"
-                    src={`${user && !user?.profile_picture.startsWith('media') ? getBaseUrl() + '/media/' + user?.profile_picture : ''}`}
+                    src={getMediaUrl(user?.profile_picture)}
                     alt="user"
                   />
                 </div>
-                <h3 className="text-xl text-white font-bold mb-2">Seguir para enviar mensaje</h3>
+                <h3 className="text-xl text-white font-bold mb-2">{t('profile:prompts.followToMessage.title')}</h3>
                 <p className="text-gray-400 text-sm mb-6">
-                  Debes seguir a @{user?.username} antes de enviarle un mensaje directo.
+                  {t('profile:prompts.followToMessage.description', { username: user?.username })}
                 </p>
                 <div className="flex gap-3">
                   <Button
@@ -2552,13 +2941,13 @@ function ProfileSeccion({
                     className="flex-1 bg-transparent border-white/20 text-white hover:bg-white/5 rounded-xl h-11"
                     onClick={() => setShowFollowPrompt(false)}
                   >
-                    Cancelar
+                    {t('common:actions.cancel')}
                   </Button>
                   <Button
                     className="flex-1 bg-gradient-to-r from-[#7000ff] to-[#00f0ff] text-white hover:opacity-90 rounded-xl h-11 border-none shadow-lg shadow-[#00f0ff]/20"
                     onClick={handleFollowAndMessage}
                   >
-                    Seguir y chatear
+                    {t('profile:actions.followAndMessage')}
                   </Button>
                 </div>
               </div>
@@ -2581,6 +2970,7 @@ function ProfileSeccion({
 const mapStateToProps = (state: RootState): any => ({
   media_user: state.getMediaByUser.media_user,
   user: state.getUserDetail.user as UserInterface | null,
+  notFoundUsername: (state.getUserDetail as { notFoundUsername: string | null }).notFoundUsername,
   subscriptionPlans: state.subscriptionReducer.plans,
   // Availability
   availabilitySaving: (state as any).availabilityReducer?.saving ?? false,
@@ -2601,6 +2991,7 @@ export default connect(mapStateToProps, {
   saveAvailability,
   getAvailability,
   getSocialAccounts,
+  refreshSocialFollowers,
   initSocialOAuth,
   disconnectSocialAccount,
   getAvailabilityStatus,

@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Rocket, Plus, Layout, ArrowLeft } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Rocket, ArrowLeft, AlertTriangle } from "lucide-react";
 import axios from "axios";
 import { getBaseUrl } from "../../redux/client/api-client";
 import AdsDashboard from "../../components/ads/AdsDashboard";
 import AdsCreationFlow from "../../components/ads/AdsCreationFlow";
+import BottomNavbar from "../../components/Layout/ButtonNavar";
 
 const AdsPage: React.FC = () => {
     const [activeTab, setActiveTab] = useState<"dashboard" | "create">("dashboard");
@@ -27,6 +27,7 @@ const AdsPage: React.FC = () => {
             latitude: null as number | null,
             longitude: null as number | null,
             radius: 50,
+            max_frequency: 3,
         },
         creative: {
             title: "",
@@ -38,6 +39,7 @@ const AdsPage: React.FC = () => {
         budget: {
             daily_budget: 5,
             total_budget: 50,
+            bidding_model: "CPM",
         }
     });
 
@@ -121,7 +123,7 @@ const AdsPage: React.FC = () => {
 
             complexFormData.append("name", campaignData.name);
             complexFormData.append("objective", campaignData.objective);
-            complexFormData.append("status", "ACTIVE");
+            complexFormData.append("status", "DRAFT");
 
             complexFormData.append("audience.age_min", campaignData.audience.age_min.toString());
             complexFormData.append("audience.age_max", campaignData.audience.age_max.toString());
@@ -135,6 +137,7 @@ const AdsPage: React.FC = () => {
                 complexFormData.append("audience.longitude", campaignData.audience.longitude.toString());
             }
             complexFormData.append("audience.radius", (campaignData.audience.radius || 50).toString());
+            complexFormData.append("audience.max_frequency", (campaignData.audience.max_frequency || 3).toString());
 
             complexFormData.append("creative.title", campaignData.creative.title);
             complexFormData.append("creative.description", campaignData.creative.description);
@@ -146,6 +149,7 @@ const AdsPage: React.FC = () => {
 
             complexFormData.append("budget.daily_budget", campaignData.budget.daily_budget.toString());
             complexFormData.append("budget.total_budget", campaignData.budget.total_budget.toString());
+            complexFormData.append("budget.bidding_model", campaignData.budget.bidding_model || "CPM");
 
             const response = await axios.post(`${getBaseUrl()}api/ads/campaigns/`, complexFormData, {
                 headers: {
@@ -175,66 +179,64 @@ const AdsPage: React.FC = () => {
     };
 
     return (
-        <div className="min-h-screen bg-[#020412] text-white pt-12 pb-12 px-4 md:px-8">
-            <div className="max-w-7xl mx-auto space-y-8">
-                {/* Independent Back Button */}
-                <div className="flex justify-start">
-                    <Link
-                        to="/"
-                        className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-all text-xs font-bold text-gray-400 hover:text-white group"
-                    >
-                        <ArrowLeft className="w-4 h-4" /> Volver al Inicio
-                    </Link>
-                </div>
+        <>
+        <div className="h-screen bg-[#020412] text-white flex flex-col overflow-hidden px-3 md:px-6 pt-2 pb-20">
+            <div className="max-w-7xl mx-auto w-full flex flex-col h-full gap-2">
 
-                {/* Header Section - Refined Premium Design */}
-                <div className="relative p-6 md:p-10 rounded-[48px] overflow-hidden group border border-white/5 shadow-2xl">
-                    {/* Decorative background elements */}
-                    <div className="absolute inset-0 bg-gradient-to-br from-cyan-900/40 via-[#020412] to-[#020412] z-0" />
-                    <div className="absolute -top-32 -right-32 w-96 h-96 bg-cyan-500/10 blur-[120px] rounded-full" />
+                {/* ── Top bar ── */}
+                <div className="flex items-center gap-3 flex-shrink-0 py-1">
+                    {/* Back arrow — only when creating */}
+                    {activeTab === "create" && (
+                        <button onClick={() => setActiveTab("dashboard")} className="p-2 rounded-xl bg-white/5 hover:bg-white/10 transition-all text-gray-400 hover:text-white flex-shrink-0">
+                            <ArrowLeft className="w-4 h-4" />
+                        </button>
+                    )}
 
-                    <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-10">
-                        <div className="flex items-center gap-6">
-                            <motion.div
-                                initial={{ rotate: -10, scale: 0.9 }}
-                                animate={{ rotate: 0, scale: 1 }}
-                                className="p-4 rounded-2xl bg-gradient-to-br from-cyan-400 to-blue-600 shadow-xl shadow-cyan-500/20 border border-white/20"
-                            >
-                                <Rocket className="w-7 h-7 text-white" />
-                            </motion.div>
-                            <div>
-                                <h1 className="text-2xl md:text-3xl font-black bg-clip-text text-transparent bg-gradient-to-r from-white via-cyan-100 to-cyan-400 tracking-tight">
-                                    Ads Manager
-                                </h1>
-                                <p className="text-[10px] md:text-xs text-cyan-400/60 font-bold uppercase tracking-[0.2em] mt-1 flex items-center gap-2">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse" />
-                                    Performance & Reach Engine
-                                </p>
-                            </div>
+                    {/* Logo + title */}
+                    <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                        <div className="p-2 rounded-xl bg-gradient-to-br from-cyan-400 to-blue-600 shadow-lg shadow-cyan-500/20 flex-shrink-0">
+                            <Rocket className="w-4 h-4 text-white" />
                         </div>
-
-                        <div className="flex flex-col sm:flex-row items-center gap-6">
-                            <div className="flex bg-black/40 p-1.5 rounded-[20px] border border-white/10 backdrop-blur-3xl">
-                                <button
-                                    onClick={() => setActiveTab("dashboard")}
-                                    className={`flex items-center gap-2 px-6 py-2.5 rounded-2xl text-xs font-black transition-all duration-500 ${activeTab === 'dashboard' ? 'bg-cyan-500 text-white shadow-lg shadow-cyan-500/20' : 'text-gray-500 hover:text-white'}`}
-                                >
-                                    <Layout className="w-3.5 h-3.5" /> DASHBOARD
-                                </button>
-                                <button
-                                    onClick={() => setActiveTab("create")}
-                                    className={`flex items-center gap-2 px-6 py-2.5 rounded-2xl text-xs font-black transition-all duration-500 ${activeTab === 'create' ? 'bg-cyan-500 text-white shadow-lg shadow-cyan-500/20' : 'text-gray-500 hover:text-white'}`}
-                                >
-                                    <Plus className="w-3.5 h-3.5" /> NUEVA CAMPAÑA
-                                </button>
-                            </div>
+                        <div className="min-w-0">
+                            <h1 className="text-sm font-black text-white tracking-tight leading-none truncate">Ads Manager</h1>
+                            <p className="text-[9px] text-cyan-400/60 font-bold uppercase tracking-widest flex items-center gap-1 mt-0.5">
+                                <span className="w-1 h-1 rounded-full bg-cyan-500 animate-pulse flex-shrink-0" />
+                                Performance & Reach Engine
+                            </p>
                         </div>
                     </div>
+
+                    {/* Nueva campaña */}
+                    {activeTab === "dashboard" && (
+                        <motion.button
+                            onClick={() => setActiveTab("create")}
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.93 }}
+                            className="relative flex items-center gap-1.5 px-3 py-2 rounded-xl text-white text-[10px] font-black uppercase tracking-widest overflow-hidden shadow-lg shadow-cyan-500/25 flex-shrink-0"
+                            style={{ background: "linear-gradient(135deg,#06b6d4,#6366f1)" }}
+                        >
+                            <motion.span
+                                className="absolute inset-0 bg-white/15"
+                                animate={{ x: ["-100%", "200%"] }}
+                                transition={{ repeat: Infinity, duration: 2.5, ease: "linear" }}
+                                style={{ skewX: "-20deg" }}
+                            />
+                            <span className="relative z-10">Nueva</span>
+                            <motion.span
+                                animate={{ x: [0, 4, 0], y: [0, -2, 0] }}
+                                transition={{ repeat: Infinity, duration: 1.2, ease: "easeInOut" }}
+                                className="relative z-10"
+                                style={{ display: "inline-flex", rotate: "45deg" }}
+                            >
+                                <Rocket className="w-3.5 h-3.5" />
+                            </motion.span>
+                        </motion.button>
+                    )}
                 </div>
 
                 {/* Content Area */}
-                <div className="relative">
-                    <AnimatePresence mode="wait">
+                <div className="flex-1 overflow-hidden relative min-h-0 h-full">
+                    <AnimatePresence mode="wait" initial={false}>
                         {success ? (
                             <motion.div
                                 key="success"
@@ -246,16 +248,25 @@ const AdsPage: React.FC = () => {
                                 <div className="w-24 h-24 bg-emerald-500/20 rounded-full flex items-center justify-center mb-6">
                                     <Rocket className="w-12 h-12 text-emerald-400 animate-bounce" />
                                 </div>
-                                <h3 className="text-4xl font-bold text-white">¡Campaña Lanzada!</h3>
-                                <p className="text-gray-400 max-w-sm">Tu anuncio está siendo procesado y comenzará a mostrarse pronto.</p>
+                                <h3 className="text-4xl font-bold text-white">¡Pago Exitoso!</h3>
+                                <p className="text-gray-400 max-w-sm">Tu campaña está en revisión. Nuestro equipo la aprobará en menos de 24 horas y comenzará a mostrarse pronto.</p>
                             </motion.div>
                         ) : activeTab === "dashboard" ? (
                             <motion.div
                                 key="dashboard"
-                                initial={{ opacity: 0, y: 20 }}
+                                initial={{ opacity: 0, y: 10 }}
                                 animate={{ opacity: 1, y: 0 }}
-                                exit={{ opacity: 0, y: -20 }}
+                                exit={{ opacity: 0, y: -10 }}
+                                className="flex flex-col gap-2 h-full"
                             >
+                                {campaigns.some(c => c.status === 'IN_REVIEW') && (
+                                    <div className="flex items-center gap-2 px-3 py-2 bg-yellow-500/10 border border-yellow-500/30 rounded-xl flex-shrink-0">
+                                        <AlertTriangle className="w-3 h-3 text-yellow-400 flex-shrink-0" />
+                                        <p className="text-[10px] text-yellow-300/80 font-bold">
+                                            {campaigns.filter(c => c.status === 'IN_REVIEW').length} campaña(s) en revisión — aprobación en menos de 24h.
+                                        </p>
+                                    </div>
+                                )}
                                 <AdsDashboard
                                     campaigns={campaigns}
                                     stats={stats}
@@ -265,9 +276,10 @@ const AdsPage: React.FC = () => {
                         ) : (
                             <motion.div
                                 key="create"
-                                initial={{ opacity: 0, y: 20 }}
+                                initial={{ opacity: 0, y: 10 }}
                                 animate={{ opacity: 1, y: 0 }}
-                                exit={{ opacity: 0, y: -20 }}
+                                exit={{ opacity: 0, y: -10 }}
+                                style={{ height: "100%", overflow: "hidden" }}
                             >
                                 <AdsCreationFlow
                                     step={step}
@@ -284,6 +296,8 @@ const AdsPage: React.FC = () => {
                 </div>
             </div>
         </div>
+        <BottomNavbar />
+        </>
     );
 };
 

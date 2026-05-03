@@ -24,6 +24,14 @@ export interface Video {
   video: string;
   liked?: boolean
   media_type?: 'video' | 'image'
+  audio_track_url?: string | null;
+  audio_track_id?: string | null;
+  audio_track_title?: string | null;
+  audio_track_artist?: string | null;
+  audio_track_cover?: string | null;
+  volume_original?: number;
+  volume_music?: number;
+  audio_trim_start?: number;
 }
 
 export interface StoryUser {
@@ -42,6 +50,24 @@ export interface StoryMedia {
   story: number;
 }
 
+export interface StoryTextLayer {
+  id: string;
+  text: string;
+  x: number;
+  y: number;
+  fontSize: number;
+  color: string;
+  bold: boolean;
+}
+
+export interface StoryStickerLayer {
+  id: string;
+  emoji: string;
+  x: number;
+  y: number;
+  size: number;
+}
+
 export interface Story {
   id: number;
   media: StoryMedia[];
@@ -51,6 +77,15 @@ export interface Story {
   is_active: boolean;
   created_at: string;
   user: StoryUser;
+  audio_track_url?: string | null;
+  audio_track_title?: string | null;
+  audio_track_artist?: string | null;
+  audio_volume_music?: number;
+  audio_trim_start?: number;
+  audio_trim_end?: number;
+  filter_css?: string | null;
+  text_layers?: StoryTextLayer[];
+  sticker_layers?: StoryStickerLayer[];
 }
 
 export type StoryList = Story[];

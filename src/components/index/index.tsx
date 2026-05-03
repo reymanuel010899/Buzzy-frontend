@@ -1,22 +1,23 @@
 import React, { useCallback, useEffect, useRef, useState, useMemo } from "react"
+import { useTranslation } from "react-i18next"
 import axios from "axios";
-import { useSelector } from 'react-redux';
 import { Link, useNavigate } from "react-router-dom"
 import sendMessageSound from "../../assets/sounds/sendMessage.mp3";
-import { Eye, MessageCircle, Heart, Volume2, VolumeX, Play, Pause, Plus, UserPlus, UserCheck, Loader2, X, MoreVertical } from "lucide-react"
+import { Eye, MessageCircle, Heart, Volume2, VolumeX, Play, Pause, Plus, UserPlus, UserCheck, Loader2, X, MoreVertical, Music2 } from "lucide-react"
 import AdCard from "../ads/AdCard"
+import StoryEditor from "./StoryEditor"
 import BottomNavbar from "../Layout/ButtonNavar"
 import { motion, AnimatePresence } from "framer-motion"
 import AdOverlay from "../ads/AdOverlay"
 import { createStory } from "../../redux/actions/history/createHistory"
-import { StoryList, Video as videoI } from './main.interface';
+import { StoryList, Story, Video as videoI, StoryTextLayer, StoryStickerLayer } from './main.interface';
 import { useDispatch, useSelector } from "react-redux"
 import { getComment } from "../../redux/actions/getComment"
 import { createComment } from "../../redux/actions/createComment"
 import { createView } from "../../redux/actions/createView"
 import { createFollower } from "../../redux/actions/createFollower"
 import { createLike } from "../../redux/actions/createLike"
-import { useWebSocket } from "../../hooks/useWebSocket"
+import { useWsEvent } from "../../context/WebSocketContext"
 import { getActiveStories } from "../../redux/actions/history/listActiveHistory"
 import { viewStory } from "../../redux/actions/history/makeViewed"
 import { getStoryViewers } from "../../redux/actions/history/getHIstoryViewers"
@@ -30,22 +31,31 @@ import { getRecivedGiftByUser } from "../../redux/actions/gift/getGiftsByUser"
 import { GiftI } from "../../interfaces/gift"
 import { ShowComments } from "../comments/modalComents"
 import { useChat } from "../../context/ChatContext"
-import { getBaseUrl } from "../../redux/client/api-client";
+import { getBaseUrl, getMediaUrl } from "../../redux/client/api-client";
 import { useTypingUsers } from "../../context/useTyping";
+import { useNotificationsStore } from "../../context/NotificationsStore";
+import HorizontalCarousel from "./HorizontalCarousel";
+import StoryFilterCanvas from "./StoryFilterCanvas";
+import { useUserVideos } from "../../hooks/useUserVideos";
+import { useVideoMetrics } from "../../hooks/useVideoMetrics";
 import typingSound from "../../assets/sounds/whatsapp-typing.mp3";
-import { useUnreadMessages } from "../../context/UnreadAcount";
 import VipGiftExperience from "../giftModal/modalGift";
 import TokenShopModal from "../giftModal/TokenShopModal";
 import InsufficientFundsModal from "../giftModal/InsufficientFundsModal";
+
+const clampWords = (text: string, maxWords = 4): string => {
+  const words = text.trim().split(/\s+/)
+  if (words.length <= maxWords) return text
+  return `${words.slice(0, maxWords).join(" ")}…`
+}
 import TokenPurchaseSuccessModal from "../giftModal/TokenPurchaseSuccessModal";
 import { buyTokens } from "../../redux/actions/buyTokens";
 import { getWallet } from "../../redux/actions/getWallet";
 import { useVideoEngagement } from "../../hooks/useVideoEngagement";
+import { deleteStory } from "../../redux/actions/history/deleteHistory";
+import { reportStory, ReportPayload } from "../../redux/actions/history/reportStory";
 import { getRecommendedFeed } from "../../redux/actions/getMedia";
 import { useCallStore } from "../../store/callStore";
-
-
-const WS_URL = "ws://localhost:8001/ws";
 interface StreamingUIProps {
   media: videoI[] | null
   getComment?: ({ video_id }: { video_id: string }) => any
@@ -66,8 +76,12 @@ export interface CommentData {
   create_at: string;
   created_at?: string;
   parent?: { uuid: string } | null;
+  audio_url?: string | null;
+  audio_duration?: number | null;
+  image_url?: string | null;
 }
 const StreamingUI = ({ media }: StreamingUIProps) => {
+  const { t } = useTranslation(['videos', 'common']);
   const dispatch = useDispatch();
   const navigate = useNavigate()
   // Redux selectors para gifts
@@ -85,6 +99,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [showTokenPurchaseSuccessModal, setShowTokenPurchaseSuccessModal] = useState(false);
   const [purchasedTokenAmount, setPurchasedTokenAmount] = useState(0);
   const [activeVideo, setActiveVideo] = useState<number | null>(null)
+  const hasPlayedFirstVideo = useRef(false)
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([])
   const [isMuted, setIsMuted] = useState(true)
   const mainRef = useRef<HTMLDivElement>(null)
@@ -95,7 +110,8 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [isGridVideoPlaying, setIsGridVideoPlaying] = useState<Record<string, boolean>>({})
   const [stories, setStories] = useState<StoryList>([]);
   const audioUnlockedRef = useRef(false);
-  const LoginReducer = useSelector((state) => state.LoginReducer);
+  const [isAudioUnlocked, setIsAudioUnlocked] = useState(false);
+  const LoginReducer = useSelector((state) => state?.LoginReducer);
 
   const [transientIconState, setTransientIconState] = useState<{
     videoId: string
@@ -103,6 +119,8 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   } | null>(null)
   const [showCommentsModal, setShowCommentsModal] = useState(false);
   const [mediaVideo, setMedia] = useState<videoI[] | null>(media);
+  const { prefetchBatch } = useUserVideos();
+  const { onVideoPlay, onTimeUpdate: trackTimeUpdate, resetVideo } = useVideoMetrics();
   const [currentVideoId, setCurrentVideoId] = useState<string | null>(null);
   const [viewedVideos, setViewedVideos] = useState<Set<string>>(new Set());
   // Stabilize user object to prevent unnecessary re-renders and WebSocket reconnections
@@ -117,7 +135,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     // 2. Accedemos a la ruta exacta: LoginReducer -> user
     // (Según tu imagen, los datos están en LoginReducer.user)
     const userData = LoginReducer?.user;
-    console.log(userData, "***********")
     // 3. Si no existe el objeto user, devolvemos el default
     if (!userData) return defaultUser;
 
@@ -152,7 +169,8 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     return [normalized, ...nextList];
   }, [normalizeIncomingComment]);
   // New state for Story Upload
-  const [isUploadingStory, setIsUploadingStory] = useState(false);
+  const [isUploadingStory, setIsUploadingStory] = useState(false)
+  const [storyEditorFile, setStoryEditorFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // --- New State for Story Viewer ---
   const [viewingStoryUserIndex, setViewingStoryUserIndex] = useState<number | null>(null);
@@ -160,6 +178,11 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [groupProgresses, setGroupProgresses] = useState<Record<string, number[]>>({});
   const [isStoryPaused, setIsStoryPaused] = useState(false);
   const [showOptionsModal, setShowOptionsModal] = useState(false);
+  const [showReportSheet, setShowReportSheet] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [feedbackModal, setFeedbackModal] = useState<{ show: boolean; success: boolean; message: string }>({ show: false, success: true, message: "" });
   const storyVideoRef = useRef<HTMLVideoElement>(null);
   // --- New States for User Switch Animation ---
   const [isSwitchingUser, setIsSwitchingUser] = useState(false);
@@ -171,9 +194,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [giftRecived, setGiftRecived] = useState<any[]>([]);
   // --- Fixed State for Viewed Items per Media UUID ---
   const [viewedItems, setViewedItems] = useState<Record<string, boolean>>({});
-  const setUnreadCount = useUnreadMessages((state) => state.setUnreadCount);
-  // O si prefieres que el hook sume automáticamente:
-  const incrementUnread = useUnreadMessages((state) => state.incrementUnread);
   // --- New States for Gift System ---
   const [showGiftMenu, setShowGiftMenu] = useState(false);
   const [showFullGiftMenu, setShowFullGiftMenu] = useState(false);
@@ -183,10 +203,17 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [storyPremiumStatesSee, setStoryPremiumStatesSee] = useState<Record<string, boolean>>({});
   const [storyPremiumColors, setStoryPremiumColors] = useState<Record<string, string>>({}); // Guardar colores premium por story UUID
   const isGiftsRef = useRef<GiftI[]>([]);
+  const currentStoryUuidRef = useRef<string | null>(null);
   const chatSocketActiveRef = useRef(false);
 
   // Audio refs for sounds
   const audioRefs = useRef<Record<string, HTMLAudioElement | null>>({});
+  const musicAudioRef = useRef<HTMLAudioElement | null>(null);
+  const activeAudioTrackRef = useRef<string | null>(null);
+  const storyAudioRef = useRef<HTMLAudioElement | null>(null);
+  const activeStoryAudioTrackRef = useRef<string | null>(null);
+  const storyAudioRequestIdRef = useRef(0);
+  const storyAudioFadeTimerRef = useRef<number | null>(null);
   const [_fullGifts, setFullGifts] = useState<GiftI[] | GiftI | []>([]);
   const [giftsLoading, setGiftsLoading] = useState(true);
   const [showVideoGiftModal, setShowVideoGiftModal] = useState(false);
@@ -213,6 +240,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   } | null>(null);
 
   const [expandedDescriptions, setExpandedDescriptions] = useState<{ [key: string]: boolean }>({});
+  const [carouselDots, setCarouselDots] = useState<{ [key: string]: { index: number; total: number } }>({});
   const [ads, setAds] = useState<any[]>([]);
   const [activeAdIndex, setActiveAdIndex] = useState<number | null>(null);
   const [selectedAd, setSelectedAd] = useState<any | null>(null);
@@ -224,9 +252,10 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const typingAudioRef = useRef<HTMLAudioElement | null>(null);
   const [showStoriesBar, setShowStoriesBar] = useState(true);
   const lastFeedScrollTopRef = useRef(0);
+  const feedScrollRef = useRef<HTMLDivElement>(null);
 
   // Custom hook for interest-based recommendation tracking
-  const { interestWeights, onIntersectionChange, recordInteraction } = useVideoEngagement();
+  const { onIntersectionChange, recordInteraction } = useVideoEngagement();
 
   // Infinite Scroll Trigger based on session interests
   const [isFetchingFeed, setIsFetchingFeed] = useState(false);
@@ -241,13 +270,12 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       // Only fetch if we haven't already attempted to fetch for this specific length
       // or if we have less than 5 videos left to show
       if (currentLength > lastFetchedLengthRef.current) {
-        const lastCursor = mediaVideo[currentLength - 1]?.created_at;
 
         console.log("Fetching next batch of recommendations...");
         setIsFetchingFeed(true);
         lastFetchedLengthRef.current = currentLength;
 
-        dispatch(getRecommendedFeed(interestWeights, lastCursor) as any)
+        getRecommendedFeed()(dispatch)
           .then((res: any) => {
             setIsFetchingFeed(false);
             if (!res || res.length === 0) {
@@ -268,25 +296,47 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   // every time a video leaves the view, but they are still captured by the closure 
   // when the fetch actually starts.
 
+  // Ad delivery config from backend
+  const [adConfig, setAdConfig] = useState({
+    ad_every_nth_video: 3,
+    ad_cooldown_seconds: 240,
+    ads_refresh_seconds: 300,
+  });
+  const userGpsRef = useRef<{ lat: number; lng: number } | null>(null);
+
+  // Fetch delivery config once on mount
+  useEffect(() => {
+    axios.get(`${getBaseUrl()}api/ads/campaigns/config/`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` }
+    }).then(r => setAdConfig(r.data)).catch(() => { });
+  }, []);
+
+  // Get user GPS once on mount (best-effort)
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => { userGpsRef.current = { lat: pos.coords.latitude, lng: pos.coords.longitude }; },
+      () => { }
+    );
+  }, []);
+
+  // Fetch ads on mount + refresh periodically
   useEffect(() => {
     fetchAds();
-  }, []);
+    const interval = setInterval(fetchAds, adConfig.ads_refresh_seconds * 1000);
+    return () => clearInterval(interval);
+  }, [adConfig.ads_refresh_seconds]);
 
   useEffect(() => {
     setMedia(media);
-  }, [media]);
+    if (!media?.length) return
+    const entries = media.map(v => ({ username: v.user_id.username, excludeId: v.id }))
+    prefetchBatch(entries)
+  }, [media, prefetchBatch]);
 
   const { activeIncomingCall, activeOutgoingCall } = useCallStore();
   const isCallActive = activeIncomingCall?.status === 'active' || activeOutgoingCall?.status === 'active';
 
-  // Duck video audio if a call is active
-  useEffect(() => {
-    videoRefs.current.forEach(video => {
-      if (video) {
-        video.volume = isCallActive ? 0.05 : 1.0;
-      }
-    });
-  }, [isCallActive, activeVideo]);
 
   const isPlayableAd = (ad: any) => {
     const mediaFile = ad?.creative?.media_file;
@@ -305,17 +355,48 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
   const fetchAds = async () => {
     try {
-      console.log("Fetching ads from:", `${getBaseUrl()}api/ads/campaigns/serve/`);
+      const params: Record<string, any> = {};
+      if (userGpsRef.current) {
+        params.lat = userGpsRef.current.lat;
+        params.lng = userGpsRef.current.lng;
+      }
       const response = await axios.get(`${getBaseUrl()}api/ads/campaigns/serve/`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` }
+        headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` },
+        params,
       });
-      console.log("Ads response data:", response.data);
       const validAds = Array.isArray(response.data) ? response.data.filter(isPlayableAd) : [];
       setAds(validAds);
     } catch (error) {
       console.error("Error fetching ads:", error);
     }
   };
+
+  const isPremiumUser = LoginReducer?.user?.is_buzzy_premium === true;
+
+  const stopStoryAudio = useCallback((restoreVideoVolume = true) => {
+    storyAudioRequestIdRef.current += 1;
+
+    if (storyAudioFadeTimerRef.current !== null) {
+      window.clearInterval(storyAudioFadeTimerRef.current);
+      storyAudioFadeTimerRef.current = null;
+    }
+
+    const prev = storyAudioRef.current;
+    if (prev) {
+      prev.pause();
+      prev.onended = null;
+      prev.ontimeupdate = null;
+      prev.src = "";
+      prev.load();
+      storyAudioRef.current = null;
+    }
+
+    activeStoryAudioTrackRef.current = null;
+
+    if (restoreVideoVolume && storyVideoRef.current) {
+      storyVideoRef.current.volume = 1;
+    }
+  }, []);
 
   const mergedFeed = useMemo(() => {
     if (!mediaVideo) {
@@ -327,8 +408,8 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
     mediaVideo.forEach((video, index) => {
       feed.push({ ...video, type: 'video' });
-      // Insert an ad every 15 videos
-      if ((index + 1) % 15 === 0 && ads[adIndex]) {
+      // Premium users never see ads in the static feed
+      if (!isPremiumUser && (index + 1) % (adConfig.ad_every_nth_video * 5) === 0 && ads[adIndex]) {
         console.log(`Inserting ad at index ${index + 1}`);
         feed.push({ ...ads[adIndex], type: 'ad' });
         adIndex++;
@@ -338,6 +419,187 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     console.log("mergedFeed total items:", feed.length);
     return feed;
   }, [mediaVideo, ads]);
+
+  // Duck video audio if a call is active, otherwise apply volume_original from the feed item
+  useEffect(() => {
+    videoRefs.current.forEach((video, index) => {
+      if (!video) return;
+      if (isCallActive) {
+        video.volume = 0.05;
+      } else {
+        const feedItem = mergedFeed[index];
+        const volOriginal = feedItem?.volume_original ?? 1.0;
+        video.volume = Math.min(Math.max(volOriginal, 0), 1);
+      }
+    });
+  }, [isCallActive, activeVideo, mergedFeed]);
+
+  const ensureAudioForTrack = useCallback(
+    (feedItem?: any, videoElement?: HTMLVideoElement | null) => {
+      const isVideoPlaying = Boolean(
+        videoElement &&
+        !videoElement.paused &&
+        !videoElement.muted &&
+        !isMuted &&
+        activeAdIndex === null &&
+        viewingStoryUserIndex === null
+      );
+
+      if (!isAudioUnlocked || !feedItem || feedItem.type !== 'video' || !feedItem.audio_track_url || !isVideoPlaying) {
+        musicAudioRef.current?.pause();
+        activeAudioTrackRef.current = null;
+        return;
+      }
+
+      const audioUrl = feedItem.audio_track_url;
+      const volumeMusic = Math.min(Math.max(feedItem.volume_music ?? 0.8, 0), 1);
+      const volumeOriginal = Math.min(Math.max(feedItem.volume_original ?? 1.0, 0), 1);
+      const trackId = feedItem.audio_track_id || audioUrl;
+
+      // Apply original-audio volume to the video element immediately
+      if (videoElement) {
+        videoElement.volume = volumeOriginal;
+      }
+
+      const trimStart = feedItem.audio_trim_start ?? 0;
+
+      if (
+        !musicAudioRef.current ||
+        musicAudioRef.current.src !== audioUrl ||
+        activeAudioTrackRef.current !== trackId
+      ) {
+        // Cleanup previous
+        if (musicAudioRef.current) {
+          musicAudioRef.current.pause();
+          musicAudioRef.current.onended = null;
+        }
+        const audio = new Audio(audioUrl);
+        audio.loop = false;
+
+        const setTime = () => {
+          audio.currentTime = trimStart;
+          audio.removeEventListener("loadedmetadata", setTime);
+        };
+        audio.addEventListener("loadedmetadata", setTime);
+
+        if (audio.readyState >= 1) {
+          audio.currentTime = trimStart;
+        }
+
+        // Manual loop — always restart from trimStart, never from 0
+        audio.onended = () => {
+          audio.currentTime = trimStart;
+          audio.play().catch(() => { });
+        };
+        musicAudioRef.current = audio;
+        activeAudioTrackRef.current = trackId;
+      }
+
+      musicAudioRef.current.volume = volumeMusic;
+      musicAudioRef.current.muted = false;
+      const playPromise = musicAudioRef.current.play();
+      if (playPromise?.catch) {
+        playPromise.catch(() => { });
+      }
+    },
+    [activeAdIndex, isAudioUnlocked, isMuted, viewingStoryUserIndex],
+  );
+
+  // (story audio is now handled directly in the useEffect below)
+
+  useEffect(() => {
+    const feedItem = mergedFeed[activeVideo ?? -1];
+    const videoElement = videoRefs.current[activeVideo ?? -1];
+
+    const syncAudio = () => ensureAudioForTrack(feedItem, videoElement);
+    const pauseAudio = () => {
+      musicAudioRef.current?.pause();
+    };
+
+    let prevTime = 0;
+    const watchLoop = () => {
+      if (!videoElement) return;
+      const ct = videoElement.currentTime;
+      if (ct < prevTime - 0.5 && musicAudioRef.current && feedItem?.audio_track_url) {
+        const trimStart = feedItem.audio_trim_start ?? 0;
+        // Assign currentTime only if metadata logic is somewhat initialized
+        if (musicAudioRef.current.readyState >= 1) {
+          musicAudioRef.current.currentTime = trimStart;
+        }
+        if (musicAudioRef.current.paused && !videoElement.paused) {
+          musicAudioRef.current.play().catch(() => { });
+        }
+      }
+      prevTime = ct;
+    };
+
+    if (videoElement) {
+      videoElement.addEventListener("play", syncAudio);
+      videoElement.addEventListener("playing", syncAudio);
+      videoElement.addEventListener("pause", pauseAudio);
+      videoElement.addEventListener("timeupdate", watchLoop);
+    }
+
+    syncAudio();
+
+    return () => {
+      if (videoElement) {
+        videoElement.removeEventListener("play", syncAudio);
+        videoElement.removeEventListener("playing", syncAudio);
+        videoElement.removeEventListener("pause", pauseAudio);
+        videoElement.removeEventListener("timeupdate", watchLoop);
+      }
+      pauseAudio();
+    };
+  }, [activeVideo, ensureAudioForTrack, mergedFeed]);
+
+
+  useEffect(() => {
+    return () => {
+      musicAudioRef.current?.pause();
+      musicAudioRef.current = null;
+      activeAudioTrackRef.current = null;
+      storyAudioRef.current?.pause();
+      storyAudioRef.current = null;
+      activeStoryAudioTrackRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    videoRefs.current.forEach((video, index) => {
+      if (!video) return;
+      if (activeAdIndex !== null && !video.paused) {
+        video.pause();
+        return;
+      }
+      if (index === activeVideo && activeAdIndex === null) {
+        if (video.paused && (index !== 0 || hasPlayedFirstVideo.current)) {
+          video.play().catch(() => { })
+        }
+      } else if (!video.paused) {
+        video.pause();
+      }
+    });
+  }, [activeVideo, activeAdIndex]);
+
+  // Pause active feed video when upload modal opens
+  useEffect(() => {
+    const onPause = () => {
+      videoRefs.current.forEach(v => { if (v && !v.paused) v.pause() })
+    }
+    const onResume = () => {
+      if (activeVideo !== null) {
+        const v = videoRefs.current[activeVideo]
+        if (v && v.paused) v.play().catch(() => { })
+      }
+    }
+    window.addEventListener('buzzy:pausefeed', onPause)
+    window.addEventListener('buzzy:resumefeed', onResume)
+    return () => {
+      window.removeEventListener('buzzy:pausefeed', onPause)
+      window.removeEventListener('buzzy:resumefeed', onResume)
+    }
+  }, [activeVideo])
 
   useEffect(() => {
     sendAudioRef.current = new Audio(sendMessageSound);
@@ -368,6 +630,120 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     return Array.from(groups.values());
   }, [stories]);
 
+  // ── Story Audio — direct, clean approach ──────────────────────────────────
+  useEffect(() => {
+    // Tear down any previous audio before starting the next story
+    stopStoryAudio(false);
+
+    if (viewingStoryUserIndex === null || isStoryPaused || isMuted) return;
+
+    const currentGroup = groupedStories[viewingStoryUserIndex];
+    if (!currentGroup) return;
+    const currentStoryItem = currentGroup.media?.[currentStoryItemIndex];
+    if (!currentStoryItem) return;
+
+    // Find the correct story for THIS media item (important for multi-story users)
+    const originalStory = (stories as Story[])?.find((s) => s.id === currentStoryItem.story);
+    if (!originalStory?.audio_track_url) return;
+
+    const trimStart = originalStory.audio_trim_start ?? 0;
+    const trimEnd = originalStory.audio_trim_end ?? null;
+    const volume = Math.min(Math.max(originalStory.audio_volume_music ?? 0.8, 0), 1);
+
+    // Silence the story video's native audio if we have a custom track
+    const videoEl = storyVideoRef.current;
+    if (videoEl) videoEl.volume = 0;
+
+    const audio = new Audio(originalStory.audio_track_url);
+    audio.loop = false;
+    audio.preload = "auto";
+    // Start muted — browsers always allow muted audio to play regardless of autoplay policy
+    audio.muted = true;
+    audio.volume = 0;
+
+    const loop = () => {
+      const end = trimEnd !== null ? trimEnd : audio.duration;
+      if (end && audio.currentTime >= end - 0.15) {
+        audio.currentTime = trimStart;
+        audio.play().catch(() => { });
+      }
+    };
+    audio.ontimeupdate = loop;
+    audio.onended = () => {
+      audio.currentTime = trimStart;
+      audio.play().catch(() => { });
+    };
+
+    const requestId = storyAudioRequestIdRef.current;
+    const beginPlay = () => {
+      if (requestId !== storyAudioRequestIdRef.current) return;
+      audio.currentTime = trimStart;
+      audio.muted = true; // muted = always autoplay allowed
+      audio.play().then(() => {
+        if (requestId !== storyAudioRequestIdRef.current) {
+          audio.pause();
+          return;
+        }
+        // Once playing, immediately unmute to hear the sound
+        audio.muted = false;
+        const targetVolume = volume;
+        const steps = 8;
+        const stepMs = 25;
+        const stepSize = targetVolume / steps;
+        let currentStep = 0;
+        audio.volume = 0;
+        if (storyAudioFadeTimerRef.current !== null) {
+          window.clearInterval(storyAudioFadeTimerRef.current);
+        }
+        storyAudioFadeTimerRef.current = window.setInterval(() => {
+          if (requestId !== storyAudioRequestIdRef.current) {
+            if (storyAudioFadeTimerRef.current !== null) {
+              window.clearInterval(storyAudioFadeTimerRef.current);
+              storyAudioFadeTimerRef.current = null;
+            }
+            return;
+          }
+          currentStep += 1;
+          audio.volume = Math.min(targetVolume, currentStep * stepSize);
+          if (currentStep >= steps) {
+            if (storyAudioFadeTimerRef.current !== null) {
+              window.clearInterval(storyAudioFadeTimerRef.current);
+              storyAudioFadeTimerRef.current = null;
+            }
+          }
+        }, stepMs);
+      }).catch(() => {
+        // If even muted play fails, retry on next click (very rare)
+        document.addEventListener("click", () => {
+          if (requestId !== storyAudioRequestIdRef.current) return;
+          audio.muted = false;
+          audio.play().catch(() => { });
+        }, { once: true });
+      });
+    };
+
+    if (audio.readyState >= 1) {
+      beginPlay();
+    } else {
+      audio.addEventListener("loadedmetadata", beginPlay, { once: true });
+    }
+
+    storyAudioRef.current = audio;
+    activeStoryAudioTrackRef.current = originalStory.audio_track_url;
+
+    return () => {
+      if (storyAudioRef.current === audio) {
+        stopStoryAudio(false);
+      } else {
+        audio.pause();
+        audio.ontimeupdate = null;
+        audio.onended = null;
+        audio.src = "";
+        audio.load();
+      }
+    };
+  }, [viewingStoryUserIndex, currentStoryItemIndex, groupedStories, stories, isStoryPaused, isMuted, stopStoryAudio]);
+
   useEffect(() => {
     sendAudioRef.current = new Audio(sendMessageSound);
   }, []);
@@ -382,6 +758,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
           sendAudioRef.current!.pause();
           sendAudioRef.current!.currentTime = 0;
           audioUnlockedRef.current = true;
+          setIsAudioUnlocked(true);
           console.log("🔓 Audio desbloqueado");
         })
         .catch(() => { });
@@ -478,223 +855,171 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     };
   };
 
-  const handleWSMessage = useCallback((data: any) => {
-    if (data.event === "like_updated") {
-      setMedia(prev =>
-        prev
-          ? prev.map(video =>
-            video.id === data.video_id
-              ? { ...video, like_count: data.likes, liked: data.liked }
-              : video
-          )
-          : prev
-      );
-    }
-    if (data.event === "gift_received") {
-      if (user.id == data.from_user) {
-        setGiftAnimation({
-          type: data.gift_type,
-          giftId: data.gift_uuid,
-          storyUuid: data.story_uuid,
-          sender: data.sender,
-          amount: data.amount || 1,
-          gift: data.gift_video,
-        });
-      } else {
-        setIsGift([...isGifts, {
-          type: data.gift_type,
-          giftId: data.gift_uuid,
-          storyUuid: data.story_uuid,
-          sender: data.sender,
-          amount: data.amount || 1,
-          gift: data.gift_video,
-        }]);
-        setGiftRecived((gift) => {
-          return [...gift, {
-            type: data.gift_type,
-            giftId: data.gift_uuid,
-            storyUuid: data.story_uuid,
-            sender: data.sender,
-            amount: data.amount || 1,
-            gift: data.gift_video,
-          }]
-        })
-      }
-      if (currentStoryUuid === data.story_uuid) {
-        setGiftRecived(prev => {
-          if (prev.some(g => g.uuid === data.gift_uuid)) return prev;
-          return [...prev, {
-            type: data.gift_type,
-            giftId: data.gift_uuid,
-            storyUuid: data.story_uuid,
-            sender: data.sender,
-            amount: data.amount || 1,
-            gift: data.gift_video,
-          }];
-        });
-      }
-      if (user.id === data.to_user) {
-        setIsGift(prev => {
-          if (prev.some(g => g.uuid === data.gift_uuid)) return prev;
-          return [...prev, {
-            type: data.gift_type,
-            giftId: data.gift_uuid,
-            storyUuid: data.story_uuid,
-            sender: data.sender,
-            amount: data.amount || 1,
-            gift: data.gift_video,
-          }];
-        });
-        setGiftRecived(prev => {
-          if (prev.some(g => g.uuid === data.gift_uuid)) return prev;
-          return [...prev, {
-            type: data.gift_type,
-            giftId: data.gift_uuid,
-            storyUuid: data.story_uuid,
-            sender: data.sender,
-            amount: data.amount || 1,
-            gift: data.gift_video,
-          }];
-        });
-      }
-    }
-    if (data.event === "video_gift_received") {
-      if (user.id == data.from_user || activeVideo !== null) {
-        setGiftAnimation({
-          type: data.gift_type,
-          giftId: data.gift_uuid,
-          videoId: data.video_id,
-          sender: data.sender,
-          amount: data.amount || 1,
-          gift: data.gift_video,
-          color_premiun: data.color_premiun,
-        });
-      }
-    }
-    if (data.event === "new_comment") {
-      setComments((prevComments) => {
-        if (data && data.user_id) {
-          setMedia(prev =>
-            prev ? prev.map((video) => {
-              if (video.id === data.video_id) {
-                return { ...video, comments_count: data.comments_count };
-              }
-              return video;
-            }) : prev
-          );
-          if (currentVideoId?.toString() === data.video_id?.toString()) {
-            return upsertComment(prevComments, data);
-          }
-          return prevComments;
-        }
-        return prevComments;
+  // ─── WebSocket events (via singleton context) ─────────────────────────────
+
+  useWsEvent("like_updated", useCallback((data: any) => {
+    setMedia(prev =>
+      prev
+        ? prev.map(video =>
+          video.id === data.video_id
+            ? { ...video, like_count: data.likes, liked: data.liked }
+            : video
+        )
+        : prev
+    );
+  }, [setMedia]));
+
+  useWsEvent("gift_received", useCallback((data: any) => {
+    const giftEntry = {
+      type: data.gift_type, giftId: data.gift_uuid, storyUuid: data.story_uuid,
+      sender: data.sender, amount: data.amount || 1, gift: data.gift_video,
+    };
+    const normalizeGiftList = (value: any) => (Array.isArray(value) ? value : []);
+    if (user.id == data.from_user) {
+      setGiftAnimation(giftEntry);
+    } else {
+      setIsGift(prev => {
+        const current = normalizeGiftList(prev);
+        return current.some(g => g.uuid === data.gift_uuid) ? current : [...current, giftEntry];
+      });
+      setGiftRecived(prev => {
+        const current = normalizeGiftList(prev);
+        return current.some(g => g.uuid === data.gift_uuid) ? current : [...current, giftEntry];
+      });
+      useNotificationsStore.getState().pushRealtime({
+        id: Date.now(),
+        notification_type: "gift",
+        message: `${data.sender?.username ?? data.sender} te mandó un regalo 🎁`,
+        is_read: false,
+        read_at: null,
+        created_at: new Date().toISOString(),
+        actor: { id: data.from_user, username: data.sender?.username ?? data.sender, profile_picture: data.sender?.profile_picture ?? null },
+        video_thumbnail: null,
+        video_uuid: null,
       });
     }
-    if (data.event === "new_view") {
-      setMedia(prev =>
-        prev ? prev.map((video) => {
-          if (video.id === data.video_id) {
-            return { ...video, view_acount: data.view_acount };
-          }
-          return video;
-        }) : prev
-      );
-    }
-    if (data.event === "new_follower") {
-      setMedia(prev =>
-        prev ? prev.map((video) => {
-          if (video.user_id.id == data.channel_profile) {
-            return { ...video, current_user_followered: data.current_user_followered };
-          }
-          return video;
-        }) : prev
-      );
-    }
-    if (data.event === "delete_follower") {
-      setMedia(prev =>
-        prev ? prev.map((video) => {
-          if (video.user_id.id == data.channel_profile) {
-            return { ...video, current_user_followered: data.current_user_followered };
-          }
-          return video;
-        }) : prev
-      );
-    }
-    if (data.event === "send_message") {
-      // ⛔ No es para mí
-      if (data.recipient_id !== user.id) return;
-      // ⛔ Ya estoy en ese chat, no sonar
-      // if (data.sender_id === user.id && !webscoket.is_active) return;
-      // if (chatSocketActiveRef.current) return;
-      if (data.unread_count !== undefined) {
-        setUnreadCount(data.chat_uuid, data.unread_count_target);
-      } else {
-        // Si el socket no trae el número, simplemente sumamos +1 en el cliente
-        // (Solo si el chat no está activo actualmente)
-        if (!chatSocketActiveRef.current) {
-          incrementUnread(data.chat_uuid);
-        }
-      }
-      if (sendAudioRef.current && audioUnlockedRef.current) {
-        sendAudioRef.current.currentTime = 0;
-        sendAudioRef.current
-          .play()
-          .catch(err => console.warn("Audio bloqueado:", err));
-      }
-
-    }
-    if (data.event === "new_story") {
-      setStories((prev) => {
-        if (data.story) {
-          return [...prev, data.story];
-        }
-        return prev;
+    // Usar ref para evitar TDZ — currentStoryUuid se declara más abajo en el módulo
+    if (currentStoryUuidRef.current === data.story_uuid) {
+      setGiftRecived(prev => {
+        const current = normalizeGiftList(prev);
+        return current.some(g => g.uuid === data.gift_uuid) ? current : [...current, giftEntry];
       });
     }
-    if (data.event === "gift_see") {
-      if (user.id === data.to_user) {
-        const updatedGifts = isGiftsRef.current.filter(gift => gift.uuid !== data.gift_uuid);
-        setIsGift(updatedGifts);
-        setGiftRecived(updatedGifts);
+  }, [user.id, setGiftAnimation, setIsGift, setGiftRecived]));
 
-        setGiftAnimation({
-          type: data.gift_type,
-          giftId: data.gift_uuid,
-          storyUuid: data.story_uuid,
-          sender: data.sender,
-          amount: data.amount || 1,
-          gift: data.gift_video,
-        });
-
-        // // Si el regalo es grande (>20), activar modo premium en esa story
-        // if (data.amount > 20) {
-        //   setStoryPremiumStatesSee(prev => ({ ...prev, [data.story_uuid]: true }));
-        // }
-      }
-
-      // Cerrar modal de viewers si está abierto
-      setShowViewersModal(false);
+  useWsEvent("video_gift_received", useCallback((data: any) => {
+    if (user.id == data.from_user || activeVideo !== null) {
+      setGiftAnimation({
+        type: data.gift_type, giftId: data.gift_uuid, videoId: data.video_id,
+        sender: data.sender, amount: data.amount || 1, gift: data.gift_video,
+        color_premiun: data.color_premiun,
+      });
+    } else {
+      useNotificationsStore.getState().pushRealtime({
+        id: Date.now(),
+        notification_type: "gift",
+        message: `${data.sender?.username ?? data.sender} te mandó un regalo 🎁`,
+        is_read: false,
+        read_at: null,
+        created_at: new Date().toISOString(),
+        actor: { id: data.from_user, username: data.sender?.username ?? data.sender, profile_picture: data.sender?.profile_picture ?? null },
+        video_thumbnail: null,
+        video_uuid: data.video_uuid ?? null,
+      });
     }
-    if (data.event === "typing") {
-      if (data.user_id === user.id) return;
+  }, [user.id, activeVideo, setGiftAnimation]));
 
-      if (data.is_typing) {
-        setTypingUser(
-          data.chat_uuid,
-          data.user_id,
-          data.username ?? "Alguien"
-        );
-      } else {
-        removeTypingUser(data.chat_uuid,
-          data.user_id);
-      }
+  useWsEvent("new_comment", useCallback((data: any) => {
+    if (!data?.user_id) return;
+    setMedia(prev =>
+      prev ? prev.map(video =>
+        video.id === data.video_id
+          ? { ...video, comments_count: data.comments_count }
+          : video
+      ) : prev
+    );
+    if (currentVideoId?.toString() === data.video_id?.toString()) {
+      setComments(prev => upsertComment(prev, data));
     }
-  },
-    [currentVideoId, setMedia, upsertComment]);
+  }, [currentVideoId, setMedia, upsertComment]));
+
+  useWsEvent("new_view", useCallback((data: any) => {
+    setMedia(prev =>
+      prev ? prev.map(video =>
+        video.id === data.video_id ? { ...video, view_acount: data.view_acount } : video
+      ) : prev
+    );
+  }, [setMedia]));
+
+  useWsEvent("new_follower", useCallback((data: any) => {
+    setMedia(prev =>
+      prev ? prev.map(video =>
+        video.user_id.id == data.channel_profile
+          ? { ...video, current_user_followered: data.current_user_followered }
+          : video
+      ) : prev
+    );
+  }, [setMedia]));
+
+  useWsEvent("delete_follower", useCallback((data: any) => {
+    setMedia(prev =>
+      prev ? prev.map(video =>
+        video.user_id.id == data.channel_profile
+          ? { ...video, current_user_followered: data.current_user_followered }
+          : video
+      ) : prev
+    );
+  }, [setMedia]));
+
+  // send_message — sonido y unread manejados globalmente en Navar (siempre montado)
+  // index.tsx no necesita duplicar esa lógica
+
+  useWsEvent("new_story", useCallback((data: any) => {
+    if (data.story) {
+      setStories(prev => {
+        const current = Array.isArray(prev) ? prev : [];
+        return [...current, data.story];
+      });
+    }
+  }, [setStories]));
+
+  useWsEvent("gift_see", useCallback((data: any) => {
+    if (user.id === data.to_user) {
+      const updated = isGiftsRef.current.filter(g => g.uuid !== data.gift_uuid);
+      setIsGift(updated);
+      setGiftRecived(updated);
+      setGiftAnimation({
+        type: data.gift_type, giftId: data.gift_uuid, storyUuid: data.story_uuid,
+        sender: data.sender, amount: data.amount || 1, gift: data.gift_video,
+      });
+    }
+    setShowViewersModal(false);
+  }, [user.id, isGiftsRef, setIsGift, setGiftRecived, setGiftAnimation, setShowViewersModal]));
+
+  useWsEvent("typing", useCallback((data: any) => {
+    if (data.user_id === user.id) return;
+    if (data.is_typing) {
+      setTypingUser(data.chat_uuid, data.user_id, data.username ?? "Alguien");
+    } else {
+      removeTypingUser(data.chat_uuid, data.user_id);
+    }
+  }, [user.id, setTypingUser, removeTypingUser]));
 
   useEffect(() => {
     setMedia(media);
   }, [media]);
+
+  // Reset scroll to top on mount so stories bar is always visible on reload
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.history.scrollRestoration = 'manual';
+    }
+    if (feedScrollRef.current) {
+      feedScrollRef.current.scrollTop = 0;
+    }
+    lastFeedScrollTopRef.current = 0;
+    setShowStoriesBar(true);
+  }, []);
 
   const hasFetchedStories = useRef(false);
   // Cargar stories solo una vez al montar el componente
@@ -703,7 +1028,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     hasFetchedStories.current = true;
 
     getActiveStories()(dispatch).then((res: any) => {
-      setStories(res);
+      setStories(Array.isArray(res) ? res : []);
     });
   }, [dispatch]); // Solo depende de dispatch que es estable
 
@@ -719,8 +1044,9 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       })
     }
   }
-  const handlePostComment = (parent_uuid: string | null = null) => {
-    if (!commentText.trim() || !currentVideoId) return;
+  const handlePostComment = (parent_uuid?: string, audioBlob?: Blob, audioDuration?: number, imageFile?: File) => {
+    if (!commentText.trim() && !audioBlob && !imageFile) return;
+    if (!currentVideoId) return;
 
     // Record interaction for recommendation system
     const videoItem = mediaVideo?.find(v => v.id.toString() === currentVideoId);
@@ -731,7 +1057,10 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     createComment({
       video_id: currentVideoId,
       content: commentText,
-      parent_uuid: parent_uuid || null   // << SE ENVÍA SOLO SI EXISTE
+      parent_uuid: parent_uuid || null,
+      audioBlob,
+      audioDuration,
+      imageFile,
     })(dispatch)
       .then((res: any) => {
         if (res) {
@@ -762,6 +1091,9 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     }
     lastVideoProgressUpdate.current[videoId] = now;
 
+    // Monetization tracking — 50% mark, min 10s for monetizable
+    trackTimeUpdate(videoId, currentTime, duration);
+
     // Solo actualizar si el cambio es significativo (más de 0.5 segundos)
     const currentProgress = videoProgress[videoId] || 0;
     if (Math.abs(currentTime - currentProgress) > 0.5 || currentTime === 0) {
@@ -777,17 +1109,20 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         [videoId]: duration
       }));
     }
-    if (videoElement.currentTime >= 10 && !viewedVideos.has(videoId)) {
+    const viewThreshold = isFinite(duration) && duration > 0 && duration < 10
+      ? duration * 0.8
+      : 10;
+    if (videoElement.currentTime >= viewThreshold && !viewedVideos.has(videoId)) {
       createView({ video_id: videoId })(dispatch)
         .then((res: any) => console.log("API View Response:", res))
         .catch((err: any) => console.error("API View Error:", err));
       setViewedVideos((prev) => {
-        const newSet = new Set(prev);
+        const newSet = new Set(prev instanceof Set ? prev : []);
         newSet.add(videoId);
         return newSet;
       });
     }
-  }, [videoProgress, videoDuration, viewedVideos, dispatch]);
+  }, [videoProgress, videoDuration, viewedVideos, dispatch, trackTimeUpdate]);
   const handleSeek = (videoId: string, newTime: number) => {
     const index = mediaVideo?.findIndex(v => v.id?.toString() === videoId);
     if (index === undefined || index === -1) return;
@@ -829,8 +1164,10 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
               onIntersectionChange(videoItem.id, true, videoItem.category?.id || videoItem.category || null);
             }
 
-            // Only play if there is no active ad overlay for this video
-            if (activeAdIndex !== index) {
+            // First video starts paused — user must tap to play
+            if (index === 0 && !hasPlayedFirstVideo.current) {
+              video.pause()
+            } else if (activeAdIndex !== index) {
               video.play().catch(() => {/* Autoplay ignored */ })
             }
             setActiveVideo(index)
@@ -873,10 +1210,11 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     }
   }, [viewingStoryUserIndex]);
   const handleVideoClick = (index: number) => {
-    if (activeAdIndex !== null) return; // Prevent clicking video while ad is active
+    if (activeAdIndex !== null) return;
     const videoElement = videoRefs.current[index];
     if (!videoElement) return;
     if (videoElement.paused) {
+      if (index === 0) hasPlayedFirstVideo.current = true;
       videoElement.play().catch(error => {
         console.error("Error al reproducir el video:", error);
       });
@@ -944,42 +1282,56 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     }, 1000);
   };
   const toggleMute = () => setIsMuted(!isMuted)
-  useWebSocket(WS_URL + `?user_id=${user.id}&token=${localStorage.getItem("accessToken")}`, handleWSMessage, true);
-
   // --- Logic for Create History ---
   const handleAddHistory = () => {
     // We click the hidden input element programmatically
     fileInputRef.current?.click();
   }
-  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    // Optional: Check file type/size here
-    if (file.size > 50 * 1024 * 1024) { // Example 50MB limit
+    if (file.size > 50 * 1024 * 1024) {
       alert("El archivo es demasiado grande (Max 50MB)");
       return;
     }
+    // Open editor instead of uploading directly
+    setStoryEditorFile(file);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  const handleStoryPublish = async (
+    file: File,
+    caption: string,
+    music?: any,
+    filterCss?: string,
+    textLayers: any[] = [],
+    stickerLayers: any[] = [],
+  ) => {
     setIsUploadingStory(true);
     const formData = new FormData();
-    // Assuming the backend expects a field named 'video' or 'file'
     formData.append('video', file);
-    // You might want to add a default description or other metadata
-    formData.append('description', 'New story');
-    // const data = Object.fromEntries(formData.entries())
-
+    formData.append('description', caption || '');
+    if (filterCss && filterCss !== "none") {
+      formData.append('filter_css', filterCss);
+    }
+    formData.append('text_layers', JSON.stringify(textLayers));
+    formData.append('sticker_layers', JSON.stringify(stickerLayers));
+    if (music) {
+      formData.append('audio_track_url', music.track.audio_url);
+      formData.append('audio_track_title', music.track.title);
+      formData.append('audio_track_artist', music.track.artist);
+      formData.append('audio_volume_music', String(music.volume_music));
+      formData.append('audio_trim_start', String(music.trim_start));
+      formData.append('audio_trim_end', String(music.trim_end));
+    }
     try {
-      console.log("Subiendo historia...");
       await createStory(formData)(dispatch);
-      // Here you could refresh the stories list
+      setStoryEditorFile(null);
     } catch (error) {
       console.error("Error creando la historia:", error);
       alert("Error al subir la historia. Inténtalo de nuevo.");
     } finally {
       setIsUploadingStory(false);
-      // Reset input so the same file can be selected again if needed
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
     }
   }
   // --- Story Viewer Logic ---
@@ -998,6 +1350,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     setIsStoryPaused(false);
   };
   const closeStoryViewer = () => {
+    stopStoryAudio(true);
     setViewingStoryUserIndex(null);
     setCurrentStoryItemIndex(0);
     setGroupProgresses({});
@@ -1199,18 +1552,37 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
   const isOwner = viewingStoryUserIndex !== null && user.username === groupedStories[viewingStoryUserIndex]?.user.username;
   const handleReport = () => {
-    console.log("Report inappropriate");
     setShowOptionsModal(false);
+    setShowReportSheet(true);
   };
-  const handleAboutAccount = () => {
-    // Navigate to profile or something
-    console.log("About this account");
-    setShowOptionsModal(false);
+
+  const handleReportReason = async (reason: ReportPayload["reason"]) => {
+    if (reportLoading || viewingStoryUserIndex === null) return;
+    const currentGroup = groupedStories[viewingStoryUserIndex];
+    const storyUuid = currentGroup?.uuid;
+    if (!storyUuid) return;
+    setReportLoading(true);
+    const result = await reportStory(storyUuid, { reason })(dispatch);
+    setReportLoading(false);
+    setShowReportSheet(false);
+    setFeedbackModal({ show: true, success: result.success, message: result.message });
   };
+
   const handleDelete = () => {
-    // Dispatch delete story action here
-    console.log("Delete story");
     setShowOptionsModal(false);
+    setShowDeleteConfirm(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (deleteLoading || viewingStoryUserIndex === null) return;
+    const currentGroup = groupedStories[viewingStoryUserIndex];
+    const storyUuid = currentGroup?.uuid;
+    if (!storyUuid) return;
+    setDeleteLoading(true);
+    await deleteStory(storyUuid)(dispatch);
+    setDeleteLoading(false);
+    setShowDeleteConfirm(false);
+    setStories((prev) => prev.filter((s: any) => s.uuid !== storyUuid));
     closeStoryViewer();
   };
   const handleCloseViewers = () => setShowViewersModal(false);
@@ -1224,7 +1596,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         });
 
         getRecivedGift(currentStoryUuid)(dispatch).then((res) => {
-          setGiftRecived(res ? res : []);
+          setGiftRecived(Array.isArray(res) ? res : []);
         })
 
       }
@@ -1281,6 +1653,11 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     const currentMedia = currentGroup.media[currentStoryItemIndex];
     return currentMedia?.id ?? null;
   }, [viewingStoryUserIndex, currentStoryItemIndex, groupedStories]);
+
+  // Mantener ref sincronizado para usarlo en handlers WS sin TDZ
+  useEffect(() => {
+    currentStoryUuidRef.current = currentStoryUuid;
+  }, [currentStoryUuid]);
 
   const handleGiftClick = () => {
     if (currentStoryUuid) {
@@ -1613,6 +1990,18 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-black text-white font-sans">
+      {/* Story Editor */}
+      <AnimatePresence>
+        {storyEditorFile && (
+          <StoryEditor
+            file={storyEditorFile}
+            onPublish={handleStoryPublish}
+            onClose={() => setStoryEditorFile(null)}
+            isUploading={isUploadingStory}
+          />
+        )}
+      </AnimatePresence>
+
       {/* Hidden Input for File Upload */}
       <input
         type="file"
@@ -1628,27 +2017,25 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       </div>
       <main
         ref={mainRef}
-        className="flex h-screen w-full flex-col overflow-hidden pt-30 pb-[calc(env(safe-area-inset-bottom)+4.5rem)]"
+        className="flex h-screen w-full flex-col overflow-hidden pt-24 pb-[calc(env(safe-area-inset-bottom)+3rem)]"
       >
-        {/* Search Bar Area */}
+        {/* Stories Bar */}
         <div
-          className={`grid w-full overflow-hidden border-t transition-[grid-template-rows,border-color] duration-500 ease-out ${showStoriesBar ? "border-[#2a2f5e]/50" : "border-transparent"}`}
-          style={{ gridTemplateRows: showStoriesBar ? "1fr" : "0fr" }}
+          className={`w-full transition-opacity duration-100 ${showStoriesBar ? "opacity-100" : "opacity-0 h-0 overflow-hidden pointer-events-none"}`}
         >
-          <div
-            className={`min-h-0 overflow-hidden transform-gpu transition-[opacity,transform] duration-500 ease-out ${showStoriesBar ? "translate-y-0 opacity-100" : "-translate-y-3 opacity-0 pointer-events-none"}`}
-          >
-            <div className="flex gap-3 overflow-x-auto px-2 py-3 scrollbar-hide snap-x ">
+          <div>
+            <div className="flex gap-2 px-2 py-2 snap-x ">
               <motion.div
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                className="flex flex-col items-center gap-1.5 min-w-[64px] cursor-pointer snap-start relative group"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.15 }}
+                className="flex flex-col items-center gap-1 min-w-[52px] cursor-pointer snap-start relative group"
                 onClick={handleAddHistory}
               >
                 <div className="relative">
-                  <div className={`relative h-[60px] w-[60px] rounded-full p-[2px] bg-[#0c1033] ${isUploadingStory ? 'animate-pulse' : ''}`}>
+                  <div className={`relative h-[40px] w-[40px] rounded-full p-[2px] bg-[#0c1033] ${isUploadingStory ? 'animate-pulse' : ''}`}>
                     <img
-                      src={!user.profile_picture.startsWith('/media') ? `${getBaseUrl()}/media${user.profile_picture}` : `${getBaseUrl()}${user.profile_picture}`}
+                      src={getMediaUrl(user.profile_picture)}
                       className={`w-full h-full rounded-full object-cover filter ${isUploadingStory ? 'brightness-50' : 'brightness-90 group-hover:brightness-100'} transition-all`}
                       alt="Tu historia"
                     />
@@ -1663,8 +2050,8 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                     )}
                   </div>
                 </div>
-                <span className="text-[10px] text-gray-300 font-medium truncate w-full text-center group-hover:text-white">
-                  {isUploadingStory ? "Subiendo..." : "Tu historia"}
+                <span className="text-[9px] text-gray-300 font-medium truncate w-[52px] text-center group-hover:text-white">
+                  {isUploadingStory ? t('common:actions.uploading') : t('videos:feed.yourStory')}
                 </span>
               </motion.div>
               {/* Using groupedStories to display one bubble per User */}
@@ -1677,8 +2064,8 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                     key={story.id || i}
                     initial={{ opacity: 0, scale: 0.8 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    transition={{ delay: i * 0.05 + 0.1 }}
-                    className="flex flex-col items-center gap-1.5 min-w-[64px] cursor-pointer snap-start group"
+                    transition={{ duration: 0.15, delay: i * 0.02 }}
+                    className="flex flex-col items-center gap-1 min-w-[52px] cursor-pointer snap-start group"
                     onClick={() => handleStoryClick(i)}
                   >
                     <div className="relative">
@@ -1687,21 +2074,21 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                       ) : (
                         <div className="absolute inset-0 rounded-full border border-[#2a2f5e]"></div>
                       )}
-                      <div className="relative h-[60px] w-[60px] rounded-full p-[2px] bg-[#050718]">
+                      <div className="relative h-[40px] w-[40px] rounded-full p-[2px] bg-[#050718]">
                         <img
-                          src={`${getBaseUrl()}/media/${story.user.profile_picture}`}
+                          src={getMediaUrl(story.user.profile_picture)}
                           className="w-full h-full rounded-full object-cover group-hover:scale-105 transition-transform duration-300"
                           alt={story.user.username}
                         />
                       </div>
                     </div>
                     <span
-                      className={`text-[10px] font-medium truncate w-16 text-center ${seen
+                      className={`text-[9px] font-medium truncate w-[52px] text-center ${seen
                         ? "text-gray-500"
                         : "text-gray-300 group-hover:text-[#00f0ff] transition-colors"
                         }`}
                     >
-                      - {story.user.username}
+                      {story.user.username}
                     </span>
                   </motion.div>
                 );
@@ -1709,11 +2096,45 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
             </div>
           </div>
         </div>
-        <section className="flex-1 min-h-0 pt-px">
+        <section className="flex-1 min-h-0">
           <div
+            ref={feedScrollRef}
             className="flex h-full flex-col overflow-y-auto overscroll-y-contain scroll-smooth snap-y snap-mandatory"
             onScroll={handleFeedScroll}
           >
+            {/* ── Loading skeleton ── */}
+            {mediaVideo === null && (
+              <div className="relative h-full w-full snap-start snap-always flex-shrink-0 flex items-end pb-20 px-3">
+                {/* Background shimmer */}
+                <div className="absolute inset-0 bg-[#0a0a0a] animate-pulse" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
+                {/* Fake action bar (right side) */}
+                <div className="absolute right-3 bottom-32 flex flex-col items-center gap-5">
+                  {[40, 40, 40, 40].map((size, i) => (
+                    <div key={i} className="flex flex-col items-center gap-1">
+                      <div
+                        className="rounded-full bg-white/10 animate-pulse"
+                        style={{ width: size, height: size }}
+                      />
+                      <div className="h-2.5 w-6 rounded bg-white/10 animate-pulse" />
+                    </div>
+                  ))}
+                </div>
+                {/* Fake user info (bottom left) */}
+                <div className="relative z-10 flex flex-col gap-2 w-[70%]">
+                  <div className="flex items-center gap-2">
+                    <div className="h-9 w-9 rounded-full bg-white/10 animate-pulse" />
+                    <div className="h-3 w-28 rounded bg-white/10 animate-pulse" />
+                  </div>
+                  <div className="h-2.5 w-48 rounded bg-white/10 animate-pulse" />
+                  <div className="h-2.5 w-36 rounded bg-white/10 animate-pulse" />
+                  <div className="mt-1 flex items-center gap-1.5">
+                    <div className="h-3 w-3 rounded-full bg-white/10 animate-pulse" />
+                    <div className="h-2.5 w-32 rounded bg-white/10 animate-pulse" />
+                  </div>
+                </div>
+              </div>
+            )}
             {mergedFeed.map((data, index) => {
               const videoId = data.type === 'video' ? data.id?.toString() : `ad-${data.id}`;
               const isExpanded = expandedDescriptions[videoId];
@@ -1782,330 +2203,387 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
               return (
                 <motion.div
-                  key={index}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.1 }}
-                  className="relative h-full min-h-full snap-start snap-always overflow-hidden rounded-t-xl rounded-b-none border border-[#2a2f5e]/30 shadow-2xl shadow-black/50"
+                  key={videoId}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.15 }}
+                  className="relative h-full min-h-full snap-start snap-always rounded-t-xl rounded-b-none border border-[#2a2f5e]/30 shadow-2xl shadow-black/50"
                 >
-                  <div className="absolute inset-0 rounded-t-xl rounded-b-none overflow-hidden pt-0 group">
-                    <div className="relative h-full w-full rounded-t-xl rounded-b-none overflow-hidden bg-black">
-                      {data.media_type === 'image' ? (
-                        <img
-                          src={data.video}
-                          className="h-full w-full object-cover border-[#00f0ff]/5"
-                          alt="Feed Content"
-                          onClick={() => handleVideoClick(index)}
-                        />
-                      ) : (
-                        <video
-                          ref={(el) => { if (el) videoRefs.current[index] = el }}
-                          muted={isMuted || activeAdIndex === index}
-                          loop
-                          playsInline
-                          className="h-full w-full object-cover border-[#00f0ff]/5"
-                          onClick={() => handleVideoClick(index)}
-                          onTimeUpdate={(e) => {
-                            handleVideoProgress(e, videoId);
-                            // Trigger ad logic: if video is at 5s, we have an ad, cooldown passed (4m), and not shown yet
-                            const now = Date.now();
-                            const cooldownPassed = now - lastAdTimestamp > 4 * 60 * 1000;
-                            const currentTime = e.currentTarget.currentTime;
-                            const prevTime = lastVideoTimeRef.current[videoId] || 0;
-                            lastVideoTimeRef.current[videoId] = currentTime;
+                  <HorizontalCarousel
+                    video={data}
+                    feedIndex={index}
+                    isActive={activeVideo === index}
+                    isMuted={isMuted}
+                    isExpanded={!!expandedDescriptions[videoId]}
+                    feedScrollRef={feedScrollRef}
+                    onLike={(_uuid, id) => createLike({ video_id: id })(dispatch)}
+                    onComment={(uuid, id) => {
+                      setComments(null)
+                      setCurrentVideoId(String(id))
+                      setShowCommentsModal(true)
+                      getComment({ video_id: uuid })(dispatch).then((res: any) => {
+                        setComments(Array.isArray(res) ? res : [])
+                      })
+                    }}
+                    onGift={(id) => handleVideoGiftClick(id)}
+                    onSlideChange={(idx, total) => setCarouselDots(prev => ({ ...prev, [videoId]: { index: idx, total } }))}
+                  >
+                    <div className="absolute inset-0 rounded-t-xl rounded-b-none overflow-hidden pt-0 group">
 
-                            // Loop detection: if time jumped backwards significantly
-                            if (prevTime > currentTime + 1) {
-                              const videoElement = e.currentTarget;
-                              setVideoLoopCount(prev => {
-                                const currentCount = (prev[videoId] || 0) + 1;
-                                if (currentCount >= 3) {
-                                  if (ads.length > 0 && activeAdIndex === null) {
-                                    const nextAd = pickRandomAd(ads);
-                                    if (nextAd) {
-                                      setSelectedAd(nextAd);
-                                      setActiveAdIndex(index);
-                                      videoElement.pause();
-                                      setIsMuted(false); // Force unmute for ad
-                                      setAdSequenceCount(1); // Start sequence
+                      <div className="relative h-full w-full rounded-t-xl rounded-b-none overflow-hidden bg-black">
+                        {data.media_type === 'image' ? (
+                          <img
+                            src={data.video}
+                            className="h-full w-full object-cover border-[#00f0ff]/5"
+                            alt="Feed Content"
+                            onClick={() => handleVideoClick(index)}
+                          />
+                        ) : (
+                          <video
+                            ref={(el) => { if (el) videoRefs.current[index] = el }}
+                            src={activeVideo === index || Math.abs((activeVideo ?? 0) - index) <= 1 ? (data.video?.startsWith("http") ? data.video : getMediaUrl(data.video)) : undefined}
+                            poster={data.thumbnail_url?.startsWith("http") ? data.thumbnail_url : getMediaUrl(data.thumbnail_url)}
+                            preload={activeVideo === index ? "auto" : "none"}
+                            muted={isMuted || activeAdIndex === index}
+                            loop
+                            playsInline
+                            className="h-full w-full object-cover border-[#00f0ff]/5"
+                            onClick={() => handleVideoClick(index)}
+                            onPlay={() => onVideoPlay(videoId)}
+                            onEnded={() => resetVideo(videoId)}
+                            onTimeUpdate={(e) => {
+                              handleVideoProgress(e, videoId);
+                              // Trigger ad logic: if video is at 5s, we have an ad, cooldown passed (4m), and not shown yet
+                              const now = Date.now();
+                              const cooldownPassed = now - lastAdTimestamp > adConfig.ad_cooldown_seconds * 1000;
+                              const currentTime = e.currentTarget.currentTime;
+                              const prevTime = lastVideoTimeRef.current[videoId] || 0;
+                              lastVideoTimeRef.current[videoId] = currentTime;
+
+                              // Loop detection: if time jumped backwards significantly
+                              if (prevTime > currentTime + 1) {
+                                const videoElement = e.currentTarget;
+                                setVideoLoopCount(prev => {
+                                  const currentCount = (prev[videoId] || 0) + 1;
+                                  if (currentCount >= 3) {
+                                    if (ads.length > 0 && activeAdIndex === null) {
+                                      const nextAd = pickRandomAd(ads);
+                                      if (nextAd) {
+                                        setSelectedAd(nextAd);
+                                        setActiveAdIndex(index);
+                                        videoElement.pause();
+                                        setIsMuted(false); // Force unmute for ad
+                                        setAdSequenceCount(1); // Start sequence
+                                      }
                                     }
+                                    return { ...prev, [videoId]: 0 }; // Reset count
                                   }
-                                  return { ...prev, [videoId]: 0 }; // Reset count
-                                }
-                                return { ...prev, [videoId]: currentCount };
-                              });
-                            }
-
-                            if (currentTime >= 5 && currentTime < 6 && ads.length > 0 && activeAdIndex === null && index % 3 === 0 && !shownAds.has(videoId) && cooldownPassed) {
-                              // Pick a random ad from the pool
-                              const nextAd = pickRandomAd(ads);
-                              if (nextAd) {
-                                setSelectedAd(nextAd);
-                                setActiveAdIndex(index);
-                                setShownAds(prev => new Set(prev).add(videoId));
-                                e.currentTarget.pause();
-                                setIsMuted(false); // Force unmute for ad
-                                setAdSequenceCount(1); // Start sequence
-                                // Auto-collapse description if it's open
-                                setExpandedDescriptions(prev => ({ ...prev, [videoId]: false }));
+                                  return { ...prev, [videoId]: currentCount };
+                                });
                               }
-                            }
-                          }}
-                        >
-                          <source src={data.video} type="video/mp4" />
-                          Tu navegador no soporta el formato de video.
-                        </video>
-                      )}
 
-                      <AnimatePresence>
-                        {activeAdIndex === index && selectedAd && (
-                          <AdOverlay
-                            key={`ad-${selectedAd.id}-${adSequenceCount}`}
-                            ad={selectedAd}
-                            isMuted={isMuted}
-                            toggleMute={toggleMute}
-                            isVisible={activeVideo === index}
-                            onClose={(finished, duration) => {
-                              // User's rule: If finished naturally AND duration > 60s AND sequence < 3, show next ad
-                              // "si el anuncio pasa de 1 minuto quiero este flujo [sequence]"
-                              if (finished && duration && duration >= 60 && adSequenceCount < 3) {
-                                // Show another different ad
-                                const otherAds = ads.filter(a => a.id !== selectedAd.id);
-                                const nextAdPool = otherAds.length > 0 ? otherAds : ads;
-                                const nextAd = pickRandomAd(nextAdPool);
+                              if (!isPremiumUser && currentTime >= 5 && currentTime < 6 && ads.length > 0 && activeAdIndex === null && index % adConfig.ad_every_nth_video === 0 && !shownAds.has(videoId) && cooldownPassed) {
+                                // Pick a random ad from the pool
+                                const nextAd = pickRandomAd(ads);
                                 if (nextAd) {
                                   setSelectedAd(nextAd);
-                                  setAdSequenceCount(prev => prev + 1);
-                                  // Stay in activeAdIndex = index, so AdOverlay remounts with new ad
+                                  setActiveAdIndex(index);
+                                  setShownAds(prev => new Set(prev instanceof Set ? prev : []).add(videoId));
+                                  e.currentTarget.pause();
+                                  setIsMuted(false); // Force unmute for ad
+                                  setAdSequenceCount(1); // Start sequence
+                                  // Auto-collapse description if it's open
+                                  setExpandedDescriptions(prev => ({ ...prev, [videoId]: false }));
+                                }
+                              }
+                            }}
+                          >
+                          </video>
+                        )}
+
+
+
+                        <AnimatePresence>
+                          {activeAdIndex === index && selectedAd && (
+                            <AdOverlay
+                              key={`ad-${selectedAd.id}-${adSequenceCount}`}
+                              ad={selectedAd}
+                              isMuted={isMuted}
+                              toggleMute={toggleMute}
+                              isVisible={activeVideo === index}
+                              onClose={(finished, duration) => {
+                                // User's rule: If finished naturally AND duration > 60s AND sequence < 3, show next ad
+                                // "si el anuncio pasa de 1 minuto quiero este flujo [sequence]"
+                                if (finished && duration && duration >= 60 && adSequenceCount < 3) {
+                                  // Show another different ad
+                                  const otherAds = ads.filter(a => a.id !== selectedAd.id);
+                                  const nextAdPool = otherAds.length > 0 ? otherAds : ads;
+                                  const nextAd = pickRandomAd(nextAdPool);
+                                  if (nextAd) {
+                                    setSelectedAd(nextAd);
+                                    setAdSequenceCount(prev => prev + 1);
+                                    // Stay in activeAdIndex = index, so AdOverlay remounts with new ad
+                                  } else {
+                                    setSelectedAd(null);
+                                    setActiveAdIndex(null);
+                                    setAdSequenceCount(0);
+                                    setLastAdTimestamp(Date.now());
+                                    videoRefs.current[index]?.play();
+                                  }
                                 } else {
+                                  // End sequence
                                   setSelectedAd(null);
                                   setActiveAdIndex(null);
                                   setAdSequenceCount(0);
                                   setLastAdTimestamp(Date.now());
                                   videoRefs.current[index]?.play();
                                 }
-                              } else {
-                                // End sequence
-                                setSelectedAd(null);
-                                setActiveAdIndex(null);
-                                setAdSequenceCount(0);
-                                setLastAdTimestamp(Date.now());
-                                videoRefs.current[index]?.play();
-                              }
-                            }}
-                          />
-                        )}
-                      </AnimatePresence>
-                      <div className="absolute inset-0 bg-gradient-to-t from-[#050718] via-[#050718]/10 to-transparent pointer-events-none"></div>
-                      <div className="absolute inset-0 bg-gradient-to-r from-[#7000ff]/10 to-[#00f0ff]/10 opacity-0 group-hover:opacity-100 transition-opacity duration-500" onClick={() => handleGridVideoToggle(videoId, videoRefs.current[index])}>
-                      </div>
-                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                        <AnimatePresence>
-                          {transientIconState?.videoId === videoId && (
-                            <motion.div
-                              key={`transient-icon-${data.id}`}
-                              initial={{ opacity: 0 }}
-                              animate={{ opacity: 1 }}
-                              exit={{ opacity: 0 }}
-                              transition={{ duration: 0.15 }}
-                              className="absolute inset-0 flex items-center justify-center pointer-events-none"
-                            >
-                              <motion.div
-                                className="flex h-12 w-12 items-center justify-center rounded-full bg-black/50 backdrop-blur-md"
-                              >
-                                {transientIconState.icon === 'play' ? (
-                                  <Play className="h-6 w-6 text-white" fill="white" />
-                                ) : (
-                                  <Pause className="h-6 w-6 text-white" fill="white" />
-                                )}
-                              </motion.div>
-                            </motion.div>
+                              }}
+                            />
                           )}
                         </AnimatePresence>
-                      </div>
-                      <motion.button
-                        whileTap={{ scale: 0.9 }}
-                        className="h-9 w-9 flex items-center justify-center rounded-full text-white drop-shadow-lg pointer-events-auto absolute top-3 right-3 z-10"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          toggleMute()
-                        }}
-                      >
-                        {isMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
-                      </motion.button>
-                      <motion.button
-                        whileTap={{ scale: 0.9 }}
-                        className="absolute top-3 left-1 z-10 flex items-center gap-1   rounded-full  text-xs font-medium"
-                        onClick={() => handleVideoClick(index)}
-                      >
-                        <span>AR</span>
-                      </motion.button>
-
-                      {/* INICIO DEL CONTENEDOR DE METADATOS INFERIOR UNIFICADO */}
-                      <div className="absolute -bottom-6 left-0 right-0 px-1 pt-16 pb-[calc(env(safe-area-inset-bottom)+2.2rem)] z-20 pointer-events-none flex flex-col justify-end bg-gradient-to-t from-black/60 via-black/20 to-transparent">
-
-                        <div className="flex flex-col gap-4 pointer-events-auto max-w-[100%]">
-                          {/* 2. PERFIL DE USUARIO */}
-                          <div className="flex w-full items-center pr-14">
-                            <div className="flex min-w-0 items-center">
-                              <div className="relative h-10 w-10 overflow-hidden rounded-full flex-shrink-0 group">
-                                <img
-                                  className="h-full w-full object-cover rounded-full border border-white/20"
-                                  src={`${data.user_id?.profile_picture ? `${getBaseUrl()}/media/${data.user_id.profile_picture}` : `${getBaseUrl()}/media/profile_pics/avatar.webp`}`}
-                                  onError={(e) => {
-                                    (e.target as HTMLImageElement).src = `https://picsum.photos/100/100?random=${index}`;
-                                  }}
-                                  alt={data.user_id?.username}
-                                />
-                                <div className="absolute inset-0 rounded-full border-2 border-white/5 pointer-events-none" />
-
-                                {!isMuted && videoRefs.current[index]?.paused === false && (
-                                  <motion.div
-                                    className="absolute inset-0 rounded-full border-4 border-[#00f0ff]/60"
-                                    animate={{
-                                      boxShadow: [
-                                        "0 0 0 0 rgba(0, 240, 255, 0)",
-                                        "0 0 20px 4px rgba(0, 240, 255, 0.4)",
-                                        "0 0 0 0 rgba(0, 240, 255, 0)",
-                                      ],
-                                      scale: [1, 1.05, 1],
-                                    }}
-                                    transition={{
-                                      duration: 0.8,
-                                      repeat: Infinity,
-                                      repeatType: "loop",
-                                      ease: "easeInOut",
-                                    }}
-                                  />
-                                )}
-                              </div>
-                              <Link
-                                className="ml-3 max-w-[20ch] flex-shrink-0 overflow-hidden whitespace-nowrap text-white font-bold text-shadow-md hover:text-[#00f0ff] transition-colors"
-                                to={`/profile/${data.user_id?.username}`}
+                        <div className="absolute inset-0 bg-gradient-to-t from-[#050718] via-[#050718]/10 to-transparent pointer-events-none"></div>
+                        <div className="absolute inset-0 bg-gradient-to-r from-[#7000ff]/10 to-[#00f0ff]/10 opacity-0 group-hover:opacity-100 transition-opacity duration-500" onClick={() => handleGridVideoToggle(videoId, videoRefs.current[index])}>
+                        </div>
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                          <AnimatePresence>
+                            {transientIconState?.videoId === videoId && (
+                              <motion.div
+                                key={`transient-icon-${data.id}`}
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                exit={{ opacity: 0 }}
+                                transition={{ duration: 0.15 }}
+                                className="absolute inset-0 flex items-center justify-center pointer-events-none"
                               >
-                                @{String(data.user_id?.username || "").slice(0, 20)}
-                              </Link>
-                              <AnimatePresence mode="wait">
-                                {data.user_id.username !== user.username && (
-                                  (!followingState[data.user_id.id.toString()] && !data.current_user_followered) ? (
-                                    <motion.button
-                                      key="inline-follow"
-                                      initial={{ opacity: 0, scale: 0.8 }}
-                                      animate={{ opacity: 1, scale: 1 }}
-                                      exit={{ opacity: 0, scale: 0.8, transition: { duration: 0.2 } }}
-                                      whileTap={{ scale: 0.95 }}
-                                      className="ml-2 flex h-8 w-8 flex-shrink-0 items-center justify-center text-white/95 transition-all"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleFollowClick(Number(data.user_id.id), data.user_id.id.toString(), "create");
-                                      }}
-                                      aria-label={`Seguir a ${data.user_id?.username}`}
-                                      title="Seguir"
-                                    >
-                                      <UserPlus className="h-4 w-4 text-white" strokeWidth={2.4} />
-                                    </motion.button>
+                                <motion.div
+                                  className="flex h-12 w-12 items-center justify-center rounded-full bg-black/50 backdrop-blur-md"
+                                >
+                                  {transientIconState.icon === 'play' ? (
+                                    <Play className="h-6 w-6 text-white" fill="white" />
                                   ) : (
-                                    <motion.button
-                                      key="inline-following"
-                                      initial={{ opacity: 0, scale: 0.8 }}
-                                      animate={{ opacity: 1, scale: 1, transition: { delay: 0.1 } }}
-                                      exit={{ opacity: 0, scale: 0.8, transition: { duration: 0.2 } }}
-                                      className="ml-2 flex h-8 w-8 flex-shrink-0 items-center justify-center text-white/95 transition-all"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleFollowClick(Number(data.user_id.id), data.user_id.id.toString(), "delete");
-                                      }}
-                                      aria-label={`Siguiendo a ${data.user_id?.username}`}
-                                      title="Siguiendo"
-                                    >
-                                      <UserCheck className="h-4 w-4 text-white" strokeWidth={2.4} />
-                                    </motion.button>
+                                    <Pause className="h-6 w-6 text-white" fill="white" />
+                                  )}
+                                </motion.div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                        {data.media_type === 'video' && data.audio_track_title && activeVideo === index && !isExpanded && (
+                          <div className="pointer-events-none absolute z-40 top-3 left-0 right-0 flex justify-center px-3">
+                            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full max-w-[70%]"
+                              style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)', border: '1px solid rgba(0,240,255,0.18)', overflow: 'hidden' }}>
+                              <Music2 className="h-3 w-3 text-cyan-400 shrink-0" />
+                              <span className="text-[10px] font-bold uppercase tracking-widest text-white/90 truncate">
+                                {clampWords(data.audio_track_title, 4)}
+                              </span>
+                              {data.audio_track_artist && (
+                                <>
+                                  <span className="text-cyan-400/50 text-[10px] shrink-0">·</span>
+                                  <span className="text-[9px] font-semibold uppercase tracking-widest text-cyan-300/80 truncate">
+                                    {clampWords(data.audio_track_artist, 3)}
+                                  </span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        {!isExpanded && (
+                          <motion.button
+                            whileTap={{ scale: 0.9 }}
+                            className="h-9 w-9 flex items-center justify-center rounded-full text-white drop-shadow-lg pointer-events-auto absolute top-3 right-2 z-10"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              toggleMute()
+                            }}
+                          >
+                            {isMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+                          </motion.button>
+                        )}
+
+                        {/* INICIO DEL CONTENEDOR DE METADATOS INFERIOR UNIFICADO */}
+                        <div className={`absolute -bottom-6 left-0 right-0 px-1 pt-16 pb-[calc(env(safe-area-inset-bottom)+2.2rem)] pointer-events-none flex flex-col justify-end bg-gradient-to-t from-black/60 via-black/20 to-transparent ${isExpanded ? 'z-[80]' : 'z-20'}`}>
+
+                          <div className="flex flex-col gap-4 pointer-events-auto max-w-[100%]">
+                            {/* DOTS carrusel — siempre 15px encima del nombre */}
+                            {carouselDots[videoId] && carouselDots[videoId].total > 1 && (
+                              <div className="flex justify-center gap-1.5 pointer-events-none mb-[-6px]">
+                                {Array.from({ length: Math.max(carouselDots[videoId].total, 4) }).map((_, i) => {
+                                  const isActiveDot = i === carouselDots[videoId].index
+                                  const isReal = i < carouselDots[videoId].total
+                                  return (
+                                    <motion.div
+                                      key={i}
+                                      animate={{ width: isActiveDot ? 16 : 5, opacity: isActiveDot ? 1 : isReal ? 0.45 : 0.2 }}
+                                      transition={{ duration: 0.2 }}
+                                      className="h-1.5 rounded-full bg-white"
+                                    />
                                   )
-                                )}
-                              </AnimatePresence>
+                                })}
+                              </div>
+                            )}
+
+                            {/* 2. PERFIL DE USUARIO */}
+                            <div className="flex w-full items-center pr-14">
+                              <div className="flex min-w-0 items-center">
+                                <div className="relative h-10 w-10 overflow-hidden rounded-full flex-shrink-0 group">
+                                  <img
+                                    className="h-full w-full object-cover rounded-full border border-white/20"
+                                    src={getMediaUrl(data.user_id?.profile_picture) || getMediaUrl("profile_pics/avatar.webp")}
+                                    onError={(e) => {
+                                      (e.target as HTMLImageElement).src = `https://picsum.photos/100/100?random=${index}`;
+                                    }}
+                                    alt={data.user_id?.username}
+                                  />
+                                  <div className="absolute inset-0 rounded-full border-2 border-white/5 pointer-events-none" />
+
+                                  {!isMuted && videoRefs.current[index]?.paused === false && (
+                                    <motion.div
+                                      className="absolute inset-0 rounded-full border-4 border-[#00f0ff]/60"
+                                      animate={{
+                                        boxShadow: [
+                                          "0 0 0 0 rgba(0, 240, 255, 0)",
+                                          "0 0 20px 4px rgba(0, 240, 255, 0.4)",
+                                          "0 0 0 0 rgba(0, 240, 255, 0)",
+                                        ],
+                                        scale: [1, 1.05, 1],
+                                      }}
+                                      transition={{
+                                        duration: 0.8,
+                                        repeat: Infinity,
+                                        repeatType: "loop",
+                                        ease: "easeInOut",
+                                      }}
+                                    />
+                                  )}
+                                </div>
+                                <Link
+                                  className="ml-3 max-w-[20ch] flex-shrink-0 overflow-hidden whitespace-nowrap text-white font-bold text-shadow-md hover:text-[#00f0ff] transition-colors"
+                                  to={`/profile/${data.user_id?.username}`}
+                                >
+                                  @{String(data.user_id?.username || "").slice(0, 20)}
+                                </Link>
+                                <AnimatePresence mode="wait">
+                                  {data.user_id.username !== user.username && (
+                                    (!followingState[data.user_id.id.toString()] && !data.current_user_followered) ? (
+                                      <motion.button
+                                        key="inline-follow"
+                                        initial={{ opacity: 0, scale: 0.8 }}
+                                        animate={{ opacity: 1, scale: 1 }}
+                                        exit={{ opacity: 0, scale: 0.8, transition: { duration: 0.2 } }}
+                                        whileTap={{ scale: 0.95 }}
+                                        className="ml-2 flex h-8 w-8 flex-shrink-0 items-center justify-center text-white/95 transition-all"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleFollowClick(Number(data.user_id.id), data.user_id.id.toString(), "create");
+                                        }}
+                                        aria-label={`${t('videos:actions.follow')} ${data.user_id?.username}`}
+                                        title={t('videos:actions.follow')}
+                                      >
+                                        <UserPlus className="h-4 w-4 text-white" strokeWidth={2.4} />
+                                      </motion.button>
+                                    ) : (
+                                      <motion.button
+                                        key="inline-following"
+                                        initial={{ opacity: 0, scale: 0.8 }}
+                                        animate={{ opacity: 1, scale: 1, transition: { delay: 0.1 } }}
+                                        exit={{ opacity: 0, scale: 0.8, transition: { duration: 0.2 } }}
+                                        className="ml-2 flex h-8 w-8 flex-shrink-0 items-center justify-center text-white/95 transition-all"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleFollowClick(Number(data.user_id.id), data.user_id.id.toString(), "delete");
+                                        }}
+                                        aria-label={`${t('videos:actions.following')} ${data.user_id?.username}`}
+                                        title={t('videos:actions.following')}
+                                      >
+                                        <UserCheck className="h-4 w-4 text-white" strokeWidth={2.4} />
+                                      </motion.button>
+                                    )
+                                  )}
+                                </AnimatePresence>
+                              </div>
+
                             </div>
 
-                          </div>
-
-                          {/* 1. SECCIÓN DE DESCRIPCIÓN DEL VIDEO (Manejo de @mentions) */}
-                          {data.description && (
-                            <motion.div
-                              className={`
+                            {/* 1. SECCIÓN DE DESCRIPCIÓN DEL VIDEO (Manejo de @mentions) */}
+                            {data.description && (
+                              <motion.div
+                                className={`
                                  backdrop-blur-md border border-white/10 bg-white/5 shadow-2xl transition-all duration-500 ease-in-out
                                 ${isExpanded
-                                  ? 'p-4 max-h-[60vh] overflow-hidden shadow-2xl z-30 w-full'
-                                  : 'p-2  max-h-[120px] overflow-hidden cursor-pointer hover:bg-white/10'
-                                }
+                                    ? 'p-4 max-h-[60vh] overflow-hidden shadow-2xl z-30 w-full'
+                                    : 'p-2  max-h-[120px] overflow-hidden cursor-pointer hover:bg-white/10'
+                                  }
                               `}
-                              onClick={(e) => {
-                                if (!isExpanded) {
-                                  e.stopPropagation();
-                                  handleToggleDescription(videoId);
-                                }
-                              }}
-                              initial={false}
-                              animate={{
-                                scale: isExpanded ? 1.02 : 1,
-                                y: isExpanded ? -5 : 0
-                              }}
-                            >
-                              <div className="text-[13px] leading-relaxed text-white/95 drop-shadow-sm font-light">
-                                {isExpanded && (
-                                  <div className="flex justify-center mb-3">
-                                    <div
-                                      className="w-10 h-1 bg-white/30 rounded-full cursor-pointer hover:bg-[#00f0ff]/60 transition-colors"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleToggleDescription(videoId);
-                                      }}
-                                    ></div>
-                                  </div>
-                                )}
+                                onClick={(e) => {
+                                  if (!isExpanded) {
+                                    e.stopPropagation();
+                                    handleToggleDescription(videoId);
+                                  }
+                                }}
+                                initial={false}
+                                animate={{
+                                  scale: isExpanded ? 1.02 : 1,
+                                  y: isExpanded ? -5 : 0
+                                }}
+                              >
+                                <div className="text-[13px] leading-relaxed text-white/95 drop-shadow-sm font-light">
+                                  {isExpanded && (
+                                    <div className="flex justify-center mb-3">
+                                      <div
+                                        className="w-10 h-1 bg-white/30 rounded-full cursor-pointer hover:bg-[#00f0ff]/60 transition-colors"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleToggleDescription(videoId);
+                                        }}
+                                      ></div>
+                                    </div>
+                                  )}
 
-                                {isExpanded ? (
-                                  <div className="flex flex-col gap-2">
-                                    <p className="whitespace-pre-wrap">{fullContent}</p>
-                                    <button
-                                      className="text-[#00f0ff] text-xs font-semibold mt-2 self-start hover:underline"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleToggleDescription(videoId);
-                                      }}
-                                    >
-                                      Ocultar
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <div className="flex flex-wrap items-center">
-                                    <span>{truncatedContent}</span>
-                                    {needsTruncation && (
-                                      <span
-                                        className="ml-1 text-[#00f0ff] font-bold text-[11px]"
+                                  {isExpanded ? (
+                                    <div className="flex flex-col gap-2">
+                                      <p className="whitespace-pre-wrap">{fullContent}</p>
+                                      <button
+                                        className="text-[#00f0ff] text-xs font-semibold mt-2 self-start hover:underline"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleToggleDescription(videoId);
+                                        }}
                                       >
-                                        ... ver más
+                                        Ocultar
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <div className="flex flex-wrap items-center">
+                                      <span>{truncatedContent}</span>
+                                      {needsTruncation && (
+                                        <span
+                                          className="ml-1 text-[#00f0ff] font-bold text-[11px]"
+                                        >
+                                          ... ver más
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Hashtags */}
+                                {data.tags && data.tags.tags && Array.isArray(data.tags.tags) && (
+                                  <div className={`flex flex-wrap gap-2 mt-2 ${isExpanded ? 'opacity-100' : 'opacity-80'}`}>
+                                    {data.tags.tags.map((tag: any, i: number) => (
+                                      <span key={i} className="text-[11px] font-medium text-[#00f0ff] hover:text-white transition-colors">
+                                        #{tag}
                                       </span>
-                                    )}
+                                    ))}
                                   </div>
                                 )}
-                              </div>
-
-                              {/* Hashtags */}
-                              {data.tags && data.tags.tags && Array.isArray(data.tags.tags) && (
-                                <div className={`flex flex-wrap gap-2 mt-2 ${isExpanded ? 'opacity-100' : 'opacity-80'}`}>
-                                  {data.tags.tags.map((tag: any, i: number) => (
-                                    <span key={i} className="text-[11px] font-medium text-[#00f0ff] hover:text-white transition-colors">
-                                      #{tag}
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
-                            </motion.div>
-                          )}
-                        </div>
+                              </motion.div>
+                            )}
+                          </div>
 
 
-                        {/* 3. BARRA DE INTERACCIÓN Y BOTÓN DE SUSCRIPCIÓN */}
-                        {/* <div className={`flex items-center justify-between w-full ${isExpanded ? "pb-4" : "pb-13"}`}>
+                          {/* 3. BARRA DE INTERACCIÓN Y BOTÓN DE SUSCRIPCIÓN */}
+                          {/* <div className={`flex items-center justify-between w-full ${isExpanded ? "pb-4" : "pb-13"}`}>
                           <div className="flex items-center gap-4">
                             <motion.button
                               whileTap={{ scale: 0.9 }}
@@ -2244,7 +2722,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                                   handleFollowClick(Number(data.user_id.id), data.user_id.id.toString(), "create");
                                 }}
                               >
-                                Seguir
+                                {t('videos:actions.follow')}
                               </motion.button>
                             ) : (
                               <motion.button
@@ -2261,176 +2739,178 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                                   <path d="M4 12.6111L8.92308 17.5L20 6.5" stroke="#00f0ff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                                 </svg>
-                                Siguiendo
+                                {t('videos:actions.following')}
                               </motion.button>
                             )}
                           </AnimatePresence>
                         </div> */}
 
-                        {/* BARRA VERTICAL PEGADA AL BORDE DERECHO - estilo TikTok real */}
-                        {/* 3. COLUMNA DE INTERACCIONES (DERECHA) */}
-                        <div className={`
-                              absolute right-1 bottom-[calc(env(safe-area-inset-bottom)+5.5rem)] flex flex-col items-center gap-3 z-[70]
-                              pointer-events-auto
-                              pb-[env(safe-area-inset-bottom)+50px]         // evita superposición con navbar inferior
+                          {/* BARRA VERTICAL PEGADA AL BORDE DERECHO - estilo TikTok real */}
+                          {/* 3. COLUMNA DE INTERACCIONES (DERECHA) */}
+                          <div className={`
+                              absolute right-1 bottom-[calc(env(safe-area-inset-bottom)+5.5rem)] flex flex-col items-center gap-3
+                              pb-[env(safe-area-inset-bottom)+50px]
+                              transition-all duration-300
+                              ${isExpanded ? 'pointer-events-none z-[65] opacity-0' : 'pointer-events-auto z-[70] opacity-100'}
                             `}>
 
-                          {/* Like */}
-                          <motion.button
-                            whileTap={{ scale: 0.9 }}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleLikeClick((videoId || "1"), index)
-                            }}
-                            className="relative flex flex-col items-center gap-1"
-                          >
-                            <motion.div
-                              animate={{ scale: data.liked ? [1, 1.3, 1] : 1 }}
-                              transition={{ duration: 0.3 }}
-                              className={`flex h-10 w-10 items-center justify-center rounded-full ${data.liked
-                                ? "bg-red-500/20 text-red-500"
-                                : "bg-white/10 text-white"
-                                }`}
+                            {/* Like */}
+                            <motion.button
+                              whileTap={{ scale: 0.9 }}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleLikeClick((videoId || "1"), index)
+                              }}
+                              className="relative flex flex-col items-center gap-1"
                             >
-                              <Heart
-                                className={`h-5 w-5 ${data.liked ? "fill-red-900 text-red-500" : "text-white"
+                              <motion.div
+                                animate={{ scale: data.liked ? [1, 1.3, 1] : 1 }}
+                                transition={{ duration: 0.3 }}
+                                className={`flex h-10 w-10 items-center justify-center rounded-full ${data.liked
+                                  ? "bg-red-500/20 text-red-500"
+                                  : "bg-white/10 text-white"
                                   }`}
-                              />
-                            </motion.div>
-                            <span className="text-xs text-white">{data.like_count || 0}</span>
-                            <AnimatePresence>
-                              {showLikeAnimation[data.id || "1"] && (
-                                <>
-                                  {[...Array(5)].map((_, i) => (
-                                    <motion.div
-                                      key={`heart-particle-${data.id}-${i}`}
-                                      initial={{
-                                        opacity: 1,
-                                        y: 0,
-                                        x: 0,
-                                        scale: 0.5,
-                                      }}
-                                      animate={{
-                                        opacity: 0,
-                                        y: -50 - Math.random() * 50,
-                                        x: (Math.random() - 0.5) * 40,
-                                        scale: 1.5,
-                                      }}
-                                      exit={{ opacity: 0 }}
-                                      transition={{
-                                        duration: 1 + Math.random() * 0.5,
-                                      }}
-                                      className="absolute text-red-500"
-                                      style={{
-                                        top: "50%",
-                                        left: "50%",
-                                        transform: "translate(-50%, -50%)",
-                                      }}
-                                    >
-                                      ❤️
-                                    </motion.div>
-                                  ))}
-                                </>
-                              )}
-                            </AnimatePresence>
-                          </motion.button>
+                              >
+                                <Heart
+                                  className={`h-5 w-5 ${data.liked ? "fill-red-900 text-red-500" : "text-white"
+                                    }`}
+                                />
+                              </motion.div>
+                              <span className="text-xs text-white">{data.like_count || 0}</span>
+                              <AnimatePresence>
+                                {showLikeAnimation[data.id || "1"] && (
+                                  <>
+                                    {[...Array(5)].map((_, i) => (
+                                      <motion.div
+                                        key={`heart-particle-${data.id}-${i}`}
+                                        initial={{
+                                          opacity: 1,
+                                          y: 0,
+                                          x: 0,
+                                          scale: 0.5,
+                                        }}
+                                        animate={{
+                                          opacity: 0,
+                                          y: -50 - Math.random() * 50,
+                                          x: (Math.random() - 0.5) * 40,
+                                          scale: 1.5,
+                                        }}
+                                        exit={{ opacity: 0 }}
+                                        transition={{
+                                          duration: 1 + Math.random() * 0.5,
+                                        }}
+                                        className="absolute text-red-500"
+                                        style={{
+                                          top: "50%",
+                                          left: "50%",
+                                          transform: "translate(-50%, -50%)",
+                                        }}
+                                      >
+                                        ❤️
+                                      </motion.div>
+                                    ))}
+                                  </>
+                                )}
+                              </AnimatePresence>
+                            </motion.button>
 
-                          {/* Comment */}
-                          <motion.button
-                            whileTap={{ scale: 0.92 }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleCommentClick(index);
-                            }}
-                            className="flex flex-col items-center relative"
-                          >
-                            <div className="relative flex h-7 w-7 items-center justify-center rounded-full">
-                              <MessageCircle className="h-6 w-8" />
-                              {activeVideo === index && (data.comments_count || 0) > 0 && (
-                                <div className="absolute -top-1 -right-1 min-h-[8px] min-w-[8px] flex items-center justify-center rounded-full bg-cyan-500 text-[10px] font-bold px-1 shadow-cyan-500/40">
-                                  {data.comments_count > 9 ? "9+" : data.comments_count}
-                                </div>
-                              )}
+                            {/* Comment */}
+                            <motion.button
+                              whileTap={{ scale: 0.92 }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleCommentClick(index);
+                              }}
+                              className="flex flex-col items-center relative"
+                            >
+                              <div className="relative flex h-7 w-7 items-center justify-center rounded-full">
+                                <MessageCircle className="h-6 w-8" />
+                                {activeVideo === index && (data.comments_count || 0) > 0 && (
+                                  <div className="absolute -top-1 -right-1 min-h-[8px] min-w-[8px] flex items-center justify-center rounded-full bg-cyan-500 text-[10px] font-bold px-1 shadow-cyan-500/40">
+                                    {data.comments_count > 9 ? "9+" : data.comments_count}
+                                  </div>
+                                )}
+                              </div>
+                              <span className="text-xs mt-0.5 text-white">
+                                {data.comments_count || 0}
+                              </span>
+                            </motion.button>
+
+                            {/* Views */}
+                            <div className="flex flex-col items-center">
+                              <div className="flex h-8 w-8 items-center justify-center">
+                                <Eye className="h-7 w-8 " />
+                              </div>
+                              <span className="text-xs   ">
+                                {data.view_acount || 0}
+                              </span>
                             </div>
-                            <span className="text-xs mt-0.5 text-white">
-                              {data.comments_count || 0}
-                            </span>
-                          </motion.button>
 
-                          {/* Views */}
-                          <div className="flex flex-col items-center">
-                            <div className="flex h-8 w-8 items-center justify-center">
-                              <Eye className="h-7 w-8 " />
-                            </div>
-                            <span className="text-xs   ">
-                              {data.view_acount || 0}
-                            </span>
-                          </div>
-
-                          {/* Gift */}
-                          <motion.button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleVideoGiftClick(data.id);
-                            }}
-                            className="flex flex-col items-center relative"
-                            whileHover={{ scale: 1.1 }}
-                            whileTap={{ scale: 0.9 }}
-                            animate={{
-                              scale: [1, 1.04, 1],
-                              rotate: [0, -4, 4, -4, 4, 0],
-                            }}
-                            transition={{
-                              duration: 1.4,
-                              repeat: Infinity,
-                              repeatDelay: 12,
-                            }}
-                          >
-                            <div className={`
+                            {/* Gift */}
+                            <motion.button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleVideoGiftClick(data.id);
+                              }}
+                              className="flex flex-col items-center relative"
+                              whileHover={{ scale: 1.1 }}
+                              whileTap={{ scale: 0.9 }}
+                              animate={{
+                                scale: [1, 1.04, 1],
+                                rotate: [0, -4, 4, -4, 4, 0],
+                              }}
+                              transition={{
+                                duration: 1.4,
+                                repeat: Infinity,
+                                repeatDelay: 12,
+                              }}
+                            >
+                              <div className={`
                                   flex h-7 w-8 items-center justify-center rounded-full
                                   bg-gradient-to-br from-pink-500/35 to-purple-500/25
                                   backdrop-blur-md border border-pink-400/40 shadow-md
                                 `}>
-                              {/* Tu SVG del gift (más pequeño) */}
-                              <svg data-v-92f2660e width="20" height="20" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg"><g id="giftbox" data-v-92f2660e=""><g id="Base" data-v-92f2660e=""><g id="bottom" data-v-92f2660e=""><path id="Rectangle 15 Copy 2" d="M94 58H26V104H94V58Z" fill="#FF4F64" data-v-92f2660e=""></path><path id="Rectangle 3 Copy" opacity="0.05" d="M94 101.294H26V104H94V101.294Z" fill="black" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 5" opacity="0.1" d="M28.6842 58H26V104H28.6842V58Z" fill="white" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 6" opacity="0.05" d="M94 58H91.3158V104H94V58Z" fill="black" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 3" opacity="0.05" d="M73.8684 58H71.1842V104H73.8684V58Z" fill="black" data-v-92f2660e=""></path><path id="Rectangle Copy" d="M71.1842 58H48.5921V104H71.1842V58Z" fill="#FFD4D9" data-v-92f2660e=""></path><path id="Rectangle 2" opacity="0.1" d="M94 58H26V63.8627H94V58Z" fill="url(#paint0_linear_740_3020)" data-v-92f2660e=""></path></g></g><g id="top" data-v-92f2660e=""><path id="Rectangle 15 Copy 3" d="M100 42.665H20V60.0001H100V42.665Z" fill="#FF4F64" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 7" opacity="0.05" d="M100 42.665H97.2881V60.0001H100V42.665Z" fill="black" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 4" opacity="0.1" d="M22.7119 42.665H20V59.775H22.7119V42.665Z" fill="white" data-v-92f2660e=""></path><path id="ribbon" d="M60.0077 31.2585C59.9498 31.1677 58.6909 29.2544 58.0916 28.4143C55.4283 24.6809 52.6562 21.6866 49.7588 19.6882C45.9232 17.0425 41.9395 16.2219 38.0786 17.8014C35.6247 18.8053 33.3914 20.7344 31.3719 23.5749C27.177 29.4752 27.4011 34.7531 31.83 38.2919C34.9369 40.7745 39.8498 42.1747 46.1869 42.8621C50.835 43.3663 55.0298 43.2435 59.6147 43.3624L60.0077 31.2585ZM46.7269 37.0423C41.3928 36.4628 37.3603 35.3117 35.3278 33.6852C34.4441 32.978 34.0493 32.2813 34.0144 31.4588C33.9664 30.3263 34.5486 28.7649 35.9595 26.7772C37.3893 24.7631 38.8028 23.5403 40.1691 22.9805C43.7795 21.5011 48.4661 24.7386 53.3703 31.624C54.6954 33.4844 55.9353 35.4716 57.0626 37.4757C53.6591 37.5264 50.0985 37.4086 46.7269 37.0423ZM66.6306 31.624C71.5348 24.7386 76.2213 21.5011 79.8318 22.9805C81.1981 23.5403 82.6115 24.7631 84.0413 26.7772C85.4522 28.7649 86.0344 30.3263 85.9864 31.4588C85.9515 32.2813 85.5567 32.978 84.673 33.6852C82.6406 35.3117 78.608 36.4628 73.2739 37.0423C69.9024 37.4086 66.3417 37.5264 62.9383 37.4757C64.0656 35.4716 65.3054 33.4844 66.6306 31.624ZM59.6147 43.3626C64.0607 43.3626 69.1658 43.3663 73.8139 42.8621C80.1511 42.1747 85.0639 40.7745 88.1708 38.2919C92.5997 34.7531 92.8238 29.4752 88.6289 23.5749C86.6095 20.7344 84.3761 18.8053 81.9222 17.8014C78.0613 16.2219 74.0777 17.0425 70.242 19.6882C67.3447 21.6866 64.5725 24.6809 61.9092 28.4143C61.2369 29.3568 60.6251 30.2764 60.0004 31.2585" fill="url(#paint1_linear_740_3020)" data-v-92f2660e=""></path><path id="Rectangle" d="M76.9491 42.665H42.8248V60.0001H76.9491V42.665Z" fill="#FFD4D9" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 8" opacity="0.1" d="M100 42.665H20V45.3666H100V42.665Z" fill="white" data-v-92f2660e=""></path><path id="Rectangle 4 Copy" opacity="0.05" d="M79.661 42.665H76.9492V60.0001H79.661V42.665Z" fill="black" data-v-92f2660e=""></path></g></g><defs data-v-92f2660e=""><linearGradient id="paint0_linear_740_3020" x1="60" y1="58" x2="60" y2="63.8627" gradientUnits="userSpaceOnUse" data-v-92f2660e=""><stop data-v-92f2660e=""></stop><stop offset="1" stopOpacity="0" data-v-92f2660e=""></stop></linearGradient><linearGradient id="paint1_linear_740_3020" x1="60.0004" y1="18.9264" x2="60.0004" y2="43.3626" gradientUnits="userSpaceOnUse" data-v-92f2660e=""><stop stopColor="#FF879D" data-v-92f2660e=""></stop><stop offset="0.326625" stopColor="#FF4F64" data-v-92f2660e=""></stop><stop offset="1" stopColor="#E54659" data-v-92f2660e=""></stop></linearGradient></defs></svg>
-                            </div>
-                            <span className="text-[10px] mt-0.5 text-pink-300/90 font-medium drop-shadow-md">
-                              Regalar
-                            </span>
-                          </motion.button>
+                                {/* Tu SVG del gift (más pequeño) */}
+                                <svg data-v-92f2660e width="20" height="20" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg"><g id="giftbox" data-v-92f2660e=""><g id="Base" data-v-92f2660e=""><g id="bottom" data-v-92f2660e=""><path id="Rectangle 15 Copy 2" d="M94 58H26V104H94V58Z" fill="#FF4F64" data-v-92f2660e=""></path><path id="Rectangle 3 Copy" opacity="0.05" d="M94 101.294H26V104H94V101.294Z" fill="black" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 5" opacity="0.1" d="M28.6842 58H26V104H28.6842V58Z" fill="white" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 6" opacity="0.05" d="M94 58H91.3158V104H94V58Z" fill="black" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 3" opacity="0.05" d="M73.8684 58H71.1842V104H73.8684V58Z" fill="black" data-v-92f2660e=""></path><path id="Rectangle Copy" d="M71.1842 58H48.5921V104H71.1842V58Z" fill="#FFD4D9" data-v-92f2660e=""></path><path id="Rectangle 2" opacity="0.1" d="M94 58H26V63.8627H94V58Z" fill="url(#paint0_linear_740_3020)" data-v-92f2660e=""></path></g></g><g id="top" data-v-92f2660e=""><path id="Rectangle 15 Copy 3" d="M100 42.665H20V60.0001H100V42.665Z" fill="#FF4F64" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 7" opacity="0.05" d="M100 42.665H97.2881V60.0001H100V42.665Z" fill="black" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 4" opacity="0.1" d="M22.7119 42.665H20V59.775H22.7119V42.665Z" fill="white" data-v-92f2660e=""></path><path id="ribbon" d="M60.0077 31.2585C59.9498 31.1677 58.6909 29.2544 58.0916 28.4143C55.4283 24.6809 52.6562 21.6866 49.7588 19.6882C45.9232 17.0425 41.9395 16.2219 38.0786 17.8014C35.6247 18.8053 33.3914 20.7344 31.3719 23.5749C27.177 29.4752 27.4011 34.7531 31.83 38.2919C34.9369 40.7745 39.8498 42.1747 46.1869 42.8621C50.835 43.3663 55.0298 43.2435 59.6147 43.3624L60.0077 31.2585ZM46.7269 37.0423C41.3928 36.4628 37.3603 35.3117 35.3278 33.6852C34.4441 32.978 34.0493 32.2813 34.0144 31.4588C33.9664 30.3263 34.5486 28.7649 35.9595 26.7772C37.3893 24.7631 38.8028 23.5403 40.1691 22.9805C43.7795 21.5011 48.4661 24.7386 53.3703 31.624C54.6954 33.4844 55.9353 35.4716 57.0626 37.4757C53.6591 37.5264 50.0985 37.4086 46.7269 37.0423ZM66.6306 31.624C71.5348 24.7386 76.2213 21.5011 79.8318 22.9805C81.1981 23.5403 82.6115 24.7631 84.0413 26.7772C85.4522 28.7649 86.0344 30.3263 85.9864 31.4588C85.9515 32.2813 85.5567 32.978 84.673 33.6852C82.6406 35.3117 78.608 36.4628 73.2739 37.0423C69.9024 37.4086 66.3417 37.5264 62.9383 37.4757C64.0656 35.4716 65.3054 33.4844 66.6306 31.624ZM59.6147 43.3626C64.0607 43.3626 69.1658 43.3663 73.8139 42.8621C80.1511 42.1747 85.0639 40.7745 88.1708 38.2919C92.5997 34.7531 92.8238 29.4752 88.6289 23.5749C86.6095 20.7344 84.3761 18.8053 81.9222 17.8014C78.0613 16.2219 74.0777 17.0425 70.242 19.6882C67.3447 21.6866 64.5725 24.6809 61.9092 28.4143C61.2369 29.3568 60.6251 30.2764 60.0004 31.2585" fill="url(#paint1_linear_740_3020)" data-v-92f2660e=""></path><path id="Rectangle" d="M76.9491 42.665H42.8248V60.0001H76.9491V42.665Z" fill="#FFD4D9" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 8" opacity="0.1" d="M100 42.665H20V45.3666H100V42.665Z" fill="white" data-v-92f2660e=""></path><path id="Rectangle 4 Copy" opacity="0.05" d="M79.661 42.665H76.9492V60.0001H79.661V42.665Z" fill="black" data-v-92f2660e=""></path></g></g><defs data-v-92f2660e=""><linearGradient id="paint0_linear_740_3020" x1="60" y1="58" x2="60" y2="63.8627" gradientUnits="userSpaceOnUse" data-v-92f2660e=""><stop data-v-92f2660e=""></stop><stop offset="1" stopOpacity="0" data-v-92f2660e=""></stop></linearGradient><linearGradient id="paint1_linear_740_3020" x1="60.0004" y1="18.9264" x2="60.0004" y2="43.3626" gradientUnits="userSpaceOnUse" data-v-92f2660e=""><stop stopColor="#FF879D" data-v-92f2660e=""></stop><stop offset="0.326625" stopColor="#FF4F64" data-v-92f2660e=""></stop><stop offset="1" stopColor="#E54659" data-v-92f2660e=""></stop></linearGradient></defs></svg>
+                              </div>
+                              <span className="text-[10px] mt-0.5 text-pink-300/90 font-medium drop-shadow-md">
+                                {t('videos:actions.sendGift')}
+                              </span>
+                            </motion.button>
+
+                          </div>
+
 
                         </div>
-
+                        {/* 4. BARRA DE PROGRESO DE VIDEO PEGADA ABAJO */}
+                        {videoDuration[videoId] > 0 && (
+                          (() => {
+                            const progressPercentage = ((videoProgress[videoId] || 0) / (videoDuration[videoId] || 1)) * 100;
+                            const progressStyle = {
+                              '--progress': `${progressPercentage}%`
+                            } as React.CSSProperties;
+                            return (
+                              <div className="pointer-events-none absolute -bottom-1 left-1 right-1 z-30">
+                                <input
+                                  type="range"
+                                  min="0"
+                                  max={videoDuration[videoId] || 0}
+                                  value={videoProgress[videoId] || 0}
+                                  step="0.1"
+                                  className="pointer-events-auto h-1.5 w-full appearance-none cursor-pointer range-slider !bg-transparent hover:h-2 transition-height duration-150"
+                                  onChange={(e) => handleSeek(videoId, parseFloat(e.target.value))}
+                                  onClick={(e) => e.stopPropagation()}
+                                  style={progressStyle}
+                                />
+                              </div>
+                            );
+                          })()
+                        )}
+                        {/* FIN DEL CONTENEDOR DE METADATOS INFERIOR UNIFICADO */}
 
                       </div>
-                      {/* 4. BARRA DE PROGRESO DE VIDEO PEGADA ABAJO */}
-                      {videoDuration[videoId] > 0 && (
-                        (() => {
-                          const progressPercentage = ((videoProgress[videoId] || 0) / (videoDuration[videoId] || 1)) * 100;
-                          const progressStyle = {
-                            '--progress': `${progressPercentage}%`
-                          } as React.CSSProperties;
-                          return (
-                            <div className="pointer-events-none absolute -bottom-1 left-1 right-1 z-30">
-                              <input
-                                type="range"
-                                min="0"
-                                max={videoDuration[videoId] || 0}
-                                value={videoProgress[videoId] || 0}
-                                step="0.1"
-                                className="pointer-events-auto h-1.5 w-full appearance-none cursor-pointer range-slider !bg-transparent hover:h-2 transition-height duration-150"
-                                onChange={(e) => handleSeek(videoId, parseFloat(e.target.value))}
-                                onClick={(e) => e.stopPropagation()}
-                                style={progressStyle}
-                              />
-                            </div>
-                          );
-                        })()
-                      )}
-                      {/* FIN DEL CONTENEDOR DE METADATOS INFERIOR UNIFICADO */}
-
                     </div>
-                  </div>
+                  </HorizontalCarousel>
                 </motion.div>
               );
             })}
@@ -2519,7 +2999,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                     : 'bg-[#2a2f5e]'
                     }`}>
                     <img
-                      src={`${getBaseUrl()}media/${groupedStories[viewingStoryUserIndex]?.user.profile_picture}`}
+                      src={getMediaUrl(groupedStories[viewingStoryUserIndex]?.user.profile_picture)}
                       className="w-full h-full rounded-full object-cover border-2 border-[#050718]"
                       alt="User"
                       onError={(e) => {
@@ -2585,33 +3065,153 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 onClick={handleNextStory}
               ></div>
               {/* Media Display - Video or Image */}
-              {isVideoContent(groupedStories[viewingStoryUserIndex].media[currentStoryItemIndex].file) ? (
-                <video
-                  ref={storyVideoRef}
-                  key={`${viewingStoryUserIndex}-${currentStoryItemIndex}`} // Key change forces remount/replay
-                  src={`${getBaseUrl()}/media/${groupedStories[viewingStoryUserIndex].media[currentStoryItemIndex].file}`}
-                  className={`max-h-full max-w-full object-contain ${storyPremiumStates[currentStoryUuid || ''] ? 'premium-media' : ''}`}
-                  autoPlay={!isStoryPaused}
-                  playsInline
-                  onEnded={handleNextStory}
-                  onTimeUpdate={handleStoryVideoProgress}
-                />
-              ) : (
-                <motion.img
-                  key={`${viewingStoryUserIndex}-${currentStoryItemIndex}`}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  src={`${getBaseUrl()}/media/${groupedStories[viewingStoryUserIndex].media[currentStoryItemIndex].file}`}
-                  className={`max-h-full max-w-full object-contain ${storyPremiumStates[currentStoryUuid || ''] ? 'premium-media' : ''}`}
-                  alt="Story Content"
-                />
-              )}
+              {(() => {
+                const currentMediaItem = groupedStories[viewingStoryUserIndex].media[currentStoryItemIndex];
+                const storyForThisMedia = (stories as Story[])?.find(s => s.id === currentMediaItem?.story);
+                const hasCustomAudio = Boolean(storyForThisMedia?.audio_track_url);
+                const hasStoryFilter = Boolean(storyForThisMedia?.filter_css && storyForThisMedia.filter_css !== "none");
+                const storyMediaSrc = `${getBaseUrl()}/media/${currentMediaItem.file}`;
+                const textLayers = (storyForThisMedia?.text_layers ?? []) as StoryTextLayer[];
+                const stickerLayers = (storyForThisMedia?.sticker_layers ?? []) as StoryStickerLayer[];
+                return isVideoContent(currentMediaItem.file) ? (
+                  <div className="relative w-full h-full flex items-center justify-center">
+                    <video
+                      ref={storyVideoRef}
+                      key={`${viewingStoryUserIndex}-${currentStoryItemIndex}`}
+                      src={storyMediaSrc}
+                      className={`absolute inset-0 w-full h-full object-contain ${storyPremiumStates[currentStoryUuid || ''] ? 'premium-media' : ''}`}
+                      autoPlay={!isStoryPaused}
+                      playsInline
+                      muted={hasCustomAudio}
+                      style={{ opacity: hasStoryFilter ? 0 : 1 }}
+                      onEnded={handleNextStory}
+                      onTimeUpdate={handleStoryVideoProgress}
+                    />
+                    <StoryFilterCanvas
+                      source={storyMediaSrc}
+                      filterCss={storyForThisMedia?.filter_css}
+                      active={hasStoryFilter}
+                      kind="video"
+                      videoRef={storyVideoRef}
+                    />
+                    {textLayers.map((layer) => (
+                      <div
+                        key={layer.id}
+                        className="absolute z-20 pointer-events-none"
+                        style={{
+                          left: `${layer.x}%`,
+                          top: `${layer.y}%`,
+                          transform: "translate(-50%, -50%)",
+                        }}
+                      >
+                        <span
+                          className="whitespace-pre-wrap drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]"
+                          style={{
+                            color: layer.color,
+                            fontSize: `${layer.fontSize}px`,
+                            fontWeight: layer.bold ? 900 : 600,
+                            textShadow: "0 2px 6px rgba(0,0,0,0.9)",
+                          }}
+                        >
+                          {layer.text}
+                        </span>
+                      </div>
+                    ))}
+                    {stickerLayers.map((layer) => (
+                      <div
+                        key={layer.id}
+                        className="absolute z-20 pointer-events-none select-none"
+                        style={{
+                          left: `${layer.x}%`,
+                          top: `${layer.y}%`,
+                          transform: "translate(-50%, -50%)",
+                          fontSize: `${layer.size}px`,
+                        }}
+                      >
+                        {layer.emoji}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="relative w-full h-full flex items-center justify-center">
+                    <motion.img
+                      key={`${viewingStoryUserIndex}-${currentStoryItemIndex}`}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      src={storyMediaSrc}
+                      className={`absolute inset-0 w-full h-full object-contain ${storyPremiumStates[currentStoryUuid || ''] ? 'premium-media' : ''}`}
+                      alt="Story Content"
+                      style={{ opacity: hasStoryFilter ? 0 : 1 }}
+                    />
+                    <StoryFilterCanvas
+                      source={storyMediaSrc}
+                      filterCss={storyForThisMedia?.filter_css}
+                      active={hasStoryFilter}
+                      kind="image"
+                    />
+                    {textLayers.map((layer) => (
+                      <div
+                        key={layer.id}
+                        className="absolute z-20 pointer-events-none"
+                        style={{
+                          left: `${layer.x}%`,
+                          top: `${layer.y}%`,
+                          transform: "translate(-50%, -50%)",
+                        }}
+                      >
+                        <span
+                          className="whitespace-pre-wrap drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]"
+                          style={{
+                            color: layer.color,
+                            fontSize: `${layer.fontSize}px`,
+                            fontWeight: layer.bold ? 900 : 600,
+                            textShadow: "0 2px 6px rgba(0,0,0,0.9)",
+                          }}
+                        >
+                          {layer.text}
+                        </span>
+                      </div>
+                    ))}
+                    {stickerLayers.map((layer) => (
+                      <div
+                        key={layer.id}
+                        className="absolute z-20 pointer-events-none select-none"
+                        style={{
+                          left: `${layer.x}%`,
+                          top: `${layer.y}%`,
+                          transform: "translate(-50%, -50%)",
+                          fontSize: `${layer.size}px`,
+                        }}
+                      >
+                        {layer.emoji}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
             </motion.div>
+
+            {/* Music Pill */}
+            {(() => {
+              const currentStoryItem = groupedStories[viewingStoryUserIndex]?.media?.[currentStoryItemIndex];
+              const originalStory = (stories as Story[])?.find(s => s.id === currentStoryItem?.story);
+              if (!originalStory?.audio_track_url) return null;
+              return (
+                <div className="absolute bottom-20 left-1/2 -translate-x-1/2 flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/50 backdrop-blur-sm border border-white/10 pointer-events-none z-30 shadow-xl">
+                  <Music2 size={12} className="text-cyan-400 font-bold" />
+                  <span className="text-white text-[11px] font-medium truncate max-w-[200px]">
+                    {originalStory.audio_track_title || 'Sonido añadido'}
+                    {originalStory.audio_track_artist ? ` · ${originalStory.audio_track_artist}` : ''}
+                  </span>
+                </div>
+              );
+            })()}
+
             {/* Reply / Interactions (Bottom Overlay) - Added Gift Button */}
             <div className="absolute bottom-0 inset-x-0 p-4 bg-gradient-to-t from-black/90 to-transparent flex items-center gap-2 z-30">
               <input
                 type="text"
-                placeholder="Enviar mensaje..."
+                placeholder={t('videos:comments.sendMessage')}
                 className="flex-1 bg-white/10 border border-white/20 rounded-full px-3 py-1 text-white placeholder-gray-400 focus:outline-none focus:border-[#00f0ff] backdrop-blur-md"
               />
               {isOwner ?
@@ -2719,38 +3319,38 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                     className="fixed bottom-20 left-1/2 transform -translate-x-1/2 z-60 bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/20 w-80 max-w-full "
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <h3 className="text-center font-bold mb-4 text-white">🎁 Enviar Regalo</h3>
+                    <h3 className="text-center font-bold mb-4 text-white">🎁 {t('videos:actions.sendGift')}</h3>
                     <div className="space-y-3">
                       <motion.button
                         whileTap={{ scale: 0.98 }}
                         onClick={() => handleCategoryClick('support', 5)}
                         className="w-full bg-yellow-500/20 text-yellow-300 p-3 rounded-xl border border-yellow-500/30"
                       >
-                        🎁 Apoyar (5 tokens)
+                        🎁 {t('videos:actions.giftSupport')}
                       </motion.button>
                       <motion.button
                         whileTap={{ scale: 0.98 }}
                         onClick={() => handleCategoryClick('invest', 10)}
                         className="w-full bg-blue-500/20 text-blue-300 p-3 rounded-xl border border-blue-500/30"
                       >
-                        💎 Invertir en ti (10 tokens)
+                        💎 {t('videos:actions.giftInvest')}
                       </motion.button>
                       <motion.button
                         whileTap={{ scale: 0.98 }}
                         onClick={() => handleCategoryClick('vip', 20)}
                         className="w-full bg-purple-500/20 text-purple-300 p-3 rounded-xl border border-purple-500/30"
                       >
-                        👑 Fan VIP (20 tokens)
+                        👑 {t('videos:actions.giftVip')}
                       </motion.button>
                       <motion.button
                         whileTap={{ scale: 0.98 }}
                         onClick={() => handleCategoryClick('unlock', 15)}
                         className="w-full bg-indigo-500/20 text-indigo-300 p-3 rounded-xl border border-indigo-500/30"
                       >
-                        🔒 Desbloquear lo que viene (15 tokens)
+                        🔒 {t('videos:actions.giftUnlock')}
                       </motion.button>
                     </div>
-                    <p className="text-xs text-gray-400 mt-4 text-center">Buzzy retiene 10% de comisión</p>
+                    <p className="text-xs text-gray-400 mt-4 text-center">{t('videos:actions.giftCommission')}</p>
                   </motion.div>
                 </>
               )}
@@ -2829,6 +3429,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
           showViewersModal && isOwner && (
             <>
               <motion.div
+                key="viewers-backdrop"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
@@ -2836,6 +3437,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 onClick={handleCloseViewers}
               />
               <motion.div
+                key="viewers-panel"
                 initial={{ y: "100%", scale: 0.9 }}
                 animate={{ y: 0, scale: 1 }}
                 exit={{ y: "100%", scale: 0.9 }}
@@ -3007,70 +3609,306 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       </AnimatePresence >
       {/* Options Modal */}
       <AnimatePresence>
-        {
-          showOptionsModal && viewingStoryUserIndex !== null && (
-            <React.Fragment>
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="fixed inset-0 bg-black/70 z-60"
-                onClick={() => setShowOptionsModal(false)}
-              />
-              <motion.div
-                initial={{ y: "100%" }}
-                animate={{ y: 0 }}
-                exit={{ y: "100%" }}
-                transition={{ type: "spring", damping: 30, stiffness: 300 }}
-                className="fixed bottom-0 left-0 right-0 h-auto z-70 bg-[#050718] rounded-t-3xl overflow-hidden max-h-[40vh]"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="flex justify-center pt-4 pb-4">
-                  <div className="w-12 h-1.5 bg-white/30 rounded-full cursor-pointer" onClick={() => setShowOptionsModal(false)} />
-                </div>
-                <div className="px-6 pb-6 space-y-2">
+        {showOptionsModal && viewingStoryUserIndex !== null && (
+          <React.Fragment>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm z-60"
+              onClick={() => setShowOptionsModal(false)}
+            />
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 28, stiffness: 260 }}
+              className="fixed bottom-0 left-0 right-0 z-70 rounded-t-[32px] overflow-hidden"
+              style={{ background: "linear-gradient(160deg, #0c0f2e 0%, #050718 100%)", borderTop: "1px solid rgba(112,0,255,0.25)" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* glow line top */}
+              <div className="absolute top-0 left-1/2 -translate-x-1/2 w-40 h-px bg-gradient-to-r from-transparent via-[#7000ff]/70 to-transparent" />
+              <div className="flex justify-center pt-3 pb-1">
+                <div className="w-10 h-1 rounded-full bg-gradient-to-r from-[#7000ff] to-[#00f0ff] opacity-60" />
+              </div>
+
+              <div className="px-5 pb-10 pt-3 space-y-2">
+                {!isOwner && (
                   <motion.button
-                    whileTap={{ scale: 0.98 }}
-                    className="w-full text-left text-red-400 font-medium py-3 rounded-lg hover:bg-red-500/10 transition-colors"
+                    whileTap={{ scale: 0.97 }}
+                    className="group relative w-full flex items-center gap-4 py-4 px-5 rounded-2xl overflow-hidden transition-all duration-200"
+                    style={{ background: "rgba(255,0,80,0.07)", border: "1px solid rgba(255,0,80,0.15)" }}
                     onClick={handleReport}
                   >
-                    Report inappropriate
+                    <div className="flex items-center justify-center w-9 h-9 rounded-full flex-shrink-0" style={{ background: "rgba(255,0,80,0.15)" }}>
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ff2d55" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
+                    </div>
+                    <span className="text-[15px] font-semibold text-[#ff2d55]">Reportar</span>
+                    <div className="ml-auto opacity-40">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff2d55" strokeWidth="2" strokeLinecap="round"><path d="M9 18l6-6-6-6"/></svg>
+                    </div>
                   </motion.button>
+                )}
+                {isOwner && (
                   <motion.button
-                    whileTap={{ scale: 0.98 }}
-                    className="w-full text-left text-white font-medium py-3 rounded-lg hover:bg-white/10 transition-colors"
-                    onClick={handleAboutAccount}
+                    whileTap={{ scale: 0.97 }}
+                    className="group relative w-full flex items-center gap-4 py-4 px-5 rounded-2xl overflow-hidden transition-all duration-200"
+                    style={{ background: "rgba(255,0,80,0.07)", border: "1px solid rgba(255,0,80,0.15)" }}
+                    onClick={handleDelete}
                   >
-                    About this account
+                    <div className="flex items-center justify-center w-9 h-9 rounded-full flex-shrink-0" style={{ background: "rgba(255,0,80,0.15)" }}>
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ff2d55" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                    </div>
+                    <span className="text-[15px] font-semibold text-[#ff2d55]">Eliminar</span>
+                    <div className="ml-auto opacity-40">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff2d55" strokeWidth="2" strokeLinecap="round"><path d="M9 18l6-6-6-6"/></svg>
+                    </div>
                   </motion.button>
-                  {isOwner && (
-                    <motion.button
-                      whileTap={{ scale: 0.98 }}
-                      className="w-full text-left text-red-400 font-medium py-3 rounded-lg hover:bg-red-500/10 transition-colors"
-                      onClick={handleDelete}
-                    >
-                      Delete
-                    </motion.button>
-                  )}
-                  <motion.button
-                    whileTap={{ scale: 0.98 }}
-                    className="w-full text-left text-gray-400 font-medium py-3 rounded-lg hover:bg-white/10 transition-colors"
-                    onClick={() => setShowOptionsModal(false)}
-                  >
-                    Cancel
-                  </motion.button>
+                )}
+
+                <motion.button
+                  whileTap={{ scale: 0.97 }}
+                  className="w-full flex items-center justify-center py-4 px-5 rounded-2xl transition-all duration-200"
+                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+                  onClick={() => setShowOptionsModal(false)}
+                >
+                  <span className="text-[15px] font-medium text-white/50">Cancelar</span>
+                </motion.button>
+              </div>
+            </motion.div>
+          </React.Fragment>
+        )}
+      </AnimatePresence>
+
+      {/* Report Reason Sheet */}
+      <AnimatePresence>
+        {showReportSheet && (
+          <React.Fragment>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm z-60"
+              onClick={() => setShowReportSheet(false)}
+            />
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 28, stiffness: 260 }}
+              className="fixed bottom-0 left-0 right-0 z-70 rounded-t-[32px] overflow-hidden"
+              style={{ background: "linear-gradient(160deg, #0c0f2e 0%, #050718 100%)", borderTop: "1px solid rgba(112,0,255,0.25)" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="absolute top-0 left-1/2 -translate-x-1/2 w-40 h-px bg-gradient-to-r from-transparent via-[#7000ff]/70 to-transparent" />
+              <div className="flex justify-center pt-3 pb-1">
+                <div className="w-10 h-1 rounded-full bg-gradient-to-r from-[#7000ff] to-[#00f0ff] opacity-60" />
+              </div>
+
+              <div className="px-5 pb-10 pt-3">
+                {/* header */}
+                <div className="flex items-center gap-3 px-1 pb-4">
+                  <div className="flex items-center justify-center w-8 h-8 rounded-full" style={{ background: "rgba(112,0,255,0.2)" }}>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#7000ff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
+                  </div>
+                  <p className="text-white font-bold text-[16px]">¿Por qué reportas este contenido?</p>
                 </div>
-              </motion.div>
-            </React.Fragment>
-          )
-        }
-      </AnimatePresence >
+
+                <div className="space-y-2">
+                  {(
+                    [
+                      { reason: "spam",     label: "Spam",                        icon: "🚫" },
+                      { reason: "violence", label: "Contenido violento",           icon: "⚠️" },
+                      { reason: "nudity",   label: "Desnudez o contenido sexual",  icon: "🔞" },
+                      { reason: "hate",     label: "Discurso de odio",             icon: "🗣" },
+                      { reason: "other",    label: "Otro motivo",                  icon: "💬" },
+                    ] as { reason: ReportPayload["reason"]; label: string; icon: string }[]
+                  ).map(({ reason, label, icon }, i) => (
+                    <motion.button
+                      key={reason}
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: i * 0.04 }}
+                      whileTap={{ scale: 0.97 }}
+                      disabled={reportLoading}
+                      className="w-full flex items-center gap-4 py-3.5 px-4 rounded-2xl transition-all duration-200 disabled:opacity-40"
+                      style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}
+                      onClick={() => handleReportReason(reason)}
+                    >
+                      <span className="text-lg leading-none">{icon}</span>
+                      <span className="text-[14px] font-medium text-white/90 flex-1 text-left">{label}</span>
+                      {reportLoading ? (
+                        <div className="w-4 h-4 rounded-full border-2 border-[#7000ff]/40 border-t-[#7000ff] animate-spin" />
+                      ) : (
+                        <svg className="opacity-30" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round"><path d="M9 18l6-6-6-6"/></svg>
+                      )}
+                    </motion.button>
+                  ))}
+                </div>
+
+                <motion.button
+                  whileTap={{ scale: 0.97 }}
+                  className="w-full flex items-center justify-center py-4 mt-3 rounded-2xl transition-all duration-200"
+                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+                  onClick={() => setShowReportSheet(false)}
+                >
+                  <span className="text-[15px] font-medium text-white/50">Cancelar</span>
+                </motion.button>
+              </div>
+            </motion.div>
+          </React.Fragment>
+        )}
+      </AnimatePresence>
+
+      {/* Delete Confirmation Dialog */}
+      <AnimatePresence>
+        {showDeleteConfirm && (
+          <React.Fragment>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/70 backdrop-blur-sm z-60"
+              onClick={() => !deleteLoading && setShowDeleteConfirm(false)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.88, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.88, y: 20 }}
+              transition={{ type: "spring", damping: 22, stiffness: 320 }}
+              className="fixed inset-0 z-70 flex items-center justify-center px-6"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="relative w-full max-w-[320px] rounded-3xl overflow-hidden"
+                style={{ background: "linear-gradient(145deg, #0e1235 0%, #07091f 100%)", border: "1px solid rgba(255,0,80,0.2)", boxShadow: "0 25px 60px rgba(0,0,0,0.7), 0 0 40px rgba(255,0,80,0.08)" }}>
+                {/* top glow */}
+                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-px bg-gradient-to-r from-transparent via-[#ff2d55]/60 to-transparent" />
+
+                <div className="px-6 pt-7 pb-5 text-center">
+                  {/* icon */}
+                  <div className="mx-auto mb-4 flex items-center justify-center w-14 h-14 rounded-full"
+                    style={{ background: "rgba(255,0,80,0.12)", border: "1px solid rgba(255,0,80,0.2)" }}>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ff2d55" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                  </div>
+                  <p className="text-white font-bold text-[18px] mb-1">¿Eliminar este video?</p>
+                  <p className="text-white/40 text-[13px]">Esta acción no se puede deshacer.</p>
+                </div>
+
+                <div className="h-px mx-5" style={{ background: "rgba(255,255,255,0.07)" }} />
+
+                <div className="flex p-3 gap-2">
+                  <button
+                    className="flex-1 py-3.5 rounded-2xl text-white/60 font-medium text-[14px] transition-all duration-200"
+                    style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}
+                    onClick={() => setShowDeleteConfirm(false)}
+                    disabled={deleteLoading}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    className="flex-1 py-3.5 rounded-2xl font-semibold text-[14px] transition-all duration-200 disabled:opacity-50 flex items-center justify-center gap-2"
+                    style={{ background: "linear-gradient(135deg, #ff2d55, #c0002a)", boxShadow: "0 4px 20px rgba(255,45,85,0.35)" }}
+                    onClick={handleConfirmDelete}
+                    disabled={deleteLoading}
+                  >
+                    {deleteLoading ? (
+                      <>
+                        <div className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                        <span className="text-white">Eliminando</span>
+                      </>
+                    ) : (
+                      <span className="text-white">Eliminar</span>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </React.Fragment>
+        )}
+      </AnimatePresence>
       <ShowComments showCommentsModal={showCommentsModal} setShowCommentsModal={setShowCommentsModal} comments={comments} user={user} commentText={commentText} setCommentText={setCommentText} handlePostComment={handlePostComment} />
+
+      {/* Feedback Modal */}
+      <AnimatePresence>
+        {feedbackModal.show && (
+          <React.Fragment>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200]"
+              onClick={() => setFeedbackModal(f => ({ ...f, show: false }))}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.85, y: 24 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.85, y: 24 }}
+              transition={{ type: "spring", damping: 22, stiffness: 320 }}
+              className="fixed inset-0 z-[201] flex items-center justify-center px-6 pointer-events-none"
+            >
+              <div
+                className="pointer-events-auto w-full max-w-[300px] rounded-3xl overflow-hidden text-center"
+                style={{
+                  background: "linear-gradient(145deg, #0e1235 0%, #07091f 100%)",
+                  border: feedbackModal.success ? "1px solid rgba(0,240,255,0.2)" : "1px solid rgba(255,45,85,0.2)",
+                  boxShadow: feedbackModal.success
+                    ? "0 25px 60px rgba(0,0,0,0.7), 0 0 40px rgba(0,240,255,0.08)"
+                    : "0 25px 60px rgba(0,0,0,0.7), 0 0 40px rgba(255,45,85,0.08)",
+                }}
+              >
+                {/* top glow line */}
+                <div
+                  className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-px"
+                  style={{ background: feedbackModal.success ? "linear-gradient(90deg, transparent, rgba(0,240,255,0.6), transparent)" : "linear-gradient(90deg, transparent, rgba(255,45,85,0.6), transparent)" }}
+                />
+
+                <div className="px-6 pt-8 pb-6">
+                  {/* icon circle */}
+                  <div
+                    className="mx-auto mb-4 flex items-center justify-center w-16 h-16 rounded-full"
+                    style={{
+                      background: feedbackModal.success ? "rgba(0,240,255,0.1)" : "rgba(255,45,85,0.1)",
+                      border: feedbackModal.success ? "1px solid rgba(0,240,255,0.2)" : "1px solid rgba(255,45,85,0.2)",
+                    }}
+                  >
+                    {feedbackModal.success ? (
+                      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#00f0ff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/>
+                      </svg>
+                    ) : (
+                      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#ff2d55" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                      </svg>
+                    )}
+                  </div>
+
+                  <p className="text-white font-bold text-[17px] mb-1">
+                    {feedbackModal.success ? "Reporte enviado" : "Algo salió mal"}
+                  </p>
+                  <p className="text-white/50 text-[13px] leading-relaxed">{feedbackModal.message}</p>
+                </div>
+
+                <div className="h-px mx-5" style={{ background: "rgba(255,255,255,0.07)" }} />
+
+                <button
+                  className="w-full py-4 font-semibold text-[14px] transition-all duration-200"
+                  style={{ color: feedbackModal.success ? "#00f0ff" : "#ff2d55" }}
+                  onClick={() => setFeedbackModal(f => ({ ...f, show: false }))}
+                >
+                  Entendido
+                </button>
+              </div>
+            </motion.div>
+          </React.Fragment>
+        )}
+      </AnimatePresence>
 
       {/* Gift Animation Overlay - Moved to top level to show in videos too */}
       <AnimatePresence>
         {giftAnimation && (
           <motion.div
+            key="gift-animation-overlay"
             initial={{ opacity: 0, y: 200, scale: 0.7 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 400, scale: 0.7 }}

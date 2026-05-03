@@ -1,0 +1,115 @@
+{
+  "app": {
+    "name": "Buzzy",
+    "tagline": "Share your moments"
+  },
+  "actions": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "delete": "Delete",
+    "edit": "Edit",
+    "close": "Close",
+    "back": "Back",
+    "next": "Next",
+    "submit": "Submit",
+    "loading": "Loading...",
+    "retry": "Try again",
+    "search": "Search",
+    "filter": "Filter",
+    "share": "Share",
+    "copy": "Copy link",
+    "copied": "Copied!",
+    "more": "More",
+    "less": "Less",
+    "seeAll": "See all",
+    "viewMore": "View more",
+    "send": "Send",
+    "upload": "Upload",
+    "uploading": "Uploading...",
+    "download": "Download",
+    "continue": "Continue"
+  },
+  "status": {
+    "online": "Online",
+    "offline": "Offline",
+    "away": "Away",
+    "success": "Success",
+    "error": "Error",
+    "pending": "Pending"
+  },
+  "time": {
+    "justNow": "Just now",
+    "minutesAgo": "{{count}} min ago",
+    "minutesAgo_plural": "{{count}} mins ago",
+    "hoursAgo": "{{count}} hour ago",
+    "hoursAgo_plural": "{{count}} hours ago",
+    "daysAgo": "{{count}} day ago",
+    "daysAgo_plural": "{{count}} days ago",
+    "weeksAgo": "{{count}} week ago",
+    "weeksAgo_plural": "{{count}} weeks ago",
+    "monthsAgo": "{{count}} month ago",
+    "monthsAgo_plural": "{{count}} months ago"
+  },
+  "numbers": {
+    "followers": "{{count}} follower",
+    "followers_plural": "{{count}} followers",
+    "following": "{{count}} following",
+    "likes": "{{count}} like",
+    "likes_plural": "{{count}} likes",
+    "comments": "{{count}} comment",
+    "comments_plural": "{{count}} comments",
+    "views": "{{count}} view",
+    "views_plural": "{{count}} views"
+  },
+  "language": {
+    "label": "Language",
+    "select": "Select language",
+    "changed": "Language updated"
+  },
+  "theme": {
+    "label": "Theme",
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System"
+  },
+  "currency": {
+    "usd": "USD",
+    "tokens": "tokens",
+    "balance": "Balance: {{amount}}"
+  },
+  "messages": {
+    "title": "Messages",
+    "searchPlaceholder": "Search chat...",
+    "empty": "No messages yet",
+    "emptyHint": "Start a conversation by finding someone on Buzzy 🚀",
+    "findPeople": "Find people",
+    "viewAll": "View all messages"
+  },
+  "search": {
+    "placeholder": "Search creators, videos or topics"
+  },
+  "errors": {
+    "microphoneAccess": "Could not access the microphone.",
+    "storyUpload": "Error uploading story. Please try again."
+  },
+  "ads": {
+    "paymentCancelled": "Payment cancelled. You can try again whenever you like.",
+    "paymentPending": "Payment not yet processed. If you already paid, wait a few seconds and try reloading.",
+    "paymentError": "Error verifying payment.",
+    "relaunchSuccess": "Campaign relaunched successfully!",
+    "relaunchError": "Could not relaunch campaign.",
+    "stats": {
+      "totalReach": "Total Reach",
+      "interactions": "Interactions",
+      "totalSpend": "Total Spend",
+      "activeCampaigns": "Active Campaigns"
+    },
+    "campaigns": {
+      "title": "Your Campaigns",
+      "viewAll": "View all",
+      "globalPerformance": "Active Global Performance",
+      "completed": "% Completed"
+    }
+  }
+}

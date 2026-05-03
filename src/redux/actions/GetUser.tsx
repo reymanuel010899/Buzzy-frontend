@@ -1,24 +1,20 @@
-import { SUCCEES_GET_USER, FAILED_GET_USER } from '../type'
+import { SUCCEES_GET_USER, FAILED_GET_USER, USER_NOT_FOUND } from '../type'
 import { apiClient } from '../client/api-client';
-// const user_seccion =  JSON.parse(localStorage.getItem('user') || '')
 
 export const getUser = (username = '') => async (dispatch: any) => {
-  console.log("getUser thunk called with username:", username);
-
   try {
     const response = await apiClient.get(`/api/get-user/${username}/`);
-    if (response.status == 200) {
-      // localStorage.setItem('user', JSON.stringify(response.data.user))
+    const data = response.data;
+
+    if (data?.user?.is_owner) {
       dispatch({
-        type: SUCCEES_GET_USER,
-        payload: response.data,
+        type: USER_NOT_FOUND,
+        payload: { user: data.user, searchedUsername: username },
       });
+    } else {
+      dispatch({ type: SUCCEES_GET_USER, payload: data });
     }
-  } catch (error) {
-    dispatch({
-      type: FAILED_GET_USER,
-      payload: error
-    });
+  } catch (error: any) {
+    dispatch({ type: FAILED_GET_USER, payload: error });
   }
 };
-

@@ -29,6 +29,7 @@ export interface ChatRoom {
   unread_count: number;
   updated_at: string;
   other_user_online: OtherUserOnline;
+  folder_type?: 'standard' | 'request' | 'hidden';
 }
 
 export interface ChatListResponse {

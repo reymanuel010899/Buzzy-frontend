@@ -38,10 +38,21 @@ const SignIn: React.FC = () => {
 
       if (token) {
         setLoading(true);
-        // @ts-ignore
-        await googleLogin(token)(dispatch);
-        setLoading(false);
-        navigate('/');
+        try {
+          // @ts-ignore
+          await googleLogin(token)(dispatch);
+          navigate('/');
+        } catch (apiError: any) {
+          const status = apiError?.response?.status;
+          const code   = apiError?.response?.data?.error;
+          if (status === 409 && code === 'not_registered') {
+            setErrorMsg("No tienes una cuenta en Buzzy con ese correo de Google. Regístrate primero.");
+          } else {
+            setErrorMsg("Error al iniciar sesión con Google. Intenta de nuevo.");
+          }
+        } finally {
+          setLoading(false);
+        }
       }
     } catch (error) {
       console.error("Google Sign-In Error", error);

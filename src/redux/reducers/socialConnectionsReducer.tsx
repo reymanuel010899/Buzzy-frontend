@@ -10,12 +10,16 @@ import {
     SUCCEES_CREATE_FOLLOWER
 } from '../type';
 
-const updateFollowingInRecord = (record: Record<string, any[]>, targetUserId: number | string) => {
+const updateFollowingInRecord = (record: Record<string, any[]>, targetUserId: number | string, nowFollowing: boolean) => {
     const newRecord = { ...record };
     Object.keys(newRecord).forEach(username => {
         newRecord[username] = newRecord[username].map(item => {
             if (item.user && item.user.id.toString() === targetUserId.toString()) {
-                return { ...item, is_following: !item.is_following };
+                return {
+                    ...item,
+                    is_following: nowFollowing,
+                    unfollowed_at: !nowFollowing ? Date.now() : null,
+                };
             }
             return item;
         });
@@ -60,16 +64,18 @@ export default function socialConnectionsReducer(state = initialState, action: a
                 suggestions: { ...state.suggestions, [username]: payload },
                 loading: false
             };
-        case SUCCEES_CREATE_FOLLOWER:
-            const targetId = payload.follower_user_id || payload.id;
+        case SUCCEES_CREATE_FOLLOWER: {
+            const targetId = payload.follower_user_id || payload.data?.follower_user_id || payload.id;
             if (!targetId) return state;
+            const nowFollowing = payload.message !== "Dejado de seguir";
             return {
                 ...state,
-                followers: updateFollowingInRecord(state.followers, targetId),
-                following: updateFollowingInRecord(state.following, targetId),
-                subscribers: updateFollowingInRecord(state.subscribers, targetId),
-                suggestions: updateFollowingInRecord(state.suggestions, targetId),
+                followers: updateFollowingInRecord(state.followers, targetId, nowFollowing),
+                following: updateFollowingInRecord(state.following, targetId, nowFollowing),
+                subscribers: updateFollowingInRecord(state.subscribers, targetId, nowFollowing),
+                suggestions: updateFollowingInRecord(state.suggestions, targetId, nowFollowing),
             };
+        }
         case FAILED_GET_FOLLOWERS:
         case FAILED_GET_FOLLOWING:
         case FAILED_GET_SUBSCRIBERS:

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Wallet, ArrowUpRight, ArrowDownLeft, DollarSign, ShieldCheck, Landmark, ChevronRight, Check, AlertCircle } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 interface WalletModalProps {
     isOpen: boolean;
@@ -14,6 +15,7 @@ interface WalletModalProps {
 }
 
 const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose, balance, onAddFunds, onWithdraw, defaultTab = 'deposit', bankAccounts, onOpenBankAccounts }) => {
+    const { t } = useTranslation('wallet');
     const [activeTab, setActiveTab] = useState<'deposit' | 'withdraw'>(defaultTab);
 
     React.useEffect(() => {
@@ -99,7 +101,9 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose, balance, onA
                                 >
                                     <div className="relative z-10 flex items-center justify-between">
                                         <div>
-                                            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-400 mb-1">Tu Balance Total</p>
+                                            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-400 mb-1">
+                                                {t('modal.totalBalance')}
+                                            </p>
                                             <h3 className="text-4xl font-black italic text-white tracking-tighter">
                                                 ${parseFloat(balance.toString()).toFixed(2)}
                                             </h3>
@@ -119,14 +123,14 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose, balance, onA
                                     className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'deposit' ? 'bg-white text-black shadow-xl' : 'text-gray-400 hover:text-white'
                                         }`}
                                 >
-                                    <ArrowDownLeft size={14} /> Depositar
+                                    <ArrowDownLeft size={14} /> {t('modal.deposit')}
                                 </button>
                                 <button
                                     onClick={() => { setActiveTab('withdraw'); setAmount(''); }}
                                     className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'withdraw' ? 'bg-white text-black shadow-xl' : 'text-gray-400 hover:text-white'
                                         }`}
                                 >
-                                    <ArrowUpRight size={14} /> Retirar
+                                    <ArrowUpRight size={14} /> {t('modal.withdrawTab')}
                                 </button>
                             </div>
 
@@ -151,7 +155,7 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose, balance, onA
                                             ))}
                                         </div>
                                         <div className="space-y-2">
-                                            <label className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500 ml-4">Monto Personalizado</label>
+                                            <label className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500 ml-4">{t('modal.customAmount')}</label>
                                             <div className="relative">
                                                 <div className="absolute left-6 top-1/2 -translate-y-1/2">
                                                     <DollarSign size={18} className="text-blue-400" />
@@ -176,7 +180,7 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose, balance, onA
                                                 <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                                             ) : (
                                                 <>
-                                                    Continuar a Pago <ChevronRight size={16} />
+                                                    {t('modal.continuePayment')} <ChevronRight size={16} />
                                                 </>
                                             )}
                                         </motion.button>
@@ -185,7 +189,7 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose, balance, onA
                                     <>
                                         <div className="space-y-4">
                                             <div className="space-y-2">
-                                                <label className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500 ml-4">Monto a Retirar</label>
+                                                <label className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500 ml-4">{t('modal.withdrawAmount')}</label>
                                                 <div className="relative">
                                                     <div className="absolute left-6 top-1/2 -translate-y-1/2">
                                                         <DollarSign size={18} className="text-emerald-400" />
@@ -194,13 +198,13 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose, balance, onA
                                                         type="number"
                                                         value={amount}
                                                         onChange={(e) => setAmount(e.target.value)}
-                                                        placeholder="0.00"
+                                                        placeholder={t('modal.amountPlaceholder')}
                                                         className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-14 pr-6 text-white font-black text-lg focus:outline-none focus:border-emerald-500/50 transition-all"
                                                     />
                                                 </div>
                                             </div>
                                             <div className="space-y-4">
-                                                <label className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500 ml-4">Cuenta de Destino</label>
+                                                <label className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500 ml-4">{t('modal.destinationAccount')}</label>
                                                 {bankAccounts && bankAccounts.length > 0 ? (
                                                     <div className="space-y-3">
                                                         {bankAccounts.map((acc) => (
@@ -237,14 +241,14 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose, balance, onA
                                                             <AlertCircle size={24} />
                                                         </div>
                                                         <div>
-                                                            <p className="text-xs font-bold text-white uppercase tracking-wider">No hay cuenta configurada</p>
-                                                            <p className="text-[10px] text-gray-500 mt-1">Debes agregar una cuenta bancaria antes de retirar.</p>
+                                                        <p className="text-xs font-bold text-white uppercase tracking-wider">{t('modal.noAccount')}</p>
+                                                        <p className="text-[10px] text-gray-500 mt-1">{t('modal.noAccountHint')}</p>
                                                         </div>
                                                         <button
                                                             onClick={onOpenBankAccounts}
                                                             className="px-4 py-2 bg-white text-black text-[10px] font-black uppercase tracking-widest rounded-lg hover:scale-105 transition-all"
                                                         >
-                                                            Configurar Cuenta
+                                                            {t('modal.configureAccount')}
                                                         </button>
                                                     </div>
                                                 )}
@@ -261,7 +265,7 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose, balance, onA
                                                 <div className="w-5 h-5 border-2 border-black/30 border-t-black rounded-full animate-spin" />
                                             ) : (
                                                 <>
-                                                    Solicitar Retiro <ArrowUpRight size={16} />
+                                                    {t('modal.requestWithdraw')} <ArrowUpRight size={16} />
                                                 </>
                                             )}
                                         </motion.button>
@@ -273,12 +277,12 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose, balance, onA
                             <div className="mt-8 flex items-center justify-center gap-4 py-4 border-t border-white/5">
                                 <div className="flex items-center gap-2">
                                     <ShieldCheck size={14} className="text-gray-500" />
-                                    <span className="text-[9px] font-bold text-gray-600 uppercase tracking-widest">Seguridad Stripe</span>
+                                    <span className="text-[9px] font-bold text-gray-600 uppercase tracking-widest">{t('modal.stripeSecurity')}</span>
                                 </div>
                                 <div className="w-1 h-1 bg-white/10 rounded-full" />
                                 <div className="flex items-center gap-2">
                                     <Landmark size={14} className="text-gray-500" />
-                                    <span className="text-[9px] font-bold text-gray-600 uppercase tracking-widest">Retiros en 24-48h</span>
+                                    <span className="text-[9px] font-bold text-gray-600 uppercase tracking-widest">{t('modal.withdrawTime')}</span>
                                 </div>
                             </div>
                         </div>

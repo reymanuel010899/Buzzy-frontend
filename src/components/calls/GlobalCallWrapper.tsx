@@ -1,16 +1,15 @@
-import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useSelector } from "react-redux";
 import { useCallStore } from "../../store/callStore";
-import { useWebSocket } from "../../hooks/useWebSocket";
+import { useRingtoneStore } from "../../store/ringtoneStore";
+import { useWsEvent } from "../../context/WebSocketContext";
 import { useAgora } from "../../hooks/useAgora";
 import IncomingCallScreen from "./IncomingCallScreen";
 import OutgoingCallScreen from "./OutgoingCallScreen";
 import { endCall, acceptCall } from "../../redux/actions/subscriptionActions";
 
-const WS_URL = "ws://localhost:8001/ws";
-
 export const GlobalCallWrapper: React.FC = () => {
-    const { user } = useSelector((state: any) => state.LoginReducer);
+    const user = useSelector((state: any) => state.LoginReducer?.user);
     const {
         activeIncomingCall,
         activeOutgoingCall,
@@ -22,20 +21,15 @@ export const GlobalCallWrapper: React.FC = () => {
 
     const { join: joinAgora, leave: leaveAgora, isJoined, isMicMuted, isCameraOn, isSpeakerMuted, toggleMic, toggleCamera, toggleSpeaker, localVideoTrack, remoteUsers } = useAgora();
 
+    const getFile = useRingtoneStore(s => s.getFile);
+    const ringAudioRef = useRef<HTMLAudioElement | null>(null);
+
     const [activeCallTime, setActiveCallTime] = useState(0);
 
     const activeCallTimerRef = useRef<NodeJS.Timeout | null>(null);
 
     const [isCallMinimized, setIsCallMinimized] = useState(false);
 
-    // Generar URL del websocket usando los mismos parámetros que Navbar
-    const wsUrl = useMemo(() => {
-        if (!user?.id) return null;
-        const token = localStorage.getItem("accessToken") || "";
-        return `${WS_URL}?user_id=${user.id}&token=${token}`;
-    }, [user?.id]);
-
-    const shouldConnect = !!wsUrl;
 
     const stopActiveCallTimer = useCallback(() => {
         if (activeCallTimerRef.current) {
@@ -44,6 +38,18 @@ export const GlobalCallWrapper: React.FC = () => {
         }
         setActiveCallTime(0);
     }, []);
+
+    useEffect(() => {
+        if (user?.id) return;
+
+        // Si estamos saliendo de sesión, limpiamos cualquier llamada residual
+        // para evitar que el wrapper siga leyendo un usuario nulo.
+        setActiveIncomingCall(null);
+        setActiveOutgoingCall(null);
+        stopActiveCallTimer();
+        setIsCallMinimized(false);
+        setAgoraData(null);
+    }, [user?.id, setActiveIncomingCall, setActiveOutgoingCall, stopActiveCallTimer, setAgoraData]);
 
     const startActiveCallTimer = useCallback(() => {
         stopActiveCallTimer();
@@ -74,6 +80,30 @@ export const GlobalCallWrapper: React.FC = () => {
             });
     }, [activeOutgoingCall, activeIncomingCall, activeCallTime, stopActiveCallTimer, leaveAgora, setAgoraData]);
 
+    // ─── Ringtone: suena en loop mientras hay llamada entrante sin contestar ────
+    useEffect(() => {
+        const isRinging = !!activeIncomingCall && activeIncomingCall.status !== 'active';
+        if (isRinging) {
+            const audio = new Audio(getFile());
+            audio.loop = true;
+            audio.volume = 0.85;
+            ringAudioRef.current = audio;
+            audio.play().catch(() => {});
+        } else {
+            if (ringAudioRef.current) {
+                ringAudioRef.current.pause();
+                ringAudioRef.current.currentTime = 0;
+                ringAudioRef.current = null;
+            }
+        }
+        return () => {
+            if (ringAudioRef.current) {
+                ringAudioRef.current.pause();
+                ringAudioRef.current = null;
+            }
+        };
+    }, [activeIncomingCall?.status, activeIncomingCall?.uuid, getFile]);
+
     const handleAnswerCall = useCallback(() => {
         if (!activeIncomingCall?.uuid) return;
 
@@ -97,76 +127,59 @@ export const GlobalCallWrapper: React.FC = () => {
         handleEndOutgoingCall("rejected", 0);
     }, [handleEndOutgoingCall]);
 
-    const handleWSMessage = useCallback((data: any) => {
-        switch (data.type) {
-            case "incoming_call": {
-                if (data.call && Number(data.recipient_id) === Number(user.id)) {
-                    setActiveIncomingCall(data.call);
-                    setIsCallMinimized(false);
-                }
-                break;
-            }
-            case "call_accepted": {
-                // En el estado global del store, obtén el current value en lugar del destructuring anterior si fuera closure atrapado,
-                // pero Zustand muta o podemos usar el callback function.
-                setActiveOutgoingCall((prev) => {
-                    if (prev && data.uuid === prev.uuid) {
-                        startActiveCallTimer();
-                        setIsCallMinimized(false);
+    // ─── Eventos de llamadas vía WebSocket singleton ─────────────────────────
 
-                        // Aquí usamos el snapshot que guardamos en agoraDataRef
-                        const currentAgoraData = useCallStore.getState().agoraDataRef;
-                        if (currentAgoraData) {
-                            joinAgora(
-                                currentAgoraData.appId,
-                                prev.channel_name,
-                                currentAgoraData.token,
-                                currentAgoraData.uid,
-                                prev.call_type
-                            );
-                        }
-                        return { ...prev, status: 'active' };
-                    }
-                    return prev;
-                });
-                break;
-            }
-            case "call_rejected":
-            case "call_ended": {
-                console.log("------mai-----")
-                leaveAgora();
-
-                setActiveOutgoingCall((prevRef) => {
-                    if (prevRef && data.uuid === prevRef.uuid) {
-                        stopActiveCallTimer();
-                        return null;
-                    }
-                    return prevRef;
-                });
-
-                setActiveIncomingCall((prevRef) => {
-                    if (prevRef && data.uuid === prevRef.uuid) {
-                        stopActiveCallTimer();
-                        return null;
-                    }
-                    return prevRef;
-                });
-
-                useCallStore.getState().setAgoraData(null);
-                break;
-            }
+    useWsEvent("incoming_call", useCallback((data: any) => {
+        if (data.call && user?.id && Number(data.recipient_id) === Number(user.id)) {
+            setActiveIncomingCall(data.call);
+            setIsCallMinimized(false);
         }
-    }, [user.id, setActiveIncomingCall, setActiveOutgoingCall, startActiveCallTimer, joinAgora, leaveAgora, stopActiveCallTimer]);
+    }, [user?.id, setActiveIncomingCall]));
 
-    // Hook del websocket exclusivo para las llamadas
-    // Nota: Dejamos el socket de Navbar intacto para los chats
-    useWebSocket(wsUrl, handleWSMessage, shouldConnect);
+    useWsEvent("call_accepted", useCallback((data: any) => {
+        setActiveOutgoingCall((prev) => {
+            if (prev && data.uuid === prev.uuid) {
+                startActiveCallTimer();
+                setIsCallMinimized(false);
+                const currentAgoraData = useCallStore.getState().agoraDataRef;
+                if (currentAgoraData) {
+                    joinAgora(
+                        currentAgoraData.appId,
+                        prev.channel_name,
+                        currentAgoraData.token,
+                        currentAgoraData.uid,
+                        prev.call_type
+                    );
+                }
+                return { ...prev, status: 'active' };
+            }
+            return prev;
+        });
+    }, [setActiveOutgoingCall, startActiveCallTimer, joinAgora]));
+
+    useWsEvent("call_rejected", useCallback((data: any) => {
+        leaveAgora();
+        setActiveOutgoingCall((prev) => (prev && data.uuid === prev.uuid ? (stopActiveCallTimer(), null) : prev));
+        setActiveIncomingCall((prev) => (prev && data.uuid === prev.uuid ? (stopActiveCallTimer(), null) : prev));
+        useCallStore.getState().setAgoraData(null);
+    }, [leaveAgora, setActiveOutgoingCall, setActiveIncomingCall, stopActiveCallTimer]));
+
+    useWsEvent("call_ended", useCallback((data: any) => {
+        leaveAgora();
+        setActiveOutgoingCall((prev) => (prev && data.uuid === prev.uuid ? (stopActiveCallTimer(), null) : prev));
+        setActiveIncomingCall((prev) => (prev && data.uuid === prev.uuid ? (stopActiveCallTimer(), null) : prev));
+        useCallStore.getState().setAgoraData(null);
+    }, [leaveAgora, setActiveOutgoingCall, setActiveIncomingCall, stopActiveCallTimer]));
 
     useEffect(() => {
         return () => {
             if (activeCallTimerRef.current) clearInterval(activeCallTimerRef.current);
         };
     }, []);
+
+    if (!user?.id) {
+        return null;
+    }
 
     const formatClock = (seconds: number) => {
         const mins = Math.floor(seconds / 60);

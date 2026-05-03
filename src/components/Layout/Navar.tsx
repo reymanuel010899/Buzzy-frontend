@@ -5,10 +5,11 @@ import sendMessageSound from "../../assets/sounds/sendMessage.mp3";
 import typingSound from "../../assets/sounds/whatsapp-typing.mp3";
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react"
+import { useTranslation } from "react-i18next"
 import {
-  FileText, Image as ImageIcon, Camera, Headphones, User, BarChart2, Calendar, Smile,
+  FileText, Image as ImageIcon, Camera, Headphones, User,
   Mic, Trash2, StopCircle, Search, Bell, X, Phone, Video, Plus, Send, Download, Play, MessageCircleMore,
-  Sparkles, Megaphone,
+  Sparkles, Megaphone, Shield, LockKeyhole, ChevronRight, Users, UserPlus, EyeOff, Inbox, UserCheck,
 } from "lucide-react"
 // import { Link } from "react-router-dom"
 import { motion, AnimatePresence, LayoutGroup } from "framer-motion"
@@ -26,24 +27,31 @@ import { RootState } from "../../store"
 import { loadChatMessages } from "../../redux/actions/message/chatMeesage"
 import { getAvailabilityStatus } from "../../redux/actions/saveAvailability"
 import { sendMessage } from "../../redux/actions/message/sendMessage"
-import { useWebSocket } from "../../hooks/useWebSocket"
+import { useWsEvent, useWebSocketContext } from "../../context/WebSocketContext"
 import { allEmojis } from "../comments/emojis";
-import { startCall, endCall, acceptCall } from "../../redux/actions/subscriptionActions"
-import OutgoingCallScreen from "../calls/OutgoingCallScreen"
-import IncomingCallScreen from "../calls/IncomingCallScreen"
+import { startCall } from "../../redux/actions/subscriptionActions"
 import { useTypingUsers } from "../../context/useTyping";
 import { useUnreadMessages } from "../../context/UnreadAcount";
-import { getBaseUrl } from "../../redux/client/api-client";
+import { apiClient, getBaseUrl } from "../../redux/client/api-client";
 import { registerFCMToken } from "../../utils/fcm";
 import { onMessage } from "firebase/messaging";
 import { messaging } from "../../firebase";
 import { useAgora } from "../../hooks/useAgora";
 import { useCallStore } from "../../store/callStore";
 import { completeUpload } from "../../redux/reducers/uploadProgressReducer";
+import { useNotificationsStore } from "../../context/NotificationsStore";
+import NotificationPanel from "../notifications/NotificationPanel";
+import HiddenChatPinModal from "../Chat/HiddenChatPinModal";
+import { getChatPrivacyStatus, verifyChatPin } from "../../redux/actions/chatPrivacy";
 
-
-const WS_URL = "ws://localhost:8001/ws";
+enum ChatFolderFilter {
+  Friends = "standard",
+  Known = "known",
+  Requests = "request",
+  Hidden = "hidden",
+}
 const Navbar: React.FC = () => {
+  const { t } = useTranslation(['common', 'notifications'])
   const [search, setSearch] = useState("")
   const [chatSearchTerm, setChatSearchTerm] = useState("")
   const navigate = useNavigate()
@@ -53,7 +61,9 @@ const Navbar: React.FC = () => {
   const [showNotifications, setShowNotifications] = useState(false)
   const [realtimeMessages, setRealtimeMessages] = useState<any[]>([])
   const chatSocketActiveRef = useRef(false);
-  const { selectedChat, setSelectedChat, showMessages, setShowMessages } = useChat()
+  const selectedChatRef = useRef<string | null>(null);
+  const showMessagesRef = useRef(false);
+  const { selectedChat, setSelectedChat, showMessages, setShowMessages, pendingFolder, setPendingFolder } = useChat()
   const [chatAvailability, setChatAvailability] = useState<{
     is_available: boolean;
     can_voice: boolean;
@@ -69,6 +79,7 @@ const Navbar: React.FC = () => {
     activeOutgoingCall,
     activeIncomingCall,
     setActiveOutgoingCall,
+    setActiveIncomingCall,
     setAgoraData,
   } = useCallStore();
   const [callAlert, setCallAlert] = useState<string | null>(null);
@@ -78,17 +89,23 @@ const Navbar: React.FC = () => {
   const activeCallTimerRef = useRef<NodeJS.Timeout | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const unreadCounts = useUnreadMessages((state) => state.unreadCounts);
+  const notifUnreadCount = useNotificationsStore((state) => state.unreadCount);
   const [clickedMessage, setClickedMessage] = useState<string | null>(null)
   const clickedMessageTimerRef = useRef<NodeJS.Timeout | null>(null);
   // reactions: { [messageUuid]: { [emoji]: string[] (usernames) } }
   const [reactionsMap, setReactionsMap] = useState<Record<string, Record<string, string[]>>>({});
   const markAsRead = useUnreadMessages((state) => state.markAsRead);
+  const setUnreadCount = useUnreadMessages((state) => state.setUnreadCount);
+  const incrementUnread = useUnreadMessages((state) => state.incrementUnread);
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
   (void setShowAttachmentMenu); // Fix unread warning
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const { typingByChat, setTypingUser, removeTypingUser } = useTypingUsers();
   const [activePreview, setActivePreview] = useState<{ url: string; type: 'image' | 'video' } | null>(null);
   const [showContactModal, setShowContactModal] = useState(false);
+  const [chatFolder, setChatFolder] = useState<ChatFolderFilter>(ChatFolderFilter.Friends);
+  const [chatPrivacy, setChatPrivacy] = useState<{ has_pin: boolean; hidden_verified: boolean; hidden_verified_at: string | null; updated_at: string | null } | null>(null);
+  const [showHiddenPinModal, setShowHiddenPinModal] = useState(false);
   const { connections } = useSelector((state: RootState) => state.socialReducer);
   const [messageText, setMessageText] = useState("")
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -98,9 +115,9 @@ const Navbar: React.FC = () => {
     { icon: <FileText className="text-indigo-400" />, label: "Documento", type: "file" },
     { icon: <Headphones className="text-orange-400" />, label: "Audio", type: "audio" },
     { icon: <User className="text-cyan-400" />, label: "Contacto", type: "contact" },
-    { icon: <BarChart2 className="text-yellow-400" />, label: "Encuesta", type: "poll", enable: true },
-    { icon: <Calendar className="text-rose-400" />, label: "Evento", type: "event", enable: true },
-    { icon: <Smile className="text-emerald-400" />, label: "Nuevo sticker", type: "sticker", enable: true },
+    { icon: <Shield className="text-cyan-400" />, label: "Ocultar chat", type: "hide_chat" },
+    { icon: <UserCheck className="text-violet-400" />, label: "Conocido", type: "move_known" },
+    { icon: <Users className="text-cyan-400" />, label: "Amigo", type: "move_standard" },
   ]
 
   const handleFileSelect = (type: string) => {
@@ -172,7 +189,11 @@ const Navbar: React.FC = () => {
     };
     setRealtimeMessages(prev => [...prev, optimisticMsg]);
 
-    sendMessage(formData)(dispatch);
+    sendMessage(formData)(dispatch).then((real: any) => {
+      if (real?.uuid) {
+        setRealtimeMessages(prev => prev.map(m => m.uuid === tempId ? { ...real } : m));
+      }
+    });
     setShowContactModal(false);
     setShowAttachmentMenu(false);
   };
@@ -197,7 +218,11 @@ const Navbar: React.FC = () => {
     formData.append("message_type", type);
     formData.append("content", content);
 
-    sendMessage(formData)(dispatch);
+    sendMessage(formData)(dispatch).then((real: any) => {
+      if (real?.uuid) {
+        setRealtimeMessages(prev => prev.map(m => m.uuid === tempId ? { ...real } : m));
+      }
+    });
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -231,7 +256,11 @@ const Navbar: React.FC = () => {
     };
     setRealtimeMessages(prev => [...prev, optimisticMsg]);
 
-    sendMessage(formData)(dispatch);
+    sendMessage(formData)(dispatch).then((real: any) => {
+      if (real?.uuid) {
+        setRealtimeMessages(prev => prev.map(m => m.uuid === tempId ? { ...real } : m));
+      }
+    });
   };
 
   const [isRecording, setIsRecording] = useState(false);
@@ -313,7 +342,11 @@ const Navbar: React.FC = () => {
     };
     setRealtimeMessages(prev => [...prev, optimisticMsg]);
 
-    sendMessage(formData)(dispatch);
+    sendMessage(formData)(dispatch).then((real: any) => {
+      if (real?.uuid) {
+        setRealtimeMessages(prev => prev.map(m => m.uuid === tempId ? { ...real } : m));
+      }
+    });
   };
 
   const formatTime = (seconds: number) => {
@@ -330,6 +363,29 @@ const Navbar: React.FC = () => {
   const { chats: backendChats, loading } = useSelector((state: RootState) => state.listChatRoomsReducer)
   const loginState = useSelector((state: RootState) => state.LoginReducer);
   const user = loginState?.user || JSON.parse(localStorage.getItem("user") || "{}");
+  const [lastMessageMap, setLastMessageMap] = useState<Record<string, string>>({});
+  const [chatFolderMap, setChatFolderMap] = useState<Record<string, ChatFolderFilter>>({});
+
+  // Sync lastMessageMap and chatFolderMap when backend chats load
+  useEffect(() => {
+    if (!backendChats?.chats) return;
+    setLastMessageMap(prev => {
+      const next = { ...prev };
+      for (const chat of backendChats.chats) {
+        if (chat.last_message && !next[chat.uuid]) {
+          next[chat.uuid] = chat.last_message;
+        }
+      }
+      return next;
+    });
+    setChatFolderMap(prev => {
+      const next = { ...prev };
+      for (const chat of backendChats.chats) {
+        next[chat.uuid] = chatFolder;
+      }
+      return next;
+    });
+  }, [backendChats, chatFolder]);
 
   useEffect(() => {
     if (user && user.username) {
@@ -355,7 +411,7 @@ const Navbar: React.FC = () => {
       });
       return () => unsubscribe();
     }
-  }, [user, activeIncomingCall, activeOutgoingCall]);
+  }, [user, activeIncomingCall, activeOutgoingCall, setActiveIncomingCall]);
 
   const { messages: backendMessages, loading: messagesLoading } = useSelector(
     (state: RootState) => state.chatMessagesReducer
@@ -404,11 +460,13 @@ const Navbar: React.FC = () => {
   // ────────────────────────────────────────────────────────────────
   const sendAudioRef = useRef<HTMLAudioElement | null>(null);
   const typingAudioRef = useRef<HTMLAudioElement | null>(null);
+  const audioUnlockedRef = useRef(false);
 
   const unreadCountFromStore = useUnreadMessages((state) => state.unreadCounts);
   const totalGlobal = useMemo(() => {
     return Object.values(unreadCounts).reduce((acc, curr) => acc + curr, 0);
   }, [unreadCounts]);
+  void totalGlobal;
   useEffect(() => {
     // Si hay un chat seleccionado y tiene un UUID válido
     if (selectedChat) {
@@ -419,161 +477,295 @@ const Navbar: React.FC = () => {
     sendAudioRef.current = new Audio(sendMessageSound);
     typingAudioRef.current = new Audio(typingSound);
   }, []);
-  // ────────────────────────────────────────────────────────────────
-  // WebSocket - conexión GLOBAL
-  // ────────────────────────────────────────────────────────────────
-  const wsUrl = useMemo(() => {
-    if (!user?.id) return null;
-    const token = localStorage.getItem("accessToken") || "";
-    return `${WS_URL}?user_id=${user.id}&token=${token}`;
-  }, [user?.id]);
 
-  const shouldConnect = !!wsUrl;
+  // Desbloquear audio tras primer gesto del usuario (requerido por browsers)
+  useEffect(() => {
+    const unlock = () => {
+      if (audioUnlockedRef.current) return;
+      const tryUnlock = (audio: HTMLAudioElement | null) => {
+        if (!audio) return;
+        audio.play().then(() => { audio.pause(); audio.currentTime = 0; }).catch(() => {});
+      };
+      tryUnlock(sendAudioRef.current);
+      tryUnlock(typingAudioRef.current);
+      audioUnlockedRef.current = true;
+      window.removeEventListener("click", unlock);
+      window.removeEventListener("keydown", unlock);
+      window.removeEventListener("touchstart", unlock);
+    };
+    window.addEventListener("click", unlock);
+    window.addEventListener("keydown", unlock);
+    window.addEventListener("touchstart", unlock);
+    return () => {
+      window.removeEventListener("click", unlock);
+      window.removeEventListener("keydown", unlock);
+      window.removeEventListener("touchstart", unlock);
+    };
+  }, []);
+  // When profile sets a pendingFolder, switch to that folder and open the chat
+  useEffect(() => {
+    if (!pendingFolder) return;
+    const folder = pendingFolder as ChatFolderFilter;
+    setPendingFolder(null);
+    setChatFolder(folder);
+    listChatRooms({ folder })(dispatch).then(() => {
+      // selectedChat is already set by profile — panel will open automatically
+    });
+  }, [pendingFolder, setPendingFolder, dispatch]);
+
+  // ────────────────────────────────────────────────────────────────
+  // WebSocket - conexión GLOBAL (singleton via context)
+  // ────────────────────────────────────────────────────────────────
+  const { send: wsSend } = useWebSocketContext();
+
   useEffect(() => {
     chatSocketActiveRef.current = !!selectedChat;
+    selectedChatRef.current = selectedChat;
   }, [selectedChat]);
 
-  const handleWSMessage = useCallback((data: any) => {
-    switch (data.event) {
-      case "send_message": {
-        if (data.chat_uuid !== selectedChat) return;
+  useEffect(() => {
+    showMessagesRef.current = showMessages;
+  }, [showMessages]);
 
-        // ⛔ Ignorar mensajes propios
-        if (data.message?.sender_username === user.username) return;
+  // send_message — mensajes entrantes + confirmación propia (is_own_confirmation)
+  useWsEvent("send_message", useCallback((data: any) => {
+    const msg = data.message;
+    if (!msg) return;
 
-        // 🔊 Sonido SOLO para el receptor
-        // if (sendAudioRef.current && data.message?.sender_username !== user.username) {
-        //   sendAudioRef.current.currentTime = 0;
-        //   sendAudioRef.current
-        //     .play()
-        //     .catch(err => console.warn("Audio bloqueado:", err));
-        // }
-
-
+    // ── Confirmación propia: el servidor confirma un mensaje que yo envié ──
+    // Reemplaza el optimista (temp-xxx) con el UUID real del servidor
+    if (data.is_own_confirmation) {
+      // Update last message preview for sender too
+      if (data.chat_uuid && msg.content) {
+        setLastMessageMap(prev => ({ ...prev, [data.chat_uuid]: msg.content }));
+      }
+      if (data.chat_uuid === selectedChatRef.current) {
         setRealtimeMessages(prev => {
-          if (prev.some(m => m.uuid === data.message?.uuid)) return prev;
-          return [...prev, data.message];
+          // Si ya existe el UUID real, no duplicar
+          if (prev.some(m => m.uuid === msg.uuid)) return prev;
+          // Reemplazar el temp más reciente del mismo sender que aún no tenga UUID real
+          const lastTempIdx = [...prev].map((m, i) => ({ m, i }))
+            .reverse()
+            .find(({ m }) => String(m.uuid).startsWith("temp-") && m.sender_username === msg.sender_username)?.i;
+          if (lastTempIdx !== undefined) {
+            const next = [...prev];
+            next[lastTempIdx] = msg;
+            return next;
+          }
+          return prev;
         });
-
-        break;
       }
-
-      case "typing": {
-
-        if (data.user_id === user.id) return;
-        typingAudioRef.current
-          ?.play()
-          .catch(() => { });
-
-        const chatUUID = data.chat_uuid;
-
-        if (data.is_typing) {
-          setTypingUser(
-            chatUUID,
-            data.user_id,
-            data.username ?? "Alguien"
-          );
-        } else {
-          removeTypingUser(
-            chatUUID,
-            data.user_id
-          );
-        }
-
-        break;
-      }
-
-      case "reaction": {
-        if (data.message_uuid && data.emoji) {
-          setReactionsMap(prev => {
-            const msgReactions = { ...(prev[data.message_uuid] || {}) };
-            let users = [...(msgReactions[data.emoji] || [])];
-
-            if (data.action === "removed") {
-              users = users.filter(u => u !== data.username);
-              if (users.length === 0) {
-                delete msgReactions[data.emoji];
-              } else {
-                msgReactions[data.emoji] = users;
-              }
-            } else {
-              if (!users.includes(data.username)) users.push(data.username);
-              msgReactions[data.emoji] = users;
-            }
-
-            return { ...prev, [data.message_uuid]: msgReactions };
-          });
-        }
-        break;
-      }
-
-      case "read_message": {
-        // manejar leído
-        break;
-      }
-
-      case "user_online": {
-        // manejar online
-        break;
-      }
-
-      case "video_ready": {
-        dispatch(completeUpload('done'))
-        break;
-      }
-
-      case "video_blocked": {
-        dispatch(completeUpload('blocked', data.safety_label || 'Contenido bloqueado por moderación'))
-        break;
-      }
-
-      // incoming_call, call_accepted, call_rejected, call_ended
-      // are handled globally by GlobalCallWrapper
-
-      default:
-        break;
+      return;
     }
-  }, [selectedChat, user.username]);
 
-  const socketRef = useWebSocket(wsUrl, handleWSMessage, shouldConnect)
+    // ── Mensaje ajeno ──
+    // Ignorar si no soy el destinatario
+    if (data.recipient_id !== undefined && data.recipient_id !== user.id) return;
+
+    // Update last message preview
+    if (data.chat_uuid && msg.content) {
+      setLastMessageMap(prev => ({ ...prev, [data.chat_uuid]: msg.content }));
+    }
+
+    // 1. Agregar al panel si el chat activo coincide
+    if (data.chat_uuid && data.chat_uuid === selectedChatRef.current) {
+      setRealtimeMessages(prev => {
+        if (prev.some((m: any) => m.uuid === msg.uuid)) return prev;
+        return [...prev, msg];
+      });
+    } else {
+      // 2. Chat no activo → incrementar unread
+      if (data.unread_count_target !== undefined) {
+        setUnreadCount(data.chat_uuid, data.unread_count_target);
+      } else {
+        incrementUnread(data.chat_uuid);
+      }
+    }
+
+    // 3. Sonido — solo si el panel de mensajes está cerrado
+    if (audioUnlockedRef.current && sendAudioRef.current && !showMessagesRef.current) {
+      sendAudioRef.current.currentTime = 0;
+      sendAudioRef.current.play().catch(() => {});
+    }
+  }, [user.id, setUnreadCount, incrementUnread]));
+
+  // typing — indicador de escritura
+  useWsEvent("typing", useCallback((data: any) => {
+    if (data.user_id === user.id) return;
+    // Solo sonar si el chat activo es el que está escribiendo
+    if (data.chat_uuid && data.chat_uuid === selectedChatRef.current) {
+      typingAudioRef.current?.play().catch(() => {});
+    }
+    if (data.is_typing) {
+      setTypingUser(data.chat_uuid, data.user_id, data.username ?? "Alguien");
+    } else {
+      removeTypingUser(data.chat_uuid, data.user_id);
+    }
+  }, [user.id, setTypingUser, removeTypingUser]));
+
+  // reaction — reacciones en mensajes
+  useWsEvent("reaction", useCallback((data: any) => {
+    if (!data.message_uuid || !data.emoji) return;
+    setReactionsMap(prev => {
+      const msgReactions = { ...(prev[data.message_uuid] || {}) };
+      let users = [...(msgReactions[data.emoji] || [])];
+      if (data.action === "removed") {
+        users = users.filter((u: string) => u !== data.username);
+        if (users.length === 0) delete msgReactions[data.emoji];
+        else msgReactions[data.emoji] = users;
+      } else {
+        if (!users.includes(data.username)) users.push(data.username);
+        msgReactions[data.emoji] = users;
+      }
+      return { ...prev, [data.message_uuid]: msgReactions };
+    });
+  }, []));
+
+  // video_ready / video_blocked — estado de video subido
+  useWsEvent("video_ready", useCallback(() => {
+    dispatch(completeUpload('done'));
+  }, [dispatch]));
+
+  useWsEvent("video_blocked", useCallback((data: any) => {
+    dispatch(completeUpload('blocked', data.safety_label || 'Contenido bloqueado por moderación'));
+  }, [dispatch]));
+
+  // notification — notificaciones en tiempo real
+  useWsEvent("notification", useCallback((data: any) => {
+    useNotificationsStore.getState().pushRealtime(data);
+  }, []));
   const handleTyping = () => {
-    if (!wsUrl || !socketRef.current) return;
+    if (!chatSocketActiveRef.current || !selectedChat) return;
 
-    const socket = chatSocketActiveRef.current;
-    if (!socket) return;
+    setMessageText(inputRef.current?.value || "");
 
-    setMessageText(inputRef.current?.value || "")
-    if (!selectedChat) return;
-    socketRef?.current?.send(JSON.stringify({
+    wsSend({
       type: "typing",
       is_typing: true,
       receiver_id: backendMessages?.other_user?.id,
-      chat_uuid: backendMessages?.chat_uuid
-    }));
+      chat_uuid: backendMessages?.chat_uuid,
+    } as any);
 
-
-    // reset timeout
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current);
-    }
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
 
     typingTimeoutRef.current = setTimeout(() => {
-      socketRef?.current?.send(JSON.stringify({
+      wsSend({
         type: "typing",
         is_typing: false,
-        receiver_id: backendMessages?.other_user?.id
-
-      }));
+        receiver_id: backendMessages?.other_user?.id,
+        chat_uuid: backendMessages?.chat_uuid,
+      } as any);
     }, 1500);
   };
   const getUnreadAcount = (chatUUID: string) => {
     return unreadCountFromStore[chatUUID] || 0;
   }
 
+  const getFolderUnread = useCallback((folder: ChatFolderFilter) => {
+    return Object.entries(chatFolderMap).reduce((acc, [uuid, f]) => {
+      if (f === folder) acc += (unreadCountFromStore[uuid] || 0);
+      return acc;
+    }, 0);
+  }, [chatFolderMap, unreadCountFromStore]);
+
+  const loadChatsForFolder = useCallback(async (folder: ChatFolderFilter = chatFolder, accessToken?: string) => {
+    await listChatRooms({ folder, accessToken })(dispatch);
+  }, [chatFolder, dispatch]);
+
+  const refreshChatPrivacy = useCallback(async () => {
+    try {
+      const data = await getChatPrivacyStatus();
+      setChatPrivacy(data);
+      return data;
+    } catch (error) {
+      setChatPrivacy({ has_pin: false, hidden_verified: false, hidden_verified_at: null, updated_at: null });
+      return null;
+    }
+  }, []);
+
+  const handleFolderChange = useCallback(async (folder: ChatFolderFilter) => {
+    setSelectedChat(null);
+    setChatFolder(folder);
+    if (folder === ChatFolderFilter.Hidden) {
+      localStorage.removeItem("hiddenChatAccessToken");
+      setShowHiddenPinModal(true);
+      return;
+    }
+
+    await loadChatsForFolder(folder);
+  }, [chatPrivacy, loadChatsForFolder, refreshChatPrivacy]);
+
+  const handleHiddenPinSubmit = useCallback(async (pin: string) => {
+    const result = await verifyChatPin(pin);
+    if (result?.access_token) {
+      localStorage.setItem("hiddenChatAccessToken", result.access_token);
+    }
+    const refreshed = await refreshChatPrivacy();
+    setShowHiddenPinModal(false);
+    await loadChatsForFolder(ChatFolderFilter.Hidden, result?.access_token || localStorage.getItem("hiddenChatAccessToken") || undefined);
+    if (refreshed) setChatPrivacy(refreshed);
+  }, [loadChatsForFolder, refreshChatPrivacy]);
+
+  const handleToggleHiddenCurrentChat = useCallback(async () => {
+    if (!currentBackendChat) return;
+
+    const nextFolder = currentBackendChat.folder_type === ChatFolderFilter.Hidden
+      ? ChatFolderFilter.Friends
+      : ChatFolderFilter.Hidden;
+
+    try {
+      await apiClient.patch(`/api/chats/${currentBackendChat.uuid}/folder/`, {
+        folder_type: nextFolder,
+      });
+
+      if (nextFolder !== ChatFolderFilter.Hidden) {
+        localStorage.removeItem("hiddenChatAccessToken");
+      }
+
+      await refreshChatPrivacy();
+      setSelectedChat(null);
+      setChatFolder(ChatFolderFilter.Friends);
+      await loadChatsForFolder(ChatFolderFilter.Friends);
+    } catch (error) {
+      console.error("Unable to update chat folder", error);
+    }
+  }, [currentBackendChat, loadChatsForFolder, refreshChatPrivacy, setSelectedChat]);
+
+  const handleMoveChatToFolder = useCallback(async (targetFolder: ChatFolderFilter) => {
+    if (!currentBackendChat) return;
+    try {
+      await apiClient.patch(`/api/chats/${currentBackendChat.uuid}/folder/`, {
+        folder_type: targetFolder,
+      });
+      setSelectedChat(null);
+      // Recargar la carpeta actual — la vista no cambia
+      await loadChatsForFolder(chatFolder);
+    } catch (error) {
+      console.error("Error moviendo chat de folder", error);
+    }
+  }, [currentBackendChat, chatFolder, loadChatsForFolder, setSelectedChat]);
+
   // Cargar chats iniciales cuando se abre la ventana de mensajes
   useEffect(() => {
-    listChatRooms()(dispatch)
-  }, [showMessages, dispatch])
+    if (!showMessages) return;
+    const load = async () => {
+      await refreshChatPrivacy();
+      if (chatFolder === ChatFolderFilter.Hidden) {
+        return;
+      }
+      await loadChatsForFolder(chatFolder);
+    };
+
+    load();
+  }, [showMessages, chatFolder, loadChatsForFolder, refreshChatPrivacy])
+
+  useEffect(() => {
+    if (!showMessages) {
+      setChatFolder(ChatFolderFilter.Friends);
+      setShowHiddenPinModal(false);
+      localStorage.removeItem("hiddenChatAccessToken");
+    }
+  }, [showMessages]);
 
   // Cargar mensajes del chat seleccionado
   useEffect(() => {
@@ -582,40 +774,41 @@ const Navbar: React.FC = () => {
     }
   }, [selectedChat, dispatch])
 
-  // Sincronizar mensajes del backend cuando lleguen/cambien
-  useEffect(() => {
-    if (backendMessages?.messages && selectedChat) {
-      setRealtimeMessages(backendMessages.messages);
-      // Seed reactionsMap from persisted backend reactions
-      const seeded: Record<string, Record<string, string[]>> = {};
-      for (const msg of backendMessages.messages) {
-        if (msg.reactions && Object.keys(msg.reactions).length > 0) {
-          seeded[msg.uuid] = msg.reactions;
-        }
-      }
-      setReactionsMap(seeded);
-    }
-  }, [backendMessages?.messages, selectedChat])
+  // Ref para saber si ya sembramos los mensajes iniciales del chat actual
+  const seededChatRef = useRef<string | null>(null);
 
-  // Resetear mensajes locales al cambiar de chat
+  // Cuando se abre un chat nuevo, resetear y esperar mensajes del backend
   useEffect(() => {
-    if (selectedChat) {
-      setRealtimeMessages([]);
-      setReactionsMap({});
+    if (!selectedChat) return;
+    // Nuevo chat — limpiar estado local y marcar que aún no sembramos
+    setRealtimeMessages([]);
+    setReactionsMap({});
+    seededChatRef.current = null;
+  }, [selectedChat]);
+
+  // Sembrar mensajes históricos UNA SOLA VEZ por chat (cuando llegan del backend)
+  // Mensajes nuevos posteriores llegan por WS y se agregan encima
+  useEffect(() => {
+    if (!backendMessages?.messages || !selectedChat) return;
+    // Solo sembrar si es la primera carga de este chat
+    if (seededChatRef.current === selectedChat) return;
+    seededChatRef.current = selectedChat;
+
+    setRealtimeMessages(backendMessages.messages);
+    const seeded: Record<string, Record<string, string[]>> = {};
+    for (const msg of backendMessages.messages) {
+      if (msg.reactions && Object.keys(msg.reactions).length > 0) {
+        seeded[msg.uuid] = msg.reactions;
+      }
     }
-  }, [selectedChat])
+    setReactionsMap(seeded);
+  }, [backendMessages?.messages, selectedChat]);
 
   // Scroll automático cuando llegan nuevos mensajes
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [realtimeMessages.length])
 
-  // Enfocar input al abrir chat
-  useEffect(() => {
-    if (selectedChat) {
-      setTimeout(() => inputRef.current?.focus(), 400)
-    }
-  }, [selectedChat])
 
   // Scroll global (navbar)
   useEffect(() => {
@@ -648,22 +841,16 @@ const Navbar: React.FC = () => {
     formData.append("content", content);
     formData.append("message_type", "text");
 
-    sendMessage(formData)(dispatch)
+    sendMessage(formData)(dispatch).then((real: any) => {
+      if (real?.uuid) {
+        setRealtimeMessages(prev => prev.map(m => m.uuid === tempId ? { ...real } : m));
+      }
+    });
     input.value = ""
     setMessageText("")
   }
   const sendReaction = (messageUuid: string, emoji: string) => {
-    if (!socketRef.current) return
-
-    socketRef.current.send(
-      JSON.stringify({
-        type: "reaction",
-        message_uuid: messageUuid,
-        emoji
-      })
-    )
-
-    console.log("****")
+    wsSend({ type: "reaction", message_uuid: messageUuid, emoji } as any);
     // Optimistic update for better UX
     setReactionsMap(prev => {
       const msgReactions = { ...(prev[messageUuid] || {}) };
@@ -723,7 +910,7 @@ const Navbar: React.FC = () => {
 
       {/* NAVBAR ORIGINAL - SIN CAMBIOS */}
       <nav
-        className={`fixed w-full top-0 z-50 px-4 sm:px-6 transition-all duration-300 ${scrollPosition > 20 ? "bg-black backdrop-blur-lg" : "bg-black/80 backdrop-blur-2xl"
+        className={`fixed w-full top-0 z-50 px-2 sm:px-6 transition-all duration-300 ${scrollPosition > 20 ? "bg-black backdrop-blur-lg" : "bg-black/80 backdrop-blur-2xl"
           }`}
       >
         <AnimatePresence>
@@ -736,33 +923,16 @@ const Navbar: React.FC = () => {
             />
           )}
         </AnimatePresence>
-        <div className="flex justify-between items-center mx-auto py-5">
+        <div className="flex justify-between items-center mx-auto py-1">
           <div className="flex items-center justify-center gap-5 sm:gap-6">
 
             <motion.button
-              className="relative" // Importante: el botón debe ser relative
-              whileHover={{ rotate: 15, scale: 1.1 }}
+              whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.9 }}
-              onClick={() => setShowMessages(true)}
+              className="relative text-gray-300 hover:text-cyan-400 transition-colors"
+              onClick={() => navigate("/ads")}
             >
-              {/* El SVG del avión de papel */}
-              <svg
-                fill="currentColor"
-                className="cursor-pointer h-7 w-10 "
-                viewBox="0 0 48 48"
-                xmlns="http://www.w3.org/2000/svg"
-                width="1em"
-                height="1em"
-              >
-                <path className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-pulse" d="M45.73 7A2 2 0 0 0 44 6H4a2 2 0 0 0-1.48 3.35l10.44 11.47a2 2 0 0 0 2.2.52l14.49-5.5c.17-.07.25-.04.28-.03.06.02.14.08.2.2.07.1.08.2.08.27 0 .04-.02.12-.16.23l-11.9 10.1a2 2 0 0 0-.62 2.12l4.56 14.51a2 2 0 0 0 3.64.4L45.73 9a2 2 0 0 0 0-2Z" />
-              </svg>
-
-              {/* El Badge con el número total global */}
-              {totalGlobal > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] bg-red-600 rounded-full flex items-center justify-center text-[10px] text-white font-bold border border-black px-1 shadow-lg animate-in zoom-in duration-300">
-                  {totalGlobal > 99 ? "99+" : totalGlobal}
-                </span>
-              )}
+              <Megaphone className="h-7 w-7" />
             </motion.button>
 
             {/* <Link to="/" className="text-2xl font-bold text-white hover:text-purple-400 transition-colors">
@@ -779,14 +949,14 @@ const Navbar: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-4 sm:gap-6">
-            <motion.button
+            {/* <motion.button
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.9 }}
               className="relative text-gray-300 hover:text-cyan-400 transition-colors"
               onClick={() => navigate("/ads")}
             >
               <Megaphone className="w-10 h-7" />
-            </motion.button>
+            </motion.button> */}
 
             {isCallMinimized && (activeOutgoingCall || (activeIncomingCall && activeIncomingCall.status === 'active')) && (
               <motion.div
@@ -806,16 +976,20 @@ const Navbar: React.FC = () => {
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.9 }}
               className="relative text-gray-300 hover:text-purple-400 transition-colors"
-              onClick={() => setShowNotifications(true)}
+              onClick={() => setShowNotifications(v => !v)}
             >
               <Bell className="w-10 h-7" />
-              <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-pulse" />
+              {notifUnreadCount > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-red-500 rounded-full text-[10px] font-bold text-white flex items-center justify-center px-1">
+                  {notifUnreadCount > 9 ? "9+" : notifUnreadCount}
+                </span>
+              )}
             </motion.button>
           </div>
         </div>
 
-        <div className="md:hidden  pb-4 pt-1">
-          <div className="flex items-center bg-gray-800/60 backdrop-blur-md border border-gray-700/50 rounded-full px-4 py-2 cursor-pointer hover:bg-gray-700/50 transition-all"
+        <div className="md:hidden  pt-1">
+          <div className="flex items-center bg-gray-800/60 backdrop-blur-md border border-gray-700/50 rounded-full px-2 py-1 cursor-pointer hover:bg-gray-700/50 transition-all"
             onClick={() => setShowSearch(true)}>
             <span className="text-gray-400 px-2">{search || "Buscar en Buzzy..."}</span>
             <Search className="w-5 h-5 text-gray-400 ml-auto mr-2" />
@@ -830,93 +1004,7 @@ const Navbar: React.FC = () => {
         )}
       </AnimatePresence>
 
-      <AnimatePresence>
-        {showNotifications && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowNotifications(false)}
-              className="fixed inset-0 bg-black/10 backdrop-blur-sm z-50 flex items-start justify-center  px-4"
-            />
-
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              transition={{ type: "spring", damping: 28, stiffness: 300 }}
-              className="absolute z-50 w-full max-w-md"
-            >
-              <div className="bg-gray-900/92 backdrop-blur-xl border border-gray-700/60 rounded-b-2xl shadow-2xl overflow-hidden">
-                <div className="flex items-center justify-between px-5 py-4 border-b border-gray-700/50">
-                  <h3 className="text-xl font-bold text-white">Notificaciones</h3>
-                  <motion.button
-                    whileHover={{ scale: 1.15, rotate: 90 }}
-                    whileTap={{ scale: 0.92 }}
-                    onClick={() => setShowNotifications(false)}
-                    className="text-gray-400 hover:text-white p-1 rounded-full transition-colors"
-                  >
-                    <X className="w-6 h-6" />
-                  </motion.button>
-                </div>
-
-                <div className="max-h-[70vh] overflow-y-auto">
-                  <ul className="divide-y divide-gray-700/30">
-                    <li className="p-4 hover:bg-gray-800/50 transition-colors cursor-pointer">
-                      <div className="flex items-start gap-3">
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center text-white font-bold text-lg">
-                          M
-                        </div>
-                        <div className="flex-1">
-                          <p className="text-white text-sm leading-tight">
-                            <span className="font-semibold">@marcelo</span> le gusta tu nuevo look
-                          </p>
-                          <span className="text-xs text-gray-500 mt-1 block">Hace 5 minutos</span>
-                        </div>
-                      </div>
-                    </li>
-
-                    <li className="p-4 hover:bg-gray-800/50 transition-colors cursor-pointer">
-                      <div className="flex items-start gap-3">
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-pink-500 to-orange-500 flex items-center justify-center text-white font-bold text-lg">
-                          A
-                        </div>
-                        <div className="flex-1">
-                          <p className="text-white text-sm leading-tight">
-                            <span className="font-semibold">@admin</span> comentó en tu publicación
-                          </p>
-                          <span className="text-xs text-gray-500 mt-1 block">Hace 12 minutos</span>
-                        </div>
-                      </div>
-                    </li>
-
-                    <li className="p-4 hover:bg-gray-800/50 transition-colors cursor-pointer">
-                      <div className="flex items-start gap-3">
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-green-500 to-teal-500 flex items-center justify-center text-white font-bold text-lg">
-                          J
-                        </div>
-                        <div className="flex-1">
-                          <p className="text-white text-sm leading-tight">
-                            <span className="font-semibold">@juan</span> empezó a seguirte
-                          </p>
-                          <span className="text-xs text-gray-500 mt-1 block">Hace 1 hora</span>
-                        </div>
-                      </div>
-                    </li>
-                  </ul>
-                </div>
-
-                <div className="p-4 border-t border-gray-700/50 text-center">
-                  <button className="text-purple-400 hover:text-purple-300 text-sm font-medium transition-colors">
-                    Ver todas las notificaciones →
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+      <NotificationPanel open={showNotifications} onClose={() => setShowNotifications(false)} />
 
       <LayoutGroup>
         {/* LISTA DE CHATS */}
@@ -940,8 +1028,16 @@ const Navbar: React.FC = () => {
               >
                 <div className="bg-gray-900/95 backdrop-blur-xl border-x border-b border-gray-700/60 rounded-b-2xl shadow-2xl overflow-hidden">
                   <div className="flex items-center justify-between px-5 py-4 border-b border-gray-700/50">
-                    <h3 className="text-xl font-bold text-white">Mensajes</h3>
-                    <motion.button whileHover={{ scale: 1.15, rotate: 90 }} whileTap={{ scale: 0.92 }} onClick={() => setShowMessages(false)}>
+                    <h3 className="text-xl font-bold text-white">{t('common:messages.title', 'Mensajes')}</h3>
+                    <motion.button
+                      type="button"
+                      whileHover={{ scale: 1.15, rotate: 90 }}
+                      whileTap={{ scale: 0.92 }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowMessages(false);
+                      }}
+                    >
                       <X className="w-6 h-6 text-gray-400" />
                     </motion.button>
                   </div>
@@ -953,7 +1049,7 @@ const Navbar: React.FC = () => {
                       </div>
                       <input
                         type="text"
-                        placeholder="Buscar chat..."
+                        placeholder={t('common:messages.searchPlaceholder', 'Buscar chat...')}
                         value={chatSearchTerm}
                         onChange={(e) => setChatSearchTerm(e.target.value)}
                         className="block w-full pl-10 pr-3 py-2 border border-gray-700/50 rounded-xl leading-5 bg-[#0c2033] text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-[#00f0ff]/50 focus:border-[#00f0ff]/50 sm:text-sm transition-all shadow-inner"
@@ -961,9 +1057,17 @@ const Navbar: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="max-h-[70vh] overflow-y-auto pb-3">
+                  <div className="h-[52vh] overflow-hidden relative">
+                    <AnimatePresence mode="wait" initial={false}>
+                      <motion.div
+                        key={chatFolder}
+                        initial={{ opacity: 0, x: 18 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -18 }}
+                        transition={{ duration: 0.2, ease: [0.25, 0.46, 0.45, 0.94] }}
+                        className="h-full overflow-y-auto pb-3"
+                      >
                     {loading ? (
-                      // Skeleton loader
                       <div className="p-4 space-y-4">
                         {[...Array(5)].map((_, i) => (
                           <div key={i} className="flex items-center gap-3 animate-pulse">
@@ -976,25 +1080,93 @@ const Navbar: React.FC = () => {
                         ))}
                       </div>
                     ) : backendChats && backendChats.chats.length == 0 ? (
-                      // Estado vacío
-                      <div className="flex flex-col items-center justify-center h-full py-16 px-8 text-center">
-                        <motion.div
-                          initial={{ scale: 0.8, opacity: 0 }}
-                          animate={{ scale: 1, opacity: 1 }}
-                          className="w-24 h-24 mb-6 rounded-full bg-gradient-to-br from-purple-600/20 to-pink-600/20 flex items-center justify-center"
-                        >
-                          <MessageCircleMore className="w-12 h-12 text-purple-400" />
-                        </motion.div>
-                        <h3 className="text-xl font-semibold text-white mb-3">Aún no tienes mensajes</h3>
-                        <p className="text-sm text-gray-400 max-w-xs">Empieza una conversación buscando a alguien en Buzzy 🚀</p>
-                        <motion.button
-                          whileHover={{ scale: 1.05 }}
-                          whileTap={{ scale: 0.95 }}
-                          onClick={() => { setShowMessages(false); setShowSearch(true); }}
-                          className="mt-8 px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white font-medium rounded-full shadow-lg"
-                        >
-                          Buscar personas
-                        </motion.button>
+                      <div className="flex flex-col items-center justify-center h-full py-10 px-8 text-center">
+                        {chatFolder === ChatFolderFilter.Hidden ? (
+                          <>
+                            <motion.div
+                              initial={{ scale: 0.8, opacity: 0 }}
+                              animate={{ scale: 1, opacity: 1 }}
+                              transition={{ delay: 0.05 }}
+                              className="w-20 h-20 mb-5 rounded-full bg-gradient-to-br from-cyan-500/20 to-violet-500/20 flex items-center justify-center"
+                            >
+                              <Shield className="w-10 h-10 text-cyan-300" />
+                            </motion.div>
+                            <motion.h3
+                              initial={{ opacity: 0, y: 6 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ delay: 0.1 }}
+                              className="text-lg font-semibold text-white mb-2"
+                            >
+                              No hay chats ocultos visibles
+                            </motion.h3>
+                            <motion.p
+                              initial={{ opacity: 0, y: 6 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ delay: 0.13 }}
+                              className="text-sm text-gray-400 max-w-xs"
+                            >
+                              {chatPrivacy?.has_pin
+                                ? "Cuando ocultes una conversación, aparecerá aquí protegida por tu PIN."
+                                : "Primero debes crear tu PIN de chats para acceder a esta carpeta."}
+                            </motion.p>
+                            <motion.button
+                              initial={{ opacity: 0, y: 6 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ delay: 0.16 }}
+                              whileHover={{ scale: 1.05 }}
+                              whileTap={{ scale: 0.95 }}
+                              onClick={() => {
+                                if (!chatPrivacy?.has_pin) {
+                                  setShowHiddenPinModal(true);
+                                  return;
+                                }
+                                setShowSearch(true);
+                              }}
+                              className="mt-6 inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-cyan-500 to-violet-500 px-6 py-2.5 font-medium text-white shadow-lg shadow-cyan-500/15"
+                            >
+                              {chatPrivacy?.has_pin ? "Buscar personas" : "Configurar PIN"}
+                              <ChevronRight className="h-4 w-4" />
+                            </motion.button>
+                          </>
+                        ) : (
+                          <>
+                            <motion.div
+                              initial={{ scale: 0.8, opacity: 0 }}
+                              animate={{ scale: 1, opacity: 1 }}
+                              transition={{ delay: 0.05 }}
+                              className="w-20 h-20 mb-5 rounded-full bg-gradient-to-br from-purple-600/20 to-pink-600/20 flex items-center justify-center"
+                            >
+                              <MessageCircleMore className="w-10 h-10 text-purple-400" />
+                            </motion.div>
+                            <motion.h3
+                              initial={{ opacity: 0, y: 6 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ delay: 0.1 }}
+                              className="text-lg font-semibold text-white mb-2"
+                            >
+                              {t('common:messages.empty', 'Aún no tienes mensajes')}
+                            </motion.h3>
+                            <motion.p
+                              initial={{ opacity: 0, y: 6 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ delay: 0.13 }}
+                              className="text-sm text-gray-400 max-w-xs"
+                            >
+                              {t('common:messages.emptyHint', 'Empieza una conversación buscando a alguien en Buzzy 🚀')}
+                            </motion.p>
+                            <motion.button
+                              initial={{ opacity: 0, y: 6 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ delay: 0.16 }}
+                              whileHover={{ scale: 1.05 }}
+                              whileTap={{ scale: 0.95 }}
+                              onClick={() => { setShowMessages(false); setShowSearch(true); }}
+                              className="mt-6 px-6 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 text-white font-medium rounded-full shadow-lg"
+                            >
+                              {t('common:messages.findPeople', 'Buscar personas')}
+                            </motion.button>
+                          </>
+                        )}
                       </div>
                     ) : (
                       // Lista real de chats desde el backend
@@ -1124,57 +1296,121 @@ const Navbar: React.FC = () => {
                                 </div>
 
                                 <div className="flex-1 min-w-0">
-                                  <div className="flex justify-between items-baseline">
-                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                  {/* Row 1: name + plan badge | timestamp */}
+                                  <div className="flex justify-between items-center">
+                                    <div className="flex items-center gap-1.5 flex-wrap min-w-0">
                                       <p className={`font-semibold truncate ${planName === 'FRIEND' ? 'text-cyan-400' : planName === 'VIP' ? 'text-amber-100' : 'text-white'}`}>{chat.other_user.username}</p>
-
                                       {planName === 'FRIEND' && (
-                                        <span className="text-[8px] bg-white/10 backdrop-blur-md text-cyan-300 px-2 py-0.5 rounded-full font-bold uppercase tracking-widest border border-cyan-400/30 shadow-[0_0_10px_rgba(0,240,255,0.2)] flex items-center gap-1 group-hover:bg-cyan-400/20 transition-colors">
+                                        <span className="text-[8px] bg-white/10 backdrop-blur-md text-cyan-300 px-2 py-0.5 rounded-full font-bold uppercase tracking-widest border border-cyan-400/30 shadow-[0_0_10px_rgba(0,240,255,0.2)] flex items-center gap-1 group-hover:bg-cyan-400/20 transition-colors shrink-0">
                                           <Sparkles size={7} fill="currentColor" /> DIAMOND
                                         </span>
                                       )}
                                       {planName === 'PLUS' && (
-                                        <span className="text-[9px] bg-gradient-to-r from-purple-400 to-pink-500 text-white px-1.5 py-0.5 rounded-md font-bold uppercase tracking-tighter">PLUS</span>
+                                        <span className="text-[9px] bg-gradient-to-r from-purple-400 to-pink-500 text-white px-1.5 py-0.5 rounded-md font-bold uppercase tracking-tighter shrink-0">PLUS</span>
                                       )}
                                       {planName === 'VIP' && (
-                                        <span className="text-[9px] bg-gradient-to-r from-amber-400 to-amber-600 text-black px-1.5 py-0.5 rounded-md font-bold uppercase tracking-tighter shadow-sm">VIP</span>
+                                        <span className="text-[9px] bg-gradient-to-r from-amber-400 to-amber-600 text-black px-1.5 py-0.5 rounded-md font-bold uppercase tracking-tighter shadow-sm shrink-0">VIP</span>
                                       )}
                                     </div>
-                                    <div className="flex flex-col items-end gap-1.5 ml-2">
-                                      <span className="text-[10px] text-gray-500 font-medium whitespace-nowrap">
-                                        {new Date(chat.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                      </span>
-                                      {chat.unread_count > 0 && (
-                                        <div className={`w-5 h-5 flex items-center justify-center text-[10px] text-white font-bold rounded-full shadow-lg ${planName === 'FRIEND' ? 'bg-gradient-to-br from-[#00f0ff] to-blue-600 shadow-[0_0_10px_rgba(0,240,255,0.3)]' :
-                                          planName === 'VIP' ? 'bg-gradient-to-br from-amber-400 to-orange-600 shadow-[0_0_10px_rgba(251,191,36,0.3)]' :
-                                            'bg-gradient-to-br from-purple-500 to-pink-500 shadow-[0_0_10px_rgba(168,85,247,0.3)]'
-                                          }`}>
-                                          {getUnreadAcount(chat.uuid)}
-                                        </div>
-                                      )}
-                                    </div>
+                                    <span className="text-[10px] text-gray-500 font-medium whitespace-nowrap ml-2 shrink-0">
+                                      {new Date(chat.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </span>
                                   </div>
-                                  <p className="text-sm text-gray-400 truncate group-hover:text-gray-300 transition-colors pr-2">
-                                    {typingContest(chat)}
-                                  </p>
+                                  {/* Row 2: last message | unread badge */}
+                                  <div className="flex items-center justify-between gap-2 mt-0.5">
+                                    <p className="text-xs text-gray-400 truncate group-hover:text-gray-300 transition-colors">
+                                      {typingContest(chat) || lastMessageMap[chat.uuid] || chat.last_message || ""}
+                                    </p>
+                                    {getUnreadAcount(chat.uuid) > 0 && (
+                                      <div className={`min-w-[20px] h-5 px-1 flex items-center justify-center text-[10px] text-white font-bold rounded-full shadow-lg shrink-0 ${planName === 'FRIEND' ? 'bg-gradient-to-br from-[#00f0ff] to-blue-600 shadow-[0_0_10px_rgba(0,240,255,0.3)]' :
+                                        planName === 'VIP' ? 'bg-gradient-to-br from-amber-400 to-orange-600 shadow-[0_0_10px_rgba(251,191,36,0.3)]' :
+                                          'bg-gradient-to-br from-purple-500 to-pink-500 shadow-[0_0_10px_rgba(168,85,247,0.3)]'
+                                        }`}>
+                                        {getUnreadAcount(chat.uuid)}
+                                      </div>
+                                    )}
+                                  </div>
                                 </div>
                               </motion.li>
                             );
                           })}
                       </ul>
                     )}
+                      </motion.div>
+                    </AnimatePresence>
                   </div>
 
-                  <div className="p-4 border-t border-gray-700/50 text-center">
-                    <button className="text-purple-400 hover:text-purple-300 text-sm font-medium">
-                      Ver todos los mensajes →
-                    </button>
+                  {/* Footer nav con iconos */}
+                  <div className="border-t border-white/8 bg-gray-900/80 backdrop-blur-md px-1 py-1">
+                    <div className="flex items-center justify-around">
+                      {[
+                        { key: ChatFolderFilter.Friends, icon: Users, label: "Amigos", gradient: "from-cyan-400 to-blue-500", glow: "shadow-cyan-500/40" },
+                        { key: ChatFolderFilter.Known, icon: UserCheck, label: "Conocidos", gradient: "from-violet-400 to-fuchsia-500", glow: "shadow-violet-500/40" },
+                        { key: ChatFolderFilter.Requests, icon: Inbox, label: "Solicitudes", gradient: "from-amber-400 to-orange-500", glow: "shadow-amber-500/40" },
+                        { key: ChatFolderFilter.Hidden, icon: EyeOff, label: "Ocultos", gradient: "from-gray-400 to-gray-600", glow: "shadow-gray-500/30" },
+                      ].map((item) => {
+                        const active = chatFolder === item.key;
+                        const Icon = item.icon;
+                        return (
+                          <motion.button
+                            key={item.key}
+                            whileTap={{ scale: 0.9 }}
+                            whileHover={{ scale: 1.05 }}
+                            onClick={() => handleFolderChange(item.key)}
+                            className="relative flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl transition-all"
+                          >
+                            {(() => { const fCount = getFolderUnread(item.key); return fCount > 0 ? (
+                              <span className={`absolute -top-0.5 right-1 min-w-[16px] h-4 px-1 flex items-center justify-center text-[9px] font-bold text-white rounded-full bg-gradient-to-br ${item.gradient} shadow-sm z-10`}>
+                                {fCount > 99 ? "99+" : fCount}
+                              </span>
+                            ) : null; })()}
+                            <motion.div
+                              className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${
+                                active
+                                  ? `bg-gradient-to-br ${item.gradient} shadow-md ${item.glow}`
+                                  : "bg-white/5"
+                              }`}
+                              animate={{ scale: active ? 1 : 0.88 }}
+                              transition={{ type: "spring", stiffness: 400, damping: 20 }}
+                            >
+                              <Icon className={`${active ? "text-white" : "text-white/40"}`} size={15} />
+                            </motion.div>
+                            <span className={`text-[8px] font-semibold tracking-wide transition-colors ${active ? "text-white" : "text-white/30"}`}>
+                              {item.label}
+                            </span>
+                            {active && (
+                              <motion.div
+                                layoutId="chat-folder-dot"
+                                className={`absolute -bottom-0.5 w-1 h-1 rounded-full bg-gradient-to-r ${item.gradient}`}
+                              />
+                            )}
+                          </motion.button>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               </motion.div>
             </>
           )}
         </AnimatePresence>
+
+        <HiddenChatPinModal
+          isOpen={showHiddenPinModal}
+          hasPin={!!chatPrivacy?.has_pin}
+          onClose={() => {
+            setShowHiddenPinModal(false);
+            setChatFolder(ChatFolderFilter.Friends);
+            loadChatsForFolder(ChatFolderFilter.Friends);
+          }}
+          onVerified={() => setShowHiddenPinModal(false)}
+          onConfigurePin={() => {
+            setShowHiddenPinModal(false);
+            setShowMessages(false);
+            navigate(`/profile/${user?.username || "user"}`);
+          }}
+          onSubmitPin={handleHiddenPinSubmit}
+        />
 
         {/* CHAT INDIVIDUAL - AHORA FUNCIONAL Y LLENO DE MENSAJES */}
         <AnimatePresence>
@@ -1193,156 +1429,119 @@ const Navbar: React.FC = () => {
                 className="fixed inset-x-0 top-0 bottom-0 z-50 mx-auto w-full max-w-md"
                 transition={{ type: "spring", damping: 30, stiffness: 300 }}
               >
-                <div className="bg-gray-900/98 backdrop-blur-2xl h-full flex flex-col shadow-2xl">
-                  {/* Header del chat */}
-                  <div className="flex items-center justify-between px-5 py-4 border-b border-gray-700/50">
-                    <div className="flex items-center gap-3">
-                      <button onClick={() => setSelectedChat(null)} className="text-gray-300 hover:text-white text-2xl">←</button>
-                      <div className="relative group">
-                        <div
-                          className={`relative p-[1.5px] rounded-full cursor-pointer transition-transform duration-500 group-hover:scale-110 ${currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND'
-                            ? 'bg-gradient-to-tr from-[#00f0ff] via-white to-[#00f0ff] animate-pulse shadow-[0_0_15px_rgba(0,240,255,0.4)]'
-                            : currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'PLUS'
-                              ? 'bg-gradient-to-tr from-purple-400 to-pink-500 border border-purple-400/30 shadow-[0_0_15px_rgba(168,85,247,0.3)]'
-                              : currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'VIP'
-                                ? 'bg-gradient-to-tr from-amber-300 via-white to-amber-200 shadow-[0_0_15px_rgba(251,191,36,0.3)]'
-                                : ''
-                            }`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedChat(null);
-                            setShowMessages(false);
-                            navigate(`/profile/${currentBackendChat.other_user.username}`);
-                          }}
-                        >
-                          <img
-                            src={`${getBaseUrl()}${currentBackendChat.other_user.avatar || "/profile_pics/avatar.webp"}`}
-                            alt={currentBackendChat.other_user.name}
-                            className="w-12 h-12 rounded-full object-cover border-2 border-[#0c1033]"
-                          />
+                {/* ── Fondo: avatar del contacto blureado ── */}
+                <div className="absolute inset-0 overflow-hidden rounded-none">
+                  <img
+                    src={`${getBaseUrl()}${currentBackendChat.other_user.avatar || "/profile_pics/avatar.webp"}`}
+                    alt=""
+                    className="w-full h-full object-cover scale-125"
+                    style={{ filter: "blur(32px) brightness(0.18) saturate(1.6)" }}
+                  />
+                  <div className="absolute inset-0 bg-black/60" />
+                </div>
 
-                          {/* Delicate Diamond/Premium Badge Overlay */}
-                          <div className="absolute top-12.5 -right-3 z-10 scale-90">
-                            {currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND' && (
-                              <motion.span
-                                initial={{ scale: 0.5, opacity: 0 }}
-                                animate={{ scale: 1, opacity: 1 }}
-                                className="text-[7px] bg-white/10 backdrop-blur-md text-cyan-300 px-2 py-0.5 rounded-full font-bold uppercase tracking-widest border border-cyan-400/30 shadow-[0_0_10px_rgba(0,240,255,0.4)] flex items-center gap-1"
-                              >
-                                <Sparkles size={6} fill="currentColor" /> DIAMOND
-                              </motion.span>
-                            )}
-                            {currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'PLUS' && (
-                              <motion.span
-                                initial={{ scale: 0.5, opacity: 0 }}
-                                animate={{ scale: 1, opacity: 1 }}
-                                className="text-[7px] bg-white/10 backdrop-blur-md text-purple-300 px-2 py-0.5 rounded-full font-bold uppercase tracking-widest border border-purple-400/30 shadow-[0_0_10px_rgba(0,240,255,0.4)] flex items-center gap-1"
-                              >
-                                PLUS
-                              </motion.span>
-                            )}
-                            {currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'VIP' && (
-                              <motion.span
-                                initial={{ scale: 0.5, opacity: 0 }}
-                                animate={{ scale: 1, opacity: 1 }}
-                                className="text-[7px] bg-white/10 backdrop-blur-md text-amber-300 px-2 py-0.5 rounded-full font-bold uppercase tracking-widest border border-amber-400/30 shadow-[0_0_10px_rgba(0,240,255,0.4)] flex items-center gap-1"
-                              >
-                                VIP
-                              </motion.span>
-                            )}
-                          </div>
-                        </div>
-                        {currentBackendChat.other_user_online.is_online && (
-                          <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 border-2 border-[#0c1033] rounded-full shadow-lg" />
-                        )}
+                <div className="relative h-full flex flex-col">
 
-                        {/* Luxury Refractive Beam for the Header Avatar Area */}
-                        {currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() !== 'NONE' && (
-                          <motion.div
-                            initial={{ x: '-100%', opacity: 0 }}
-                            animate={{ x: '200%', opacity: [0, 0.4, 0] }}
-                            transition={{ duration: 4, repeat: Infinity, repeatDelay: 2 }}
-                            className="absolute inset-0 z-0 bg-gradient-to-r from-transparent via-white/10 to-transparent skew-x-12 pointer-events-none rounded-full"
-                          />
-                        )}
-                      </div>
-                      <div>
-                        <div className="flex flex-col">
-                          <p className={`font-bold text-lg leading-tight ${currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND' ? 'text-cyan-400' :
-                            currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'PLUS' ? 'text-purple-400' :
-                              currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'VIP' ? 'text-amber-400' : 'text-white'
-                            }`}>
-                            {currentBackendChat.other_user.name}
-                          </p>
-                          <p className="text-xs text-gray-400">
-                            {currentBackendChat.other_user_online.is_online ? "En línea" : "Desconectado"}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-3 relative">
-                      <motion.button
-                        whileHover={{ scale: 1.1 }}
-                        whileTap={{ scale: 0.9 }}
-                        onClick={() => handleStartChatCall('voice')}
-                        disabled={!chatAvailability?.can_voice}
-                        className={`p-2 rounded-full transition-all ${chatAvailability?.can_voice
-                          ? "bg-green-300/20 hover:bg-green-600/40 text-green-400 border border-green-500/30"
-                          : "bg-gray-600/50 text-gray-500 opacity-50 cursor-not-allowed"
-                          }`}
-                      >
-                        <Phone className="w-5 h-5" />
-                        {chatAvailability?.is_available && chatAvailability?.can_voice && (
-                          <span className="absolute top-0.5 right-0.5 flex h-3 w-3">
-                            <span className="absolute inline-flex h-full w-full rounded-full bg-pink-400/70 blur-[1px] animate-ping"></span>
-                            <span className="relative inline-flex h-3 w-3 rounded-full border-2 border-gray-900 bg-gradient-to-br from-pink-300 via-fuchsia-400 to-pink-500 shadow-[0_0_10px_rgba(244,114,182,0.8)]"></span>
-                          </span>
-                        )}
-                      </motion.button>
-                      <motion.button
-                        whileHover={{ scale: 1.1 }}
-                        whileTap={{ scale: 0.9 }}
-                        onClick={() => handleStartChatCall('video')}
-                        disabled={!chatAvailability?.can_video}
-                        className={`p-2 rounded-full transition-all ${chatAvailability?.can_video
-                          ? "bg-blue-300/20 hover:bg-blue-600/40 text-blue-400 border border-blue-500/30"
-                          : "bg-gray-600/50 text-gray-500 opacity-50 cursor-not-allowed"
-                          }`}
-                      >
-                        <Video className="w-5 h-5" />
-                        {chatAvailability?.is_available && chatAvailability?.can_video && (
-                          <span className="absolute top-0.5 right-0.5 flex h-3 w-3">
-                            <span className="absolute inline-flex h-full w-full rounded-full bg-pink-400/70 blur-[1px] animate-ping"></span>
-                            <span className="relative inline-flex h-3 w-3 rounded-full border-2 border-gray-900 bg-gradient-to-br from-pink-300 via-fuchsia-400 to-pink-500 shadow-[0_0_10px_rgba(244,114,182,0.8)]"></span>
-                          </span>
-                        )}
-                      </motion.button>
-                      <motion.button whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }} onClick={() => { setSelectedChat(null); setShowMessages(false); }}>
-                        <X className="w-6 h-6 text-gray-400" />
-                      </motion.button>
+                  {/* ── Avatar: esquina superior izquierda, pequeño y redondo ── */}
+                  <div className="absolute top-4 left-4 z-10">
+                    <div
+                      className={`relative p-[2px] rounded-full cursor-pointer ${
+                        currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND'
+                          ? 'bg-gradient-to-br from-[#00f0ff] to-blue-500 shadow-[0_0_12px_rgba(0,240,255,0.5)]'
+                          : currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'PLUS'
+                            ? 'bg-gradient-to-br from-purple-400 to-pink-500 shadow-[0_0_10px_rgba(168,85,247,0.45)]'
+                            : currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'VIP'
+                              ? 'bg-gradient-to-br from-amber-300 to-amber-500 shadow-[0_0_10px_rgba(251,191,36,0.45)]'
+                              : 'bg-white/20'
+                      }`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedChat(null);
+                        setShowMessages(false);
+                        navigate(`/profile/${currentBackendChat.other_user.username}`);
+                      }}
+                    >
+                      <img
+                        src={`${getBaseUrl()}${currentBackendChat.other_user.avatar || "/profile_pics/avatar.webp"}`}
+                        alt={currentBackendChat.other_user.name}
+                        className="w-10 h-10 rounded-full object-cover"
+                      />
+                      {currentBackendChat.other_user_online.is_online && (
+                        <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-400 border-2 border-black rounded-full shadow-[0_0_5px_rgba(74,222,128,0.9)]" />
+                      )}
                     </div>
                   </div>
 
-                  {/* Mensajes */}
-                  <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gradient-to-b from-gray-900/50 via-black to-gray-900">
+                  {/* ── Pill de botones: izquierda, centrada verticalmente, con bounce ── */}
+                  <motion.div
+                    initial={{ x: -60, opacity: 0 }}
+                    animate={{ x: 0, opacity: 1 }}
+                    transition={{ type: "spring", stiffness: 260, damping: 14, delay: 0.1 }}
+                    className="absolute left-4 top-1/2 -translate-y-1/2 z-10 flex flex-col items-center gap-0 bg-[#1c2030]/85 backdrop-blur-xl rounded-[32px] border border-white/10 shadow-2xl overflow-hidden">
+                    <motion.button
+                      whileHover={{ scale: 1.08 }}
+                      whileTap={{ scale: 0.92 }}
+                      onClick={() => handleStartChatCall('voice')}
+                      disabled={!chatAvailability?.can_voice}
+                      className={`relative w-12 h-12 flex items-center justify-center transition-all ${
+                        chatAvailability?.can_voice ? "text-white/80 hover:bg-white/10 hover:text-white" : "text-white/25 cursor-not-allowed"
+                      }`}
+                    >
+                      <Phone className="w-[18px] h-[18px]" />
+                      {chatAvailability?.is_available && chatAvailability?.can_voice && (
+                        <span className="absolute top-2 right-2 flex h-2 w-2">
+                          <span className="absolute inline-flex h-full w-full rounded-full bg-pink-400/70 animate-ping" />
+                          <span className="relative inline-flex h-2 w-2 rounded-full bg-pink-500" />
+                        </span>
+                      )}
+                    </motion.button>
+                    <div className="w-7 h-px bg-white/12 mx-auto" />
+                    <motion.button
+                      whileHover={{ scale: 1.08 }}
+                      whileTap={{ scale: 0.92 }}
+                      onClick={() => handleStartChatCall('video')}
+                      disabled={!chatAvailability?.can_video}
+                      className={`relative w-12 h-12 flex items-center justify-center transition-all ${
+                        chatAvailability?.can_video ? "text-white/80 hover:bg-white/10 hover:text-white" : "text-white/25 cursor-not-allowed"
+                      }`}
+                    >
+                      <Video className="w-[18px] h-[18px]" />
+                      {chatAvailability?.is_available && chatAvailability?.can_video && (
+                        <span className="absolute top-2 right-2 flex h-2 w-2">
+                          <span className="absolute inline-flex h-full w-full rounded-full bg-pink-400/70 animate-ping" />
+                          <span className="relative inline-flex h-2 w-2 rounded-full bg-pink-500" />
+                        </span>
+                      )}
+                    </motion.button>
+                    <div className="w-7 h-px bg-white/12 mx-auto" />
+                    <motion.button
+                      whileHover={{ scale: 1.08 }}
+                      whileTap={{ scale: 0.92 }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedChat(null);
+                        setShowMessages(false);
+                      }}
+                      className="w-12 h-12 flex items-center justify-center text-white/60 hover:bg-white/10 hover:text-white transition-all"
+                    >
+                      <X className="w-[18px] h-[18px]" />
+                    </motion.button>
+                  </motion.div>
+
+                  {/* ── Área de mensajes ── */}
+                  <div className="flex-1 overflow-y-auto pt-[140px] pb-2 px-4 space-y-2" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
                     {realtimeMessages.map((msg) => {
                       const isMe = msg.sender_username === user.username
 
                       return (
                         <motion.div
                           key={msg.uuid}
-                          initial={{ opacity: 0, y: 20 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ duration: 0.3 }}
-                          onMouseEnter={undefined}
-                          onMouseLeave={undefined}
+                          initial={{ opacity: 0, y: 14, scale: 0.97 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          transition={{ duration: 0.22, ease: [0.25, 0.46, 0.45, 0.94] }}
                           onClick={(e) => {
-                            // Don't trigger if clicking a button/link inside the message
                             if ((e.target as HTMLElement).closest('button, a, input, video, audio')) return;
-                            // Clear existing timer
                             if (clickedMessageTimerRef.current) clearTimeout(clickedMessageTimerRef.current);
-                            // If same message, toggle off
                             if (clickedMessage === msg.uuid) {
                               setClickedMessage(null);
                               setEmojiTarget(null);
@@ -1350,77 +1549,62 @@ const Navbar: React.FC = () => {
                             }
                             setEmojiTarget(null);
                             setClickedMessage(msg.uuid);
-                            // Auto-hide after 3s if user doesn't interact
                             clickedMessageTimerRef.current = setTimeout(() => {
                               setClickedMessage(null);
                             }, 3000);
                           }}
-                          className={`relative flex items-end gap-2 ${isMe ? "justify-end" : "justify-start"
-                            }`}
+                          className="relative flex items-end justify-end gap-2"
                         >
-                          {/* Avatar */}
-                          {!isMe && (
-                            <div className={`relative p-[1px] rounded-full flex-shrink-0 ${currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND' ? 'bg-gradient-to-tr from-[#00f0ff] via-white to-[#00f0ff] animate-pulse shadow-[0_0_10px_rgba(0,240,255,0.4)]' :
-                              currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'VIP' ? 'bg-gradient-to-tr from-amber-300 via-amber-500 to-amber-200 animate-pulse shadow-[0_0_8px_rgba(251,191,36,0.2)]' :
-                                currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'PLUS' ? 'bg-gradient-to-tr from-purple-400 to-pink-500 border border-purple-500/30' : ''
-                              }`}>
-                              <img
-                                src={
-                                  msg.sender_avatar
-                                    ? `${getBaseUrl()}media/${msg.sender_avatar}`
-                                    : "/profile_pics/avatar.webp"
-                                }
-                                alt={msg.sender_username}
-                                className="w-8 h-8 rounded-full object-cover border border-[#0c1033]"
-                              />
-                            </div>
-                          )}
-
                           {/* Bubble + Emoji */}
                           <div className="relative flex items-center">
 
-                            {/* Emoji trigger (izquierda - otros) */}
-                            {!isMe && clickedMessage === msg.uuid && (
+                            {/* Emoji trigger */}
+                            {clickedMessage === msg.uuid && (
                               <motion.button
                                 initial={{ opacity: 0, scale: 0.5, x: -8 }}
                                 animate={{ opacity: 1, scale: 1, x: 0 }}
                                 exit={{ opacity: 0, scale: 0.5 }}
-                                className="mr-2 w-8 h-8 flex items-center justify-center bg-[#1e1e35] rounded-full shadow-xl border border-white/15 text-gray-300 hover:text-yellow-400 hover:border-yellow-400/30 transition-all cursor-pointer flex-shrink-0"
+                                className="mr-2 w-7 h-7 flex items-center justify-center bg-black/50 backdrop-blur-md rounded-full shadow-xl border border-white/15 text-gray-300 hover:text-yellow-400 transition-all cursor-pointer flex-shrink-0"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   if (clickedMessageTimerRef.current) clearTimeout(clickedMessageTimerRef.current);
                                   setEmojiTarget(emojiTarget === msg.uuid ? null : msg.uuid);
                                 }}
                               >
-                                <span className="text-base">😊</span>
+                                <span className="text-sm">😊</span>
                               </motion.button>
                             )}
 
-                            {/* Message bubble */}
+                            {/* ── Burbuja de mensaje ── */}
                             <div
-                              className={`max-w-xs ${msg.message_type === 'text' ? 'px-4 py-3' : 'p-[1px]'} rounded-2xl shadow-xl transition-all duration-300 ${isMe
-                                ? msg.message_type === 'text'
-                                  ? user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND'
-                                    ? "bg-gradient-to-br from-cyan-500 via-blue-600 to-indigo-800 text-white rounded-br-none shadow-[0_0_20px_rgba(0,240,255,0.3)] border border-cyan-400/30"
-                                    : user.subscription_status?.plan?.name?.toUpperCase() === 'VIP'
-                                      ? "bg-gradient-to-br from-amber-400 via-amber-500 to-orange-600 text-black font-bold rounded-br-none shadow-[0_0_20px_rgba(251,191,36,0.4)] border border-amber-300/50"
-                                      : user.subscription_status?.plan?.name?.toUpperCase() === 'PLUS'
-                                        ? "bg-gradient-to-br from-purple-600 via-pink-600 to-purple-800 text-white rounded-br-none shadow-[0_0_15px_rgba(168,85,247,0.3)] border border-purple-400/20"
-                                        : "bg-gradient-to-br from-gray-700 via-gray-800 to-gray-900 text-white rounded-br-none shadow-lg border border-white/5"
-                                  : "backdrop-blur-lg text-white rounded-br-none"
-                                : msg.message_type === 'text'
-                                  ? currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND'
-                                    ? "bg-[#0c1a2e]/90 text-cyan-50 border border-cyan-400/40 rounded-bl-none shadow-[0_0_15px_rgba(0,240,255,0.15)]"
-                                    : currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'VIP'
-                                      ? "bg-[#1f1a10]/95 text-amber-50 border border-amber-400/40 rounded-bl-none shadow-[0_0_15px_rgba(251,191,36,0.15)]"
-                                      : currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'PLUS'
-                                        ? "bg-[#1e0f2e]/90 text-purple-50 border border-purple-500/30 rounded-bl-none shadow-[0_0_10px_rgba(168,85,247,0.1)]"
-                                        : "bg-[#1a1a1a] text-gray-100 rounded-bl-none border border-white/10 shadow-inner"
-                                  : "backdrop-blur-lg text-gray-100 rounded-bl-none"
-                                }`}
+                              className={`max-w-[72vw] ${msg.message_type === 'text' ? 'px-4 py-3' : 'p-[1px]'} ${isMe ? 'rounded-tl-[20px] rounded-tr-[20px] rounded-bl-[20px] rounded-br-[4px]' : 'rounded-tl-[20px] rounded-tr-[20px] rounded-br-[20px] rounded-bl-[4px]'} shadow-xl transition-all duration-300 ${
+                                isMe
+                                  ? msg.message_type === 'text'
+                                    ? user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND'
+                                      ? "bg-gradient-to-br from-cyan-500 via-blue-600 to-indigo-800 text-white shadow-[0_0_20px_rgba(0,240,255,0.3)] border border-cyan-400/30"
+                                      : user.subscription_status?.plan?.name?.toUpperCase() === 'VIP'
+                                        ? "bg-gradient-to-br from-amber-400 via-amber-500 to-orange-600 text-black font-bold shadow-[0_0_20px_rgba(251,191,36,0.4)] border border-amber-300/50"
+                                        : user.subscription_status?.plan?.name?.toUpperCase() === 'PLUS'
+                                          ? "bg-gradient-to-br from-purple-600 via-pink-600 to-purple-800 text-white shadow-[0_0_15px_rgba(168,85,247,0.3)] border border-purple-400/20"
+                                          : "bg-gradient-to-br from-gray-700 via-gray-800 to-gray-900 text-white shadow-lg border border-white/5"
+                                    : "backdrop-blur-lg text-white"
+                                  : msg.message_type === 'text'
+                                    ? currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND'
+                                      ? "bg-[#0c1a2e]/90 text-cyan-50 border border-cyan-400/40 shadow-[0_0_15px_rgba(0,240,255,0.15)]"
+                                      : currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'VIP'
+                                        ? "bg-[#1f1a10]/95 text-amber-50 border border-amber-400/40 shadow-[0_0_15px_rgba(251,191,36,0.15)]"
+                                        : currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'PLUS'
+                                          ? "bg-[#1e0f2e]/90 text-purple-50 border border-purple-500/30 shadow-[0_0_10px_rgba(168,85,247,0.1)]"
+                                          : "bg-[#1a1a1a] text-gray-100 border border-white/10 shadow-inner"
+                                    : "backdrop-blur-lg text-gray-100"
+                              }`}
                             >
                               {!isMe && (
-                                <p className="text-xs text-gray-400 mb-1 font-medium">
+                                <p className={`text-[10px] mb-0.5 font-semibold ${
+                                  currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND' ? 'text-cyan-400' :
+                                  currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'VIP' ? 'text-amber-400' :
+                                  currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'PLUS' ? 'text-purple-400' : 'text-gray-400'
+                                }`}>
                                   {msg.sender_username}
                                 </p>
                               )}
@@ -1614,12 +1798,9 @@ const Navbar: React.FC = () => {
 
                               {msg.message_type !== 'image' && msg.message_type !== 'video' && msg.message_type !== 'voice' && (
                                 <div
-                                  className="flex items-center justify-between w-full mt-2 gap-4"
+                                  className="flex items-center justify-between w-full mt-1.5 gap-4"
                                 >
-                                  <p
-                                    className={`text-xs ${isMe ? "text-purple-200" : "text-gray-500"
-                                      }`}
-                                  >
+                                  <p className="text-[11px] text-white/40 font-normal">
                                     {new Date(msg.created_at).toLocaleTimeString("es-DO", {
                                       hour: "2-digit",
                                       minute: "2-digit",
@@ -1660,22 +1841,6 @@ const Navbar: React.FC = () => {
                               )}
                             </div>
 
-                            {/* Emoji trigger (derecha - yo) */}
-                            {isMe && clickedMessage === msg.uuid && (
-                              <motion.button
-                                initial={{ opacity: 0, scale: 0.5, x: 8 }}
-                                animate={{ opacity: 1, scale: 1, x: 0 }}
-                                exit={{ opacity: 0, scale: 0.5 }}
-                                className="ml-2 w-8 h-8 flex items-center justify-center bg-[#1e1e35] rounded-full shadow-xl border border-white/15 text-gray-300 hover:text-yellow-400 hover:border-yellow-400/30 transition-all cursor-pointer flex-shrink-0"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (clickedMessageTimerRef.current) clearTimeout(clickedMessageTimerRef.current);
-                                  setEmojiTarget(emojiTarget === msg.uuid ? null : msg.uuid);
-                                }}
-                              >
-                                <span className="text-base">😊</span>
-                              </motion.button>
-                            )}
 
                             {/* Professional Emoji Picker */}
                             <AnimatePresence>
@@ -1808,8 +1973,8 @@ const Navbar: React.FC = () => {
                     <div ref={messagesEndRef} />
                   </div>
 
-                  {/* Input */}
-                  <form onSubmit={handleSendMessage} className="p-4 border-t border-gray-700/50 bg-gray-900/95 relative">
+                  {/* ── Input bar flotante ── */}
+                  <form onSubmit={handleSendMessage} className="px-4 pb-4 pt-1.5 bg-transparent relative">
                     <AnimatePresence>
                       {showAttachmentMenu && (
                         <motion.div
@@ -1818,22 +1983,59 @@ const Navbar: React.FC = () => {
                           exit={{ opacity: 0, y: 10, scale: 0.95 }}
                           className="absolute bottom-full left-4 mb-4 bg-gray-900/95 backdrop-blur-xl border border-gray-700/50 rounded-2xl shadow-2xl p-2 grid grid-cols-4 gap-2 min-w-[280px] z-50"
                         >
-                          {attachmentOptions.map((option, idx) => (
+                          {attachmentOptions.map((option, idx) => {
+                            const isHideChat = option.type === "hide_chat";
+                            const isMoveKnown = option.type === "move_known";
+                            const isMoveStandard = option.type === "move_standard";
+                            const isHidden = isHideChat && currentBackendChat?.folder_type === ChatFolderFilter.Hidden;
+                            const isActiveKnown = isMoveKnown && currentBackendChat?.folder_type === ChatFolderFilter.Known;
+                            const isActiveStandard = isMoveStandard && currentBackendChat?.folder_type === ChatFolderFilter.Friends;
+                            const isDisabled = false;
+                            return (
                             <motion.button
                               key={idx}
                               type="button"
-                              whileHover={option.enable ? {} : { scale: 1.05 }}
-                              whileTap={option.enable ? {} : { scale: 0.95 }}
-                              onClick={() => !option.enable && handleFileSelect(option.type)}
-                              className={`flex flex-col items-center justify-center p-3 rounded-xl transition-colors gap-2 ${option.enable ? 'cursor-not-allowed' : 'hover:bg-white/5'}`}
-                              disabled={option.enable}
+                              whileHover={isDisabled ? {} : { scale: 1.05 }}
+                              whileTap={isDisabled ? {} : { scale: 0.95 }}
+                              onClick={() => {
+                                if (isDisabled) return;
+                                if (isHideChat) {
+                                  handleToggleHiddenCurrentChat();
+                                  setShowAttachmentMenu(false);
+                                } else if (isMoveKnown) {
+                                  handleMoveChatToFolder(ChatFolderFilter.Known);
+                                  setShowAttachmentMenu(false);
+                                } else if (isMoveStandard) {
+                                  handleMoveChatToFolder(ChatFolderFilter.Friends);
+                                  setShowAttachmentMenu(false);
+                                } else {
+                                  handleFileSelect(option.type);
+                                }
+                              }}
+                              className={`flex flex-col items-center justify-center p-3 rounded-xl transition-colors gap-2 ${isDisabled ? 'cursor-not-allowed' : 'hover:bg-white/5'} ${isHidden || isActiveKnown || isActiveStandard ? 'bg-white/5' : ''}`}
+                              disabled={isDisabled}
                             >
-                              <div className={`w-10 h-10 rounded-full flex items-center justify-center shadow-inner ${option.enable ? 'bg-gray-600' : 'bg-gray-800/50'}`}>
+                              <div className={`w-10 h-10 rounded-full flex items-center justify-center shadow-inner ${
+                                isDisabled ? 'bg-gray-600'
+                                : isHidden ? 'bg-cyan-500/20 border border-cyan-400/40'
+                                : isActiveKnown ? 'bg-violet-500/20 border border-violet-400/40'
+                                : isActiveStandard ? 'bg-cyan-500/20 border border-cyan-400/40'
+                                : 'bg-gray-800/50'
+                              }`}>
                                 {option.icon}
                               </div>
-                              <span className={`text-[10px] font-medium ${option.enable ? 'text-gray-500' : 'text-gray-400'}`}>{option.label}</span>
+                              <span className={`text-[10px] font-medium ${
+                                isDisabled ? 'text-gray-500'
+                                : isHidden ? 'text-cyan-300'
+                                : isActiveKnown ? 'text-violet-300'
+                                : isActiveStandard ? 'text-cyan-300'
+                                : 'text-gray-400'
+                              }`}>
+                                {isHideChat ? (isHidden ? "Restaurar" : "Ocultar chat") : option.label}
+                              </span>
                             </motion.button>
-                          ))}
+                            );
+                          })}
                         </motion.div>
                       )}
                     </AnimatePresence>
@@ -1846,25 +2048,21 @@ const Navbar: React.FC = () => {
                       accept="image/*,video/*"
                     />
 
-                    <div className="flex gap-1 items-center">
+                    <div className="flex gap-2 items-center bg-[#181b27]/75 backdrop-blur-xl rounded-full px-2.5 py-1.5 border border-white/8 shadow-[0_4px_24px_rgba(0,0,0,0.5)]">
                       {!isRecording && (
                         <motion.button
                           type="button"
                           whileTap={{ scale: 0.9 }}
                           onClick={() => setShowAttachmentMenu(!showAttachmentMenu)}
-                          className={`p-2 rounded-full transition-colors ${showAttachmentMenu ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-800'}`}
+                          className="text-white/50 hover:text-white transition-colors flex-shrink-0 pl-1"
                         >
-                          <Plus className={`w-6 h-6 transition-transform duration-200 ${showAttachmentMenu ? 'rotate-45' : 'rotate-0'}`} />
+                          <Plus className={`w-5 h-5 transition-transform duration-200 ${showAttachmentMenu ? 'rotate-45' : 'rotate-0'}`} />
                         </motion.button>
                       )}
 
-                      <div className={`flex-1 flex items-center relative rounded-full p-[1.5px] transition-all duration-300 ${currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND' ? 'bg-gradient-to-r from-cyan-500/50 via-white/50 to-cyan-500/50 shadow-[0_0_15px_rgba(0,240,255,0.2)]' :
-                        currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'PLUS' ? 'bg-gradient-to-r from-purple-500/50 via-white/50 to-purple-500/50' :
-                          currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'VIP' ? 'bg-gradient-to-r from-amber-400/50 via-white/50 to-amber-400/50' :
-                            'bg-gray-700/50'
-                        }`}>
+                      <div className="flex-1 flex items-center relative">
                         {isRecording ? (
-                          <div className="flex-1 flex items-center gap-4 bg-gray-900/90 backdrop-blur-md rounded-full px-4 py-2.5">
+                          <div className="flex-1 flex items-center gap-4 rounded-full px-2 py-1">
                             <motion.button
                               type="button"
                               whileHover={{ scale: 1.1, color: "#ef4444" }}
@@ -1892,11 +2090,7 @@ const Navbar: React.FC = () => {
                             placeholder="Escribe un mensaje..."
                             value={messageText}
                             onChange={handleTyping}
-                            className={`flex-1 bg-gray-900/90 backdrop-blur-md rounded-full px-4 py-3 text-white placeholder-gray-400 focus:outline-none transition-all ${currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND' ? 'focus:ring-1 focus:ring-cyan-400/50' :
-                              currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'PLUS' ? 'focus:ring-1 focus:ring-purple-400/50' :
-                                currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'VIP' ? 'focus:ring-1 focus:ring-amber-400/50' :
-                                  'focus:border-purple-500'
-                              }`}
+                            className="flex-1 bg-transparent px-2 py-1.5 text-white placeholder-gray-500 focus:outline-none text-sm"
                           />
                         )}
                       </div>
@@ -1912,12 +2106,13 @@ const Navbar: React.FC = () => {
                             startRecording();
                           }
                         }}
-                        className={`p-3.5 rounded-full shadow-xl transition-all duration-300 ${isRecording ? "bg-red-500 hover:bg-red-600 shadow-red-500/20" :
+                        className={`p-2.5 rounded-full shadow-xl transition-all duration-300 flex-shrink-0 ${
+                          isRecording ? "bg-red-500 hover:bg-red-600 shadow-red-500/20" :
                           currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND' ? "bg-gradient-to-br from-cyan-400 to-blue-600 shadow-cyan-500/40" :
-                            currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'PLUS' ? "bg-gradient-to-br from-purple-500 to-pink-600 shadow-purple-500/40" :
-                              currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'VIP' ? "bg-gradient-to-br from-amber-400 to-orange-600 shadow-amber-500/40 text-black" :
-                                "bg-gradient-to-r from-purple-600 to-indigo-600"
-                          }`}
+                          currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'PLUS' ? "bg-gradient-to-br from-purple-500 to-pink-600 shadow-purple-500/40" :
+                          currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'VIP' ? "bg-gradient-to-br from-amber-400 to-orange-600 shadow-amber-500/40" :
+                          "bg-gradient-to-r from-purple-600 to-indigo-600"
+                        }`}
                       >
                         {isRecording ? (
                           <StopCircle className="w-5 h-5 text-white" />

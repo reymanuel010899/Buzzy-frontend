@@ -1,162 +1,168 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { motion } from "framer-motion"
-import { Wallet, Plus, ArrowDown, ArrowUp, Clock } from 'lucide-react';
+import { useState, useEffect, useCallback } from "react"
+import { motion, AnimatePresence } from "framer-motion"
+import { Wallet, Plus, ArrowDown, ArrowUp, Clock } from 'lucide-react'
 import BottomNavbar from "../Layout/ButtonNavar"
-import WalletModal from "./WalletModal";
-import WithdrawSuccessModal from "./WithdrawSuccessModal";
-import { useDispatch, useSelector } from 'react-redux';
-import { RootState } from "../../store";
-import { getBankAccounts } from "../../redux/actions/bankActions";
-import BankAccountModal from "../profle/BankAccountModal";
-import { IUser } from "../../interfaces/auth";
-import WithdrawCancel from "./withdrawBad";
-interface Transaction {
-  id: string
-  description: string
-  amount: number
-  type: "income" | "expense"
-  date: string
-}
+import WalletModal from "./WalletModal"
+import WithdrawSuccessModal from "./WithdrawSuccessModal"
+import { useDispatch, useSelector } from 'react-redux'
+import { RootState } from "../../store"
+import { getBankAccounts } from "../../redux/actions/bankActions"
+import BankAccountModal from "../profle/BankAccountModal"
+import { IUser } from "../../interfaces/auth"
+import WithdrawCancel from "./withdrawBad"
+import WithdrawPinModal from "./WithdrawPinModal"
+import ChatPrivacyModal from "../profle/ChatPrivacyModal"
+import { getChatPrivacyStatus } from "../../redux/actions/chatPrivacy"
+import { getTransactions, TxFilter } from "../../redux/actions/transactionActions"
+import { WalletTransaction } from "../../redux/reducers/transactionReducer"
+import { useTranslation } from 'react-i18next'
 
 type WalletComponentProps = {
-  user?: IUser | null;
-  balances?: string | number;
-  getWallet: () => void;
-  pass_code?: string;
-  wallet_type?: string;
-  createDepositSession: (amount: number) => any;
-  withdrawFunds: (amount: number, bankAccountId?: string | number) => any;
+  user?: IUser | null
+  balances?: string | number
+  getWallet: () => void
+  pass_code?: string
+  wallet_type?: string
+  createDepositSession: (amount: number) => Promise<{ url?: string }>
+  withdrawFunds: (amount: number, bankAccountId?: string | number) => Promise<{ active?: boolean; balance?: number; message?: string }>
 }
 
-const WalletComponent = ({ balances, getWallet, pass_code, wallet_type, user, createDepositSession, withdrawFunds }: WalletComponentProps) => {
-  console.log(user)
-  const dispatch = useDispatch();
-  const [balance, setBalance] = useState(parseInt(balances?.toString() || "0"))
+function formatDate(iso: string): string {
+  const d = new Date(iso)
+  return d.toLocaleDateString('es-ES', { year: 'numeric', month: 'short', day: 'numeric' })
+}
+
+const TRANSACTIONS_PER_PAGE = 5
+const PAGINATION_WINDOW = 5
+
+const WalletComponent = ({
+  balances,
+  getWallet,
+  pass_code,
+  wallet_type,
+  createDepositSession,
+  withdrawFunds,
+}: WalletComponentProps) => {
+  const dispatch = useDispatch()
+  const { t } = useTranslation('wallet')
+
+  const [balance, setBalance] = useState(parseFloat(balances?.toString() || "0"))
   const [isWalletModalOpen, setIsWalletModalOpen] = useState(false)
-  const [showWithdrawSuccessModal, setShowWithdrawSuccessModal] = useState(false);
-  const [cancelModal, setCancelModal] = useState(false);
+  const [showWithdrawSuccessModal, setShowWithdrawSuccessModal] = useState(false)
+  const [cancelModal, setCancelModal] = useState(false)
   const [mesageError, setMessageError] = useState('')
   const [isBankAccountModalOpen, setIsBankAccountModalOpen] = useState(false)
   const [defaultTab, setDefaultTab] = useState<'deposit' | 'withdraw'>('deposit')
-  const [activeFilter, setActiveFilter] = useState<"all" | "income" | "expense">("all")
-  const [scrollPosition, setScrollPosition] = useState(0)
+  const [isPinModalOpen, setIsPinModalOpen] = useState(false)
+  const [isPrivacyModalOpen, setIsPrivacyModalOpen] = useState(false)
+  const [activeFilter, setActiveFilter] = useState<TxFilter>("all")
 
-  const { accounts: bankAccounts } = useSelector((state: RootState) => state.bankReducer);
-  // let count = useRef(0)
-  console.log(scrollPosition)
-  // Sample transactions data
-  const [transactions] = useState<Transaction[]>([
-    {
-      id: "tx1",
-      description: "Compra en Store",
-      amount: 50,
-      type: "income",
-      date: "2025-04-10",
+  const { accounts: bankAccounts } = useSelector((state: RootState) => state.bankReducer)
+  const { transactions, loading: txLoading, count, page: currentPage } = useSelector(
+    (state: RootState) => state.transactionReducer
+  )
+
+  const fetchTransactions = useCallback(
+    (filter: TxFilter, pg = 1, append = false) => {
+      dispatch(
+        getTransactions(filter, pg, append, TRANSACTIONS_PER_PAGE) as unknown as ReturnType<
+          typeof dispatch
+        >
+      )
     },
-    {
-      id: "tx2",
-      description: "Pago recibido",
-      amount: 100,
-      type: "income",
-      date: "2025-04-09",
-    },
-    {
-      id: "tx3",
-      description: "Suscripción mensual",
-      amount: -20,
-      type: "expense",
-      date: "2025-04-08",
-    },
-    {
-      id: "tx4",
-      description: "Venta de producto",
-      amount: 75,
-      type: "income",
-      date: "2025-04-07",
-    },
-  ])
+    [dispatch]
+  )
+
   useEffect(() => {
-    // if(count.current >= 1) return;
-    // count.current += 1
     getWallet()
-    dispatch(getBankAccounts() as any)
-    setBalance(balances ? parseInt(balances.toString()) : 0)
-  }, [balances, dispatch])
-  // Handle scroll for parallax effects
-  useEffect(() => {
-    const handleScroll = () => {
-      setScrollPosition(window.scrollY)
-    }
+    dispatch(getBankAccounts() as unknown as ReturnType<typeof dispatch>)
+    fetchTransactions("all")
+  }, [dispatch]) // eslint-disable-line react-hooks/exhaustive-deps
 
-    window.addEventListener("scroll", handleScroll)
-    return () => window.removeEventListener("scroll", handleScroll)
-  }, [])
+  useEffect(() => {
+    setBalance(parseFloat(balances?.toString() || "0"))
+  }, [balances])
+
+  const handleFilterChange = (f: TxFilter) => {
+    if (f === activeFilter) return
+    setActiveFilter(f)
+    fetchTransactions(f, 1, false)
+  }
+
+  const handlePageChange = (targetPage: number) => {
+    if (targetPage === currentPage || targetPage < 1) return
+    const totalPages = Math.max(1, Math.ceil(count / TRANSACTIONS_PER_PAGE))
+    if (targetPage > totalPages) return
+    fetchTransactions(activeFilter, targetPage, false)
+  }
 
   const handleAddFunds = (amount: number) => {
-    createDepositSession(amount)
-      .catch(() => {
-        alert("Error al crear la sesión de depósito");
-      });
+    createDepositSession(amount).catch(() => {
+      alert(t('errors.depositSession'))
+    })
   }
 
   const handleWithdraw = async (amount: number, bankAccountId?: string | number) => {
     try {
-      await withdrawFunds(amount, bankAccountId).then((res)=>{
-        if ( !res?.active) {
-          setMessageError(res?.message)
-          setIsWalletModalOpen(false);
-          setCancelModal(true)
-          return
-        
-        };
-        new Promise(r => setTimeout(r, 3000));
-        setIsWalletModalOpen(false);
-        setShowWithdrawSuccessModal(true);
-        getWallet();
-      });
-      // Artificial delay so the spinner spins for exactly 3 seconds after success
-      
-    } catch (err: any) {
-      
-      // alert(err.error || "Error al solicitar retiro");
-      // throw err;
+      const res = await withdrawFunds(amount, bankAccountId)
+      if (!res?.active) {
+        setMessageError(res?.message || t('errors.withdrawProcessing'))
+        setIsWalletModalOpen(false)
+        setCancelModal(true)
+        return
+      }
+      setIsWalletModalOpen(false)
+      setShowWithdrawSuccessModal(true)
+      getWallet()
+      fetchTransactions(activeFilter, 1, false)
+    } catch {
+      // error handled by redux
     }
   }
 
-  const filteredTransactions = transactions.filter((tx) => {
-    if (activeFilter === "all") return true
-    return tx.type === activeFilter
-  })
+  const txIcon = (tx: WalletTransaction) =>
+    tx.direction === 'income'
+      ? <ArrowUp size={18} />
+      : <ArrowDown size={18} />
+
+  const filterLabels: Record<TxFilter, string> = {
+    all: t('history.filter.all'),
+    income: t('history.filter.income'),
+    expense: t('history.filter.expense'),
+  }
+
+  const totalPages = Math.max(1, Math.ceil(count / TRANSACTIONS_PER_PAGE))
+  const paginationStart = Math.min(
+    Math.max(1, currentPage - Math.floor(PAGINATION_WINDOW / 2)),
+    Math.max(1, totalPages - PAGINATION_WINDOW + 1)
+  )
+  const paginationEnd = Math.min(totalPages, paginationStart + PAGINATION_WINDOW - 1)
+  const visiblePageNumbers = []
+  for (let i = paginationStart; i <= paginationEnd; i += 1) {
+    visiblePageNumbers.push(i)
+  }
 
   return (
     <div className="min-h-screen text-white bg-black">
-      {/* Dynamic background with animated gradient */}
       <div className="fixed inset-0 z-0">
-        <div className="absolute inset-0 bg-black opacity-80"></div>
-        <div className="absolute inset-0 bg-black opacity-[0.03] mix-blend-overlay"></div>
-
-        {/* Animated orbs in background */}
-        {/* <div className="absolute top-1/4 left-1/4 h-40 w-40 rounded-full bg-[#7000ff]/20 blur-3xl animate-float"></div> */}
-        {/* <div className="absolute top-2/3 left-1/2 h-32 w-32 rounded-full bg-[#a200ff]/20 blur-3xl animate-float-slow"></div> */}
-        {/* <div className="absolute bottom-1/3 right-1/3 h-60 w-60 rounded-full bg-[#00f0ff]/20 blur-3xl animate-float-delayed"></div> */}
+        <div className="absolute inset-0 bg-black opacity-80" />
       </div>
 
-      {/* Main content */}
-      <div className="relative z-10 flex flex-col items-center p-4 space-y-8 max-w-md mx-auto pt-10 pb-24">
-        {/* Wallet Card */}
+      <div className="relative z-10 flex flex-col items-center p-4 space-y-5 max-w-md mx-auto pt-6 pb-24">
+
+        {/* ── Wallet Card ── */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
           className="w-full relative"
         >
-          <div className="absolute -inset-1 bg-black rounded-3xl opacity-50 blur-md"></div>
-          <div className="relative bg-black p-8 rounded-3xl border border-[#2a2f5e] overflow-hidden">
-            {/* Decorative elements */}
-            <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-[#7000ff]/20 to-[#00f0ff]/20 rounded-full blur-xl -translate-y-1/2 translate-x-1/2"></div>
-            <div className="absolute bottom-0 left-0 w-24 h-24 bg-gradient-to-tr from-[#7000ff]/20 to-[#00f0ff]/20 rounded-full blur-xl translate-y-1/2 -translate-x-1/2"></div>
+          <div className="absolute -inset-1 bg-black rounded-3xl opacity-50 blur-md" />
+          <div className="relative bg-black p-5 rounded-3xl border border-[#2a2f5e] overflow-hidden">
+            <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-[#7000ff]/20 to-[#00f0ff]/20 rounded-full blur-xl -translate-y-1/2 translate-x-1/2" />
+            <div className="absolute bottom-0 left-0 w-16 h-16 bg-gradient-to-tr from-[#7000ff]/20 to-[#00f0ff]/20 rounded-full blur-xl translate-y-1/2 -translate-x-1/2" />
             <span className="wallet-badge">{wallet_type?.toUpperCase()}</span>
 
             <div className="flex flex-col items-center relative z-10">
@@ -164,72 +170,47 @@ const WalletComponent = ({ balances, getWallet, pass_code, wallet_type, user, cr
                 initial={{ scale: 0.8, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 transition={{ delay: 0.2, type: "spring" }}
-                className="relative mb-4"
+                className="relative mb-3"
               >
-                <div className="absolute -inset-1 rounded-full bg-[#ffcc00] opacity-30 blur-md"></div>
-                <div className="relative flex h-16 w-16 items-center justify-center rounded-full bg-[#0c1033] border-2 border-[#ffcc00]">
-                  <Wallet size={32} className="text-[#ffcc00]" />
+                <div className="absolute -inset-1 rounded-full bg-[#ffcc00] opacity-30 blur-md" />
+                <div className="relative flex h-11 w-11 items-center justify-center rounded-full bg-[#0c1033] border-2 border-[#ffcc00]">
+                  <Wallet size={20} className="text-[#ffcc00]" />
                 </div>
               </motion.div>
 
-              <motion.h2
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 0.3 }}
-                className="text-2xl font-bold text-white mb-2"
-              >
-                Mi Wallet
-              </motion.h2>
-              <p>{pass_code?.toUpperCase()}</p>
-
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.4 }}
-                className="relative"
-              >
-                <div className="absolute -inset-4 rounded-full bg-gradient-to-r from-[#7000ff]/30 to-[#00f0ff]/30 opacity-0 group-hover:opacity-100 blur-md transition-opacity duration-300"></div>
-                <p className="text-5xl font-extrabold bg-clip-text  bg-gradient-to-r from-white to-[#00f0ff] my-4">
-                  ${balance.toFixed(2)}
+              <h2 className="text-lg font-bold text-white mb-1">{t('title')}</h2>
+              {pass_code && (
+                <p className="text-xs text-gray-400">
+                  {t('passcode', { code: pass_code.toUpperCase() })}
                 </p>
-              </motion.div>
+              )}
 
-              <div className="flex flex-col gap-3 mt-4 w-full">
+              <p className="text-4xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-white to-[#00f0ff] my-3">
+                ${balance.toFixed(2)}
+              </p>
+
+              <div className="flex flex-col gap-2 mt-2 w-full">
                 <motion.button
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.5 }}
-                  whileHover={{ scale: 1.05, translateY: -2 }}
+                  whileHover={{ scale: 1.03, translateY: -1 }}
                   whileTap={{ scale: 0.95 }}
-                  onClick={() => { setDefaultTab('deposit'); setIsWalletModalOpen(true); }}
-                  className="w-full relative group py-4 px-6 rounded-full bg-[#10b981] shadow-[0_0_25px_rgba(16,185,129,0.45)] hover:shadow-[0_0_35px_rgba(16,185,129,0.6)] transition-all duration-300 border border-white/20 overflow-hidden"
+                  onClick={() => { setDefaultTab('deposit'); setIsWalletModalOpen(true) }}
+                  className="w-full relative group py-3 px-5 rounded-full bg-[#10b981] shadow-[0_0_20px_rgba(16,185,129,0.4)] hover:shadow-[0_0_28px_rgba(16,185,129,0.55)] transition-all duration-300 border border-white/20 overflow-hidden"
                 >
-                  <div className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity" />
-                  <div className="relative flex items-center justify-center gap-3">
-                    <Plus size={20} className="text-white" strokeWidth={3} />
-                    <span className="text-white font-black italic tracking-widest uppercase text-sm">
-                      Agregar Fondos
-                    </span>
+                  <div className="relative flex items-center justify-center gap-2">
+                    <Plus size={16} className="text-white" strokeWidth={3} />
+                    <span className="text-white font-black italic tracking-widest uppercase text-xs">{t('addFunds')}</span>
                   </div>
-                  {/* Glowing line overlay */}
-                  <div className="absolute top-0 -inset-full h-full w-1/2 z-5 block transform -skew-x-12 bg-gradient-to-r from-transparent to-white/20 opacity-40 group-hover:animate-shine" />
                 </motion.button>
 
                 <motion.button
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.6 }}
-                  whileHover={{ scale: 1.05, translateY: -2 }}
+                  whileHover={{ scale: 1.03, translateY: -1 }}
                   whileTap={{ scale: 0.95 }}
-                  onClick={() => { setDefaultTab('withdraw'); setIsWalletModalOpen(true); }}
-                  className="w-full relative group py-4 px-6 rounded-full bg-[#ef4444] shadow-[0_0_20px_rgba(239,68,68,0.35)] hover:shadow-[0_0_30px_rgba(239,68,68,0.5)] transition-all duration-300 border border-white/10 overflow-hidden opacity-90"
+                  onClick={() => { setDefaultTab('withdraw'); setIsPinModalOpen(true) }}
+                  className="w-full relative group py-3 px-5 rounded-full bg-[#ef4444] shadow-[0_0_16px_rgba(239,68,68,0.3)] hover:shadow-[0_0_24px_rgba(239,68,68,0.45)] transition-all duration-300 border border-white/10 overflow-hidden"
                 >
-                  <div className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-                  <div className="relative flex items-center justify-center gap-3">
-                    <ArrowDown size={20} className="text-white" strokeWidth={3} />
-                    <span className="text-white font-black italic tracking-widest uppercase text-sm">
-                      Retirar
-                    </span>
+                  <div className="relative flex items-center justify-center gap-2">
+                    <ArrowDown size={16} className="text-white" strokeWidth={3} />
+                    <span className="text-white font-black italic tracking-widest uppercase text-xs">{t('withdrawAction')}</span>
                   </div>
                 </motion.button>
               </div>
@@ -237,104 +218,185 @@ const WalletComponent = ({ balances, getWallet, pass_code, wallet_type, user, cr
           </div>
         </motion.div>
 
-        {/* Transaction History */}
+        {/* ── Transaction History ── */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.7, duration: 0.5 }}
           className="w-full"
         >
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-[#a2b0ff]">
-              Historial de Transacciones
-            </h3>
+          <div className="mb-4 flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-[#a2b0ff]">
+                {t('history.title')}
+              </h3>
 
-            {/* Filter buttons */}
-            <div className="flex gap-2">
-              <button
-                onClick={() => setActiveFilter("all")}
-                className={`px-2 py-1 text-xs rounded-full transition-colors ${activeFilter === "all"
-                  ? "bg-gradient-to-r from-[#7000ff] to-[#00f0ff] text-white"
-                  : "bg-[#0c1033]/80 text-[#a2b0ff] hover:text-white"
-                  }`}
-              >
-                Todos
-              </button>
-              <button
-                onClick={() => setActiveFilter("income")}
-                className={`px-2 py-1 text-xs rounded-full transition-colors ${activeFilter === "income"
-                  ? "bg-gradient-to-r from-green-500 to-green-600 text-white"
-                  : "bg-[#0c1033]/80 text-[#a2b0ff] hover:text-white"
-                  }`}
-              >
-                Ingresos
-              </button>
-              <button
-                onClick={() => setActiveFilter("expense")}
-                className={`px-2 py-1 text-xs rounded-full transition-colors ${activeFilter === "expense"
-                  ? "bg-gradient-to-r from-red-500 to-red-600 text-white"
-                  : "bg-[#0c1033]/80 text-[#a2b0ff] hover:text-white"
-                  }`}
-              >
-                Gastos
-              </button>
+              <div className="flex gap-2">
+                {(["all", "income", "expense"] as TxFilter[]).map((f) => {
+                  const activeClass: Record<TxFilter, string> = {
+                    all:     "bg-gradient-to-r from-[#7000ff] to-[#00f0ff] text-white",
+                    income:  "bg-gradient-to-r from-green-500 to-green-600 text-white",
+                    expense: "bg-gradient-to-r from-red-500 to-red-600 text-white",
+                  }
+                  return (
+                    <button
+                      key={f}
+                      onClick={() => handleFilterChange(f)}
+                      className={`px-2 py-1 text-xs rounded-full transition-colors ${
+                        activeFilter === f
+                          ? activeClass[f]
+                          : "bg-[#0c1033]/80 text-[#a2b0ff] hover:text-white"
+                      }`}
+                    >
+                      {filterLabels[f]}
+                    </button>
+                  )
+                })}
+              </div>
             </div>
+
+            <p className="text-xs text-[#a2b0ff]">
+              {t('history.subtitle', { limit: TRANSACTIONS_PER_PAGE })}
+            </p>
           </div>
 
-          {filteredTransactions.length > 0 ? (
+          {/* Loading skeleton */}
+          {txLoading && transactions.length === 0 && (
+            <div className="space-y-3">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="bg-[#0c1033]/60 rounded-xl h-16 animate-pulse" />
+              ))}
+            </div>
+          )}
+
+          {/* Empty state */}
+          {!txLoading && transactions.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-10 text-center">
+              <div className="relative mb-4">
+                <div className="absolute -inset-4 rounded-full bg-gradient-to-r from-[#7000ff] to-[#00f0ff] opacity-20 blur-md" />
+                <div className="relative flex h-16 w-16 items-center justify-center rounded-full bg-[#0c1033]/80">
+                  <Clock className="h-8 w-8 text-[#00f0ff]" />
+                </div>
+              </div>
+              <h3 className="text-xl font-bold text-white mb-2">{t('history.empty')}</h3>
+              <p className="text-[#a2b0ff] max-w-xs text-sm">
+                {t('history.emptyHint')}
+              </p>
+            </div>
+          )}
+
+          {/* Transaction list */}
+          <AnimatePresence mode="popLayout">
             <ul className="space-y-3">
-              {filteredTransactions.map((tx, index) => (
+              {transactions.map((tx, index) => (
                 <motion.li
                   key={tx.id}
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.1 * index, duration: 0.3 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ delay: 0.05 * Math.min(index, 6), duration: 0.25 }}
                   className="relative group"
                 >
-                  <div
-                    className={`absolute -inset-0.5 rounded-xl opacity-0 group-hover:opacity-50 blur-sm transition-opacity duration-300 ${tx.type === "income"
+                  <div className={`absolute -inset-0.5 rounded-xl opacity-0 group-hover:opacity-40 blur-sm transition-opacity duration-300 ${
+                    tx.direction === 'income'
                       ? "bg-gradient-to-r from-green-500 to-[#00f0ff]"
                       : "bg-gradient-to-r from-red-500 to-[#ff00aa]"
-                      }`}
-                  ></div>
+                  }`} />
                   <div className="relative flex justify-between items-center bg-black p-4 rounded-xl border border-[#2a2f5e] group-hover:border-transparent transition-colors">
                     <div className="flex items-center gap-3">
-                      <div
-                        className={`flex h-10 w-10 items-center justify-center rounded-full ${tx.type === "income" ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
-                          }`}
-                      >
-                        {tx.type === "income" ? <ArrowUp size={18} /> : <ArrowDown size={18} />}
+                      <div className={`flex h-10 w-10 items-center justify-center rounded-full ${
+                        tx.direction === 'income' ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
+                      }`}>
+                        {txIcon(tx)}
                       </div>
                       <div>
-                        <span className="font-medium text-white">{tx.description}</span>
-                        <p className="text-xs text-[#a2b0ff]">{tx.date}</p>
+                        <span className="font-medium text-white text-sm">{tx.display_description}</span>
+                        <p className="text-xs text-[#a2b0ff]">{formatDate(tx.created_at)}</p>
+                        {tx.status === 'pending' && (
+                          <span className="text-[10px] text-yellow-400 bg-yellow-400/10 px-1.5 py-0.5 rounded-full">
+                            {t('history.status.pending')}
+                          </span>
+                        )}
+                        {tx.status === 'failed' && (
+                          <span className="text-[10px] text-red-400 bg-red-400/10 px-1.5 py-0.5 rounded-full">
+                            {t('history.status.failed')}
+                          </span>
+                        )}
                       </div>
                     </div>
-                    <span className={`font-bold ${tx.type === "income" ? "text-green-400" : "text-red-400"}`}>
-                      {tx.type === "income" ? `+$${tx.amount.toFixed(2)}` : `-$${Math.abs(tx.amount).toFixed(2)}`}
+                    <span className={`font-bold text-sm ${tx.direction === 'income' ? "text-green-400" : "text-red-400"}`}>
+                      {tx.direction === 'income' ? '+' : '-'}${Math.abs(parseFloat(tx.amount)).toFixed(2)}
                     </span>
                   </div>
                 </motion.li>
               ))}
             </ul>
-          ) : (
-            <div className="flex flex-col items-center justify-center py-10 text-center">
-              <div className="relative mb-4">
-                <div className="absolute -inset-4 rounded-full bg-gradient-to-r from-[#7000ff] to-[#00f0ff] opacity-20 blur-md"></div>
-                <div className="relative flex h-16 w-16 items-center justify-center rounded-full bg-[#0c1033]/80 backdrop-blur-md">
-                  <Clock className="h-8 w-8 text-[#00f0ff]" />
+          </AnimatePresence>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="mt-4 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  onClick={() => handlePageChange(currentPage - 1)}
+                  disabled={currentPage <= 1}
+                  className="flex-1 rounded-full border border-[#2a2f5e] px-4 py-2 text-xs uppercase tracking-[0.3em] text-[#a2b0ff] transition-colors disabled:cursor-not-allowed disabled:text-[#2c3160] disabled:border-[#1f2143] hover:text-white"
+                >
+                  {t('history.pagination.prev')}
+                </button>
+                <div className="flex flex-1 items-center justify-center gap-2 overflow-hidden">
+                  {visiblePageNumbers.map((pageNumber) => (
+                    <button
+                      key={pageNumber}
+                      onClick={() => handlePageChange(pageNumber)}
+                      className={`min-w-[32px] rounded-full border px-3 py-1 text-[11px] font-bold uppercase tracking-[0.2em] transition-colors ${
+                        pageNumber === currentPage
+                          ? 'border-white text-white'
+                          : 'border-transparent text-[#a2b0ff] hover:border-[#7000ff] hover:text-white'
+                      }`}
+                    >
+                      {pageNumber}
+                    </button>
+                  ))}
                 </div>
+                <button
+                  onClick={() => handlePageChange(currentPage + 1)}
+                  disabled={currentPage >= totalPages}
+                  className="flex-1 rounded-full border border-[#2a2f5e] px-4 py-2 text-xs uppercase tracking-[0.3em] text-[#a2b0ff] transition-colors disabled:cursor-not-allowed disabled:text-[#2c3160] disabled:border-[#1f2143] hover:text-white"
+                >
+                  {t('history.pagination.next')}
+                </button>
               </div>
-              <h3 className="text-xl font-bold text-white mb-2">No hay transacciones</h3>
-              <p className="text-[#a2b0ff] max-w-xs">
-                Las transacciones aparecerán aquí cuando realices movimientos en tu wallet
+              <p className="text-[10px] text-center text-[#a2b0ff]">
+                {t('history.pagination.pageInfo', { current: currentPage, total: totalPages })}
               </p>
             </div>
           )}
         </motion.div>
       </div>
 
-      {/* Premium Wallet Modal */}
+      {/* Modals */}
+      <WithdrawPinModal
+        isOpen={isPinModalOpen}
+        onClose={() => setIsPinModalOpen(false)}
+        onSuccess={() => setIsWalletModalOpen(true)}
+        onConfigurePin={async () => {
+          setIsPinModalOpen(false)
+          setIsPrivacyModalOpen(true)
+        }}
+      />
+
+      <ChatPrivacyModal
+        isOpen={isPrivacyModalOpen}
+        onClose={async () => {
+          setIsPrivacyModalOpen(false)
+          try {
+            const data = await getChatPrivacyStatus()
+            if (data.has_pin) setIsPinModalOpen(true)
+          } catch { /* ignore */ }
+        }}
+      />
+
       <WalletModal
         isOpen={isWalletModalOpen}
         onClose={() => setIsWalletModalOpen(false)}
@@ -344,8 +406,8 @@ const WalletComponent = ({ balances, getWallet, pass_code, wallet_type, user, cr
         defaultTab={defaultTab}
         bankAccounts={bankAccounts || []}
         onOpenBankAccounts={() => {
-          setIsWalletModalOpen(false);
-          setIsBankAccountModalOpen(true);
+          setIsWalletModalOpen(false)
+          setIsBankAccountModalOpen(true)
         }}
       />
 
@@ -358,14 +420,13 @@ const WalletComponent = ({ balances, getWallet, pass_code, wallet_type, user, cr
         isOpen={showWithdrawSuccessModal}
         onClose={() => setShowWithdrawSuccessModal(false)}
       />
-      
 
       <WithdrawCancel
-          isOpen={cancelModal}
-          message={mesageError}
-          onClose={() => setCancelModal(false)}
+        isOpen={cancelModal}
+        message={mesageError}
+        onClose={() => setCancelModal(false)}
       />
-      {/* Bottom navbar */}
+
       <BottomNavbar />
     </div>
   )

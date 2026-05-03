@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { motion } from "framer-motion";
 import { Target, Search, X, MapPin, Loader2 } from "lucide-react";
 import { useGeolocation } from "../../hooks/useGeolocation";
 import { Autocomplete, useLoadScript } from "@react-google-maps/api";
@@ -8,9 +9,16 @@ const libraries: ("places")[] = ["places"];
 interface StepAudienceProps {
     data: any;
     setData: (data: any) => void;
+    errors?: Record<string, boolean>;
+    shakeTrigger?: number;
 }
 
-const StepAudience: React.FC<StepAudienceProps> = ({ data, setData }) => {
+const shake = {
+    x: [0, -8, 8, -8, 8, -4, 4, 0],
+    transition: { duration: 0.45 }
+}
+
+const StepAudience: React.FC<StepAudienceProps> = ({ data, setData, errors = {}, shakeTrigger = 0 }) => {
     const inputRef = React.useRef<HTMLInputElement>(null);
     const [intInput, setIntInput] = useState("");
     const { getCurrentLocation, loading: geoLoading, error: geoError } = useGeolocation();
@@ -163,12 +171,25 @@ const StepAudience: React.FC<StepAudienceProps> = ({ data, setData }) => {
                         </div>
                     </div>
 
-                    <div className="bg-cyan-500/10 border border-cyan-500/20 p-5 rounded-2xl flex items-start gap-4 shadow-xl shadow-cyan-500/5">
-                        <Target className="w-6 h-6 text-cyan-400" />
-                        <div>
-                            <h5 className="text-[11px] font-black text-white uppercase tracking-wider">Alcance Estimado</h5>
-                            <p className="text-xl font-black text-cyan-400 tracking-tight">120k - 350k</p>
-                            <p className="text-[9px] text-gray-500 font-bold uppercase tracking-widest mt-1">Personas por día.</p>
+                    <div className="bg-cyan-500/10 border border-cyan-500/20 p-5 rounded-2xl space-y-3 shadow-xl shadow-cyan-500/5">
+                        <div className="flex items-center gap-3">
+                            <Target className="w-5 h-5 text-cyan-400 flex-shrink-0" />
+                            <div>
+                                <h5 className="text-[11px] font-black text-white uppercase tracking-wider">Frecuencia máxima</h5>
+                                <p className="text-[9px] text-gray-500 font-bold uppercase tracking-widest mt-0.5">Veces que cada persona ve tu anuncio por día</p>
+                            </div>
+                            <span className="ml-auto text-lg font-black text-cyan-400">{data.audience.max_frequency ?? 3}×</span>
+                        </div>
+                        <input
+                            type="range"
+                            min="1" max="10"
+                            value={data.audience.max_frequency ?? 3}
+                            onChange={(e) => setData({ ...data, audience: { ...data.audience, max_frequency: parseInt(e.target.value) } })}
+                            className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+                        />
+                        <div className="flex justify-between text-[9px] text-gray-600 font-bold uppercase">
+                            <span>1× (menos intrusivo)</span>
+                            <span>10× (máx exposición)</span>
                         </div>
                     </div>
                 </div>
@@ -176,7 +197,11 @@ const StepAudience: React.FC<StepAudienceProps> = ({ data, setData }) => {
                 {/* Right Col: Interests & Locations */}
                 <div className="space-y-6">
                     {/* Locations */}
-                    <div className="space-y-2">
+                    <motion.div
+                        key={`locations-${shakeTrigger}`}
+                        animate={errors.locations ? shake : {}}
+                        className="space-y-2"
+                    >
                         <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Ubicaciones</label>
                         <div className="relative">
                             {isLoaded ? (
@@ -193,7 +218,7 @@ const StepAudience: React.FC<StepAudienceProps> = ({ data, setData }) => {
                                             }
                                         }}
                                         placeholder="Añadir ciudad o país..."
-                                        className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 py-3 text-white text-sm"
+                                        className={`w-full bg-white/5 border rounded-xl pl-10 pr-4 py-3 text-white text-sm ${errors.locations ? 'border-red-500' : 'border-white/10'}`}
                                     />
                                 </Autocomplete>
                             ) : (
@@ -217,23 +242,17 @@ const StepAudience: React.FC<StepAudienceProps> = ({ data, setData }) => {
                         </button>
                         {geoError && <p className="text-red-400 text-[10px] mt-1">{geoError}</p>}
 
-                        {(data.audience.latitude && data.audience.longitude) && (
-                            <div className="mt-4 p-4 bg-white/5 border border-white/10 rounded-xl space-y-3">
-                                <label className="text-[10px] font-black text-cyan-400/80 uppercase tracking-widest flex items-center justify-between">
-                                    <span>Radio de alcance</span>
-                                    <span className="text-white text-xs">{data.audience.radius || 50} km</span>
-                                </label>
+                        {(data.audience.latitude && data.audience.longitude && data.audience.locations.includes("Mi Ubicación Actual")) && (
+                            <div className="mt-2 px-3 py-2 bg-white/5 border border-white/5 rounded-xl flex items-center gap-3">
+                                <span className="text-[9px] font-black text-cyan-400/70 uppercase tracking-widest whitespace-nowrap">Radio</span>
                                 <input
                                     type="range"
                                     min="5" max="200" step="5"
                                     value={data.audience.radius || 50}
                                     onChange={(e) => setData({ ...data, audience: { ...data.audience, radius: parseInt(e.target.value) } })}
-                                    className="w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+                                    className="flex-1 h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-cyan-500"
                                 />
-                                <div className="flex justify-between text-[10px] text-gray-500 font-bold">
-                                    <span>5 km</span>
-                                    <span>200 km</span>
-                                </div>
+                                <span className="text-[9px] font-black text-white whitespace-nowrap">{data.audience.radius || 50} km</span>
                             </div>
                         )}
 
@@ -248,7 +267,7 @@ const StepAudience: React.FC<StepAudienceProps> = ({ data, setData }) => {
                                 </span>
                             ))}
                         </div>
-                    </div>
+                    </motion.div>
 
                     {/* Interests */}
                     <div className="space-y-2">

@@ -1,4 +1,5 @@
 import axios from "axios";
+import i18n from "@/i18n/config";
 
 export const getBaseUrl = (): string => {
   const url = import.meta.env.VITE_DOMAIN_SERVER || "http://127.0.0.1:8000";
@@ -6,6 +7,23 @@ export const getBaseUrl = (): string => {
 };
 
 export const BASE_URL = getBaseUrl();
+
+/**
+ * Converts a media path from the backend into a full URL.
+ * Handles both old format ("profile_pics/avatar.webp") and
+ * new format ("/media/profile_pics/avatar.webp") without doubling /media/.
+ */
+export const getMediaUrl = (path: string | null | undefined): string => {
+  if (!path) return ""
+  if (path.startsWith("http")) return path
+  const base = getBaseUrl().replace(/\/+$/, "") // remove trailing slashes
+  // normalize: remove leading slashes then re-add one
+  const clean = path.replace(/^\/+/, "")
+  if (clean.startsWith("media/")) {
+    return `${base}/${clean}`
+  }
+  return `${base}/media/${clean}`
+}
 
 // 1. Exportación nombrada para apiClient
 export const apiClient = axios.create({
@@ -20,6 +38,7 @@ apiClient.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  config.headers["Accept-Language"] = i18n.language || "en";
   return config;
 });
 
@@ -39,6 +58,7 @@ apiClientStory.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  config.headers["Accept-Language"] = i18n.language || "en";
   return config;
 });
 

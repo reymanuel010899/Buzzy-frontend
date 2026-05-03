@@ -30,16 +30,11 @@ export const registerFCMToken = async () => {
                 // 3. Guardar localmente para referencia
                 localStorage.setItem("device_token", token);
 
-                // 4. Enviar al backend de Django
-                const response = await apiClient.post(`${getBaseUrl()}api/v1/users/update-device-token/`, {
+                // 4. Enviar al backend de Django (axios lanza excepción si falla)
+                await apiClient.post(`${getBaseUrl()}api/v1/users/update-device-token/`, {
                     device_token: token
-                });
-
-                if (response.ok) {
-                    console.log("✅ Token registrado exitosamente en el servidor.");
-                } else {
-                    console.error("❌ Falló el registro del token en el servidor.");
-                }
+                })
+                console.log("✅ Token registrado exitosamente en el servidor.")
             } else {
                 console.log("No se pudo obtener el token. Asegúrate de que el Service Worker esté configurado.");
             }

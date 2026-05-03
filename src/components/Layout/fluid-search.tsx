@@ -7,7 +7,7 @@ import { useDispatch, useSelector } from "react-redux"
 import { RootState, AppDispatch } from "../../store"
 import { globalSearch, getTrending, getRecentSearch, deleteRecentSearch } from "../../redux/actions/Search"
 import "../../footer.css"
-import { getBaseUrl } from "../../redux/client/api-client"
+import { getBaseUrl, getMediaUrl } from "../../redux/client/api-client"
 import { createFollower } from "../../redux/actions/createFollower"
 
 interface FluidSearchProps {
@@ -264,10 +264,23 @@ export default function FluidSearch({ onClose, searchTerm, setSearchTerm }: Flui
 
 function UserResult({ user, onClose }: { user: any, onClose: () => void }) {
   const dispatch = useDispatch<AppDispatch>()
+  const [isFollowing, setIsFollowing] = useState<boolean>(!!user.is_following)
+  const [loading, setLoading] = useState(false)
 
-  const handleFollow = (e: React.MouseEvent) => {
+  const handleFollow = async (e: React.MouseEvent) => {
     e.stopPropagation()
-    dispatch(createFollower({ follower_user_id: user.id }))
+    if (loading) return
+    // Optimistic update inmediato
+    setIsFollowing(prev => !prev)
+    setLoading(true)
+    try {
+      await dispatch(createFollower({ follower_user_id: user.id }))
+    } catch {
+      // Revertir si falla
+      setIsFollowing(prev => !prev)
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -282,7 +295,7 @@ function UserResult({ user, onClose }: { user: any, onClose: () => void }) {
     >
       <div className="relative">
         <img
-          src={user.profile_picture ? `${getBaseUrl()}/media/${user.profile_picture}` : "/profile_pics/avatar.webp"}
+          src={getMediaUrl(user.profile_picture) || "/profile_pics/avatar.webp"}
           alt={user.username}
           className="w-12 h-12 rounded-full object-cover border-2 border-white/5 group-hover:border-purple-500/50 transition-colors"
         />
@@ -294,15 +307,18 @@ function UserResult({ user, onClose }: { user: any, onClose: () => void }) {
         <h4 className="text-white font-medium truncate">{user.first_name || user.username}</h4>
         <p className="text-white/40 text-xs truncate">@{user.username}</p>
       </div>
-      <button
+      <motion.button
         onClick={handleFollow}
-        className={`px-3 py-1.5 rounded-full text-[10px] font-bold transition-all border ${user.is_following
+        whileTap={{ scale: 0.93 }}
+        animate={{ opacity: loading ? 0.6 : 1 }}
+        className={`px-3 py-1.5 rounded-full text-[10px] font-bold transition-all border ${
+          isFollowing
             ? "bg-purple-600/20 text-purple-400 border-purple-500/30 hover:bg-purple-600/30"
             : "bg-white/10 text-white border-white/5 hover:bg-white/20"
-          }`}
+        }`}
       >
-        {user.is_following ? "Siguiendo" : "Seguir"}
-      </button>
+        {isFollowing ? "Siguiendo" : "Seguir"}
+      </motion.button>
     </motion.div>
   )
 }

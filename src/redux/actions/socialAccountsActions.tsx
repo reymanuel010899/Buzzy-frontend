@@ -49,6 +49,24 @@ export const initSocialOAuth = (platform: SocialPlatform) => async (dispatch: an
     }
 }
 
+/** Refresca el followers_count de todas las redes sociales conectadas */
+export const refreshSocialFollowers = () => async (dispatch: any) => {
+    try {
+        await apiClient.post('/api/social/refresh/')
+        // Después de refrescar en el backend, volver a cargar los datos actualizados
+        const response = await apiClient.get('/api/social/accounts/')
+        if (response.status === 200) {
+            dispatch({
+                type: SUCCESS_GET_SOCIAL_ACCOUNTS,
+                payload: response.data,
+            })
+            return response.data
+        }
+    } catch {
+        // Fallo silencioso — no bloquea la carga del perfil
+    }
+}
+
 /** Desconecta una red social del usuario */
 export const disconnectSocialAccount = (platform: SocialPlatform) => async (dispatch: any) => {
     try {

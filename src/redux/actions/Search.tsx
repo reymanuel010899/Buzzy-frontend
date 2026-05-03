@@ -21,7 +21,7 @@ export const globalSearch = (query: string) => async (dispatch: AppDispatch) => 
     dispatch({ type: SEARCH_START });
     try {
         console.log(getBaseUrl(), "*****")
-        const res = await apiClient.get(`${getBaseUrl()}/api/search/global/?q=${query}`);
+        const res = await apiClient.get(`/api/search/global/?q=${encodeURIComponent(query)}`);
         console.log("/////////---------//////////", res)
         dispatch({ type: SEARCH_SUCCESS, payload: res.data });
         // Refetch recent searches to update the list

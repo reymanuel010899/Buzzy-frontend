@@ -6,13 +6,16 @@ import { PersistGate } from "redux-persist/integration/react";
 import store, { persistor } from "./store";
 import './App.css';
 import UploadProgressBar from "./components/Layout/UploadProgressBar";
+import { WebSocketProvider } from "./context/WebSocketContext";
 
 function App() {
   return (
     <Provider store={store}>
       <PersistGate loading={null} persistor={persistor}>
-        <UploadProgressBar />
-        <RouterProvider router={router} />
+        <WebSocketProvider>
+          <UploadProgressBar />
+          <RouterProvider router={router} />
+        </WebSocketProvider>
       </PersistGate>
     </Provider>
   );

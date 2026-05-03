@@ -2,8 +2,6 @@ import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getMessaging } from "firebase/messaging";
 
-// TODO: Reemplaza estos valores con la configuración real de tu proyecto de Firebase
-// Puedes encontrarlos en la consola de Firebase -> Project Settings -> General
 const firebaseConfig = {
     apiKey: "AIzaSyAAjsYq2ElCTwm--VJyK9q5h4oF6VxRFdg", // Copiada de tu captura
     authDomain: "buzzy-app-8086f.firebaseapp.com",

@@ -22,6 +22,8 @@ import AccountSuccess from "../pages/main/successAcount";
 import AccountCancel from "../pages/main/CancelAccount";
 import SupportForm from "../pages/main/Support";
 import AdsPage from "../pages/main/AdsPage";
+import PremiumSuccess from "../pages/main/PremiumSuccess";
+import NotFound from "../pages/NotFound";
 
 export const router = createBrowserRouter(
   createRoutesFromElements(
@@ -150,6 +152,14 @@ export const router = createBrowserRouter(
         }
       />
       <Route
+        path="/premium/success"
+        element={
+          <ProtectedRoute>
+            <PremiumSuccess />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/social/callback/:platform"
         element={
           <ProtectedRoute>
@@ -157,6 +167,17 @@ export const router = createBrowserRouter(
           </ProtectedRoute>
         }
       />
+      {/* Video deep-link: redirect to home (video opens via feed) */}
+      <Route
+        path="/video/:uuid"
+        element={
+          <ProtectedRoute>
+            <NotFound />
+          </ProtectedRoute>
+        }
+      />
+      {/* Catch-all: 404 */}
+      <Route path="*" element={<NotFound />} />
     </>
   )
 );

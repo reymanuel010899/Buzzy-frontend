@@ -1,126 +1,118 @@
 "use client"
 
 import React, { useState } from "react"
-import { Plus } from "lucide-react"
-import {
-  HomeIcon,
-  ShoppingBagIcon,
-  WalletIcon
-} from "@heroicons/react/24/solid";
+import { Plus, Home, Wallet } from "lucide-react"
 import { Link, useLocation } from "react-router-dom"
-import { motion } from "framer-motion"
+import { motion, AnimatePresence } from "framer-motion"
 import { useSelector } from "react-redux"
-import profileIconC from "./ProfileIcon";
-import CreateActionModal from "./CreateActionModal";
+import ProfileIconC from "./ProfileIcon";
+import CreateActionModal from "../CreateVideo/components/create-action-modal";
+import { useChat } from "../../context/ChatContext";
 
 const BottomNavbar: React.FC = () => {
   const location = useLocation()
-  const [hoveredItem, setHoveredItem] = useState<string | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
-
-  // Obtener usuario actual para el link de perfil
-  const currentUser = useSelector((state: any) => state.LoginReducer?.user);
+  const { setShowMessages } = useChat()
+  const currentUser = useSelector((state: { LoginReducer: { user?: { username?: string } } }) => state.LoginReducer?.user);
   const profilePath = `/profile/${currentUser?.username || 'user'}`;
 
-  // Mock subscription status - In a real app, this would come from a global state/hook
-  const subStatus = {
-    is_active: true,
-    plan_name: 'FRIEND',
-    ai_limit: 20,
-    ai_used: 5
-  }
-
-  // Navigation items
-  const navItems = [
-    { icon: HomeIcon, label: "Home", path: "/" },
-    // { icon: WalletIcon, label: "Wallet", path: "/wallet" },
-    { icon: ShoppingBagIcon, label: "Store", path: "/marker" },
-    { icon: Plus, label: "Create", path: null, isSpecial: true },
-    // { icon: MapIcon, label: "Game", path: "/game" },
-    { icon: WalletIcon, label: "Wallet", path: "/wallet" },
-    { icon: profileIconC, label: "Profile", path: profilePath },
-  ]
-
-  // Check if a path is active
   const isActive = (path: string | null) => {
     if (!path) return false
     return location.pathname === path
   }
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-[#2a2f5e] bg-black">
-      <div className="flex h-16 items-center justify-around px-2">
-        {navItems.map((item) => (
-          <React.Fragment key={item.label}>
-            {item.isSpecial ? (
-              // Special center button
-              <motion.div
-                className="relative"
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onHoverStart={() => setHoveredItem(item.label)}
-                onHoverEnd={() => setHoveredItem(null)}
-              >
-                <div className="absolute -inset-3 rounded-full  opacity-70 blur-md"></div>
-                <button
-                  onClick={() => setIsModalOpen(true)}
-                  className="relative flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-r from-[#7000ff] to-[#00f0ff] shadow-[0_0_15px_rgba(112,0,255,0.7)]"
-                >
-                  <item.icon className="h-5 w-5 text-white" />
+    <>
+      <nav className="fixed bottom-0 left-0 right-0 z-50"
+        style={{ background: 'rgba(5,7,24,0.92)', backdropFilter: 'blur(20px)', borderTop: '1px solid rgba(112,0,255,0.15)' }}
+      >
+        <div className="flex h-14 items-center justify-around px-4 max-w-lg mx-auto">
 
-                  {hoveredItem === item.label && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 5 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="absolute -bottom-8 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-[#0c1033] px-3 py-1 text-xs font-medium text-white shadow-lg"
-                    >
-                      {item.label}
-                    </motion.div>
-                  )}
-                </button>
-              </motion.div>
-            ) : (
-              // Regular navigation items
-              <motion.div
-                className="relative"
-                whileHover={{ scale: 1.1 }}
-                whileTap={{ scale: 0.95 }}
-                onHoverStart={() => setHoveredItem(item.label)}
-                onHoverEnd={() => setHoveredItem(null)}
-              >
-                <Link
-                  to={item.path || ""}
-                  className={`flex flex-col items-center justify-center gap-1 p-2 transition-colors ${isActive(item.path) ? "text-[#00f0ff]" : "text-gray-400 hover:text-white"
-                    }`}
-                >
-                  <item.icon className="h-6 w-6" />
-                  <span className="text-xs">{item.label}</span>
-                  {isActive(item.path) && (
-                    <motion.div
-                      layoutId="activeIndicator"
-                      className="absolute -bottom-1 h-1 w-10 rounded-full bg-gradient-to-r from-[#7000ff] to-[#00f0ff]"
-                      transition={{ type: "spring", stiffness: 300, damping: 30 }}
-                    />
-                  )}
-                </Link>
-                {hoveredItem === item.label && !isActive(item.path) && (
-                  <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="absolute -bottom-1 h-1 w-10 rounded-full bg-white/20"
-                  />
-                )}
-              </motion.div>
-            )}
-          </React.Fragment>
-        ))}
-      </div>
+          {/* Home */}
+          <Link to="/" className="relative flex flex-col items-center gap-0.5 group">
+            <motion.div whileTap={{ scale: 0.85 }} className="flex flex-col items-center gap-0.5">
+              <Home className={`h-5 w-5 transition-colors duration-200 ${isActive("/") ? "text-[#00f0ff]" : "text-white/40 group-hover:text-white/70"}`} />
+              <span className={`text-[9px] font-medium transition-colors duration-200 ${isActive("/") ? "text-[#00f0ff]" : "text-white/30"}`}>Home</span>
+            </motion.div>
+            <AnimatePresence>
+              {isActive("/") && (
+                <motion.div
+                  layoutId="activeBar"
+                  className="absolute -bottom-1 w-4 h-0.5 rounded-full"
+                  style={{ background: 'linear-gradient(90deg, #7000ff, #00f0ff)' }}
+                  initial={{ opacity: 0, scaleX: 0 }}
+                  animate={{ opacity: 1, scaleX: 1 }}
+                  exit={{ opacity: 0, scaleX: 0 }}
+                />
+              )}
+            </AnimatePresence>
+          </Link>
+
+          {/* Messages */}
+          <motion.button
+            whileTap={{ scale: 0.85 }}
+            onClick={() => setShowMessages(true)}
+            className="flex flex-col items-center gap-0.5 group"
+          >
+            <svg fill="currentColor" className="h-5 w-5 text-white/40 group-hover:text-white/70 transition-colors duration-200" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+              <path d="M45.73 7A2 2 0 0 0 44 6H4a2 2 0 0 0-1.48 3.35l10.44 11.47a2 2 0 0 0 2.2.52l14.49-5.5c.17-.07.25-.04.28-.03.06.02.14.08.2.2.07.1.08.2.08.27 0 .04-.02.12-.16.23l-11.9 10.1a2 2 0 0 0-.62 2.12l4.56 14.51a2 2 0 0 0 3.64.4L45.73 9a2 2 0 0 0 0-2Z" />
+            </svg>
+            <span className="text-[9px] font-medium text-white/30 group-hover:text-white/50 transition-colors duration-200">Messages</span>
+          </motion.button>
+
+          {/* Create — centro elevado */}
+          <div className="relative -mt-4">
+            <motion.button
+              whileTap={{ scale: 0.9 }}
+              whileHover={{ scale: 1.05 }}
+              onClick={() => { setIsModalOpen(true); window.dispatchEvent(new Event('buzzy:pausefeed')) }}
+              className="relative flex h-12 w-12 items-center justify-center rounded-full"
+              style={{ background: 'linear-gradient(135deg, #7000ff, #00f0ff)', boxShadow: '0 0 20px rgba(112,0,255,0.6), 0 0 40px rgba(0,240,255,0.2)' }}
+            >
+              <Plus className="h-5 w-5 text-white" strokeWidth={2.5} />
+            </motion.button>
+          </div>
+
+          {/* Wallet */}
+          <Link to="/wallet" className="relative flex flex-col items-center gap-0.5 group">
+            <motion.div whileTap={{ scale: 0.85 }} className="flex flex-col items-center gap-0.5">
+              <Wallet className={`h-5 w-5 transition-colors duration-200 ${isActive("/wallet") ? "text-[#00f0ff]" : "text-white/40 group-hover:text-white/70"}`} />
+              <span className={`text-[9px] font-medium transition-colors duration-200 ${isActive("/wallet") ? "text-[#00f0ff]" : "text-white/30"}`}>Wallet</span>
+            </motion.div>
+            <AnimatePresence>
+              {isActive("/wallet") && (
+                <motion.div
+                  layoutId="activeBar"
+                  className="absolute -bottom-1 w-4 h-0.5 rounded-full"
+                  style={{ background: 'linear-gradient(90deg, #7000ff, #00f0ff)' }}
+                  initial={{ opacity: 0, scaleX: 0 }}
+                  animate={{ opacity: 1, scaleX: 1 }}
+                  exit={{ opacity: 0, scaleX: 0 }}
+                />
+              )}
+            </AnimatePresence>
+          </Link>
+
+          {/* Profile */}
+          <Link to={profilePath} className="relative flex flex-col items-center gap-0.5 group">
+            <motion.div whileTap={{ scale: 0.85 }} className="flex flex-col items-center gap-0.5">
+              <div className={`transition-all duration-200 ${isActive(profilePath) ? "ring-1 ring-[#00f0ff] rounded-full" : ""}`}>
+                <ProfileIconC />
+              </div>
+              <span className={`text-[9px] font-medium transition-colors duration-200 ${isActive(profilePath) ? "text-[#00f0ff]" : "text-white/30"}`}>Profile</span>
+            </motion.div>
+          </Link>
+
+        </div>
+        {/* safe area */}
+        <div style={{ height: 'env(safe-area-inset-bottom)' }} />
+      </nav>
+
       <CreateActionModal
         isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        subscriptionStatus={subStatus}
+        onClose={() => { setIsModalOpen(false); window.dispatchEvent(new Event('buzzy:resumefeed')) }}
       />
-    </nav>
+    </>
   )
 }
 

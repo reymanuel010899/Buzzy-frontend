@@ -8,7 +8,7 @@ import { register } from "../../redux/actions/register";
 import { useDispatch } from 'react-redux';
 import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 import { auth } from "../../firebase";
-import { googleLogin } from "../../redux/actions/Login";
+import { googleRegister } from "../../redux/actions/Login";
 
 // ─── All countries with ISO-2 code ───────────────────────────────────────────
 const COUNTRIES = [
@@ -103,7 +103,8 @@ const SignUp: React.FC = () => {
   const { name, username, email, password, repeat_password, country } = formData;
 
   const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
+    const field = e.currentTarget.dataset.field || e.target.name;
+    setFormData(prev => ({ ...prev, [field]: e.target.value }));
   };
 
   const handleCountryChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -137,13 +138,14 @@ const SignUp: React.FC = () => {
         const sendName = formData.country || detectedCountry.name;
 
         // @ts-ignore
-        await googleLogin(token, photoUrl, sendCode, sendName)(dispatch);
+        await googleRegister(token, photoUrl, sendCode, sendName)(dispatch);
         navigate('/');
       }
     } catch (error: any) {
       if (error?.code !== 'auth/popup-closed-by-user' && error?.code !== 'auth/cancelled-popup-request') {
         console.error("Google Sign-Up Error", error);
-        setErrorMsg("Error al iniciar sesión con Google. Intenta de nuevo.");
+        const backendError = error?.response?.data?.message || error?.response?.data?.error;
+        setErrorMsg(backendError || "Error al crear la cuenta con Google. Intenta de nuevo.");
       }
     } finally {
       setLoading(false);
@@ -232,13 +234,13 @@ const SignUp: React.FC = () => {
           <div className="flex-1 h-px bg-white/10" />
         </div>
 
-        <form onSubmit={handleRegister} className="space-y-4">
+        <form onSubmit={handleRegister} className="space-y-4" autoComplete="off">
 
           {/* Nombre */}
           <div className="relative group">
             <User className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-cyan-500 transition-colors w-5 h-5" />
             <input
-              type="text" name="name" placeholder="Nombre completo"
+              type="text" name="signup_name" data-field="name" placeholder="Nombre completo" autoComplete="off"
               value={name} onChange={onChange} required
               className="w-full pl-12 pr-4 py-3.5 bg-[#0b0f19] border border-white/10 rounded-xl focus:outline-none focus:border-cyan-500 focus:ring-4 focus:ring-cyan-500/10 text-white font-medium transition-all"
             />
@@ -248,7 +250,7 @@ const SignUp: React.FC = () => {
           <div className="relative group">
             <User className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-cyan-500 transition-colors w-5 h-5" />
             <input
-              type="text" name="username" placeholder="Usuario (Username)"
+              type="text" name="signup_username" data-field="username" placeholder="Usuario (Username)" autoComplete="off"
               value={username} onChange={onChange} required
               className="w-full pl-12 pr-4 py-3.5 bg-[#0b0f19] border border-white/10 rounded-xl focus:outline-none focus:border-cyan-500 focus:ring-4 focus:ring-cyan-500/10 text-white font-medium transition-all"
             />
@@ -258,7 +260,7 @@ const SignUp: React.FC = () => {
           <div className="relative group">
             <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-cyan-500 transition-colors w-5 h-5" />
             <input
-              type="email" name="email" placeholder="Correo electrónico"
+              type="email" name="signup_email" data-field="email" placeholder="Correo electrónico" autoComplete="off"
               value={email} onChange={onChange} required
               className="w-full pl-12 pr-4 py-3.5 bg-[#0b0f19] border border-white/10 rounded-xl focus:outline-none focus:border-cyan-500 focus:ring-4 focus:ring-cyan-500/10 text-white font-medium transition-all"
             />
@@ -271,6 +273,7 @@ const SignUp: React.FC = () => {
               value={formData.country_code}
               onChange={handleCountryChange}
               required
+              autoComplete="off"
               className="w-full pl-12 pr-4 py-3.5 bg-[#0b0f19] border border-white/10 rounded-xl focus:outline-none focus:border-cyan-500 focus:ring-4 focus:ring-cyan-500/10 text-white font-medium transition-all appearance-none cursor-pointer"
             >
               <option value="" disabled className="text-gray-500">Selecciona tu país *</option>
@@ -292,7 +295,7 @@ const SignUp: React.FC = () => {
             <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-cyan-500 transition-colors w-5 h-5" />
             <input
               type={showPassword ? "text" : "password"}
-              name="password" placeholder="Contraseña"
+              name="signup_password" data-field="password" placeholder="Contraseña" autoComplete="new-password"
               value={password} onChange={onChange} required
               className="w-full pl-12 pr-12 py-3.5 bg-[#0b0f19] border border-white/10 rounded-xl focus:outline-none focus:border-cyan-500 focus:ring-4 focus:ring-cyan-500/10 text-white font-medium transition-all"
             />
@@ -304,16 +307,24 @@ const SignUp: React.FC = () => {
 
           {/* Password Strength Hints */}
           {password.length > 0 && (
-            <div className="flex flex-col gap-1.5 px-2 mt-1 -mb-2">
-              <span className={`text-xs font-semibold flex items-center gap-1.5 transition-colors ${isLengthValid ? 'text-green-400' : 'text-gray-500'}`}>
-                {isLengthValid ? <Check size={14} className="stroke-[3]" /> : <X size={14} className="stroke-[3]" />} Mínimo 8 caracteres
-              </span>
-              <span className={`text-xs font-semibold flex items-center gap-1.5 transition-colors ${isUppercaseValid ? 'text-green-400' : 'text-gray-500'}`}>
-                {isUppercaseValid ? <Check size={14} className="stroke-[3]" /> : <X size={14} className="stroke-[3]" />} Al menos una letra mayúscula
-              </span>
-              <span className={`text-xs font-semibold flex items-center gap-1.5 transition-colors ${isSpecialValid ? 'text-green-400' : 'text-gray-500'}`}>
-                {isSpecialValid ? <Check size={14} className="stroke-[3]" /> : <X size={14} className="stroke-[3]" />} Al menos un carácter especial (!@#$...)
-              </span>
+            <div className="grid grid-cols-3 gap-2 px-1">
+              {[
+                { valid: isLengthValid, label: "8+ chars" },
+                { valid: isUppercaseValid, label: "Mayúscula" },
+                { valid: isSpecialValid, label: "Especial" },
+              ].map(({ valid, label }) => (
+                <div
+                  key={label}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[11px] font-bold transition-all duration-200 ${
+                    valid
+                      ? "bg-green-500/10 border-green-500/30 text-green-400"
+                      : "bg-white/[0.03] border-white/10 text-gray-600"
+                  }`}
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 transition-colors ${valid ? "bg-green-400" : "bg-gray-700"}`} />
+                  {label}
+                </div>
+              ))}
             </div>
           )}
 
@@ -322,7 +333,7 @@ const SignUp: React.FC = () => {
             <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-cyan-500 transition-colors w-5 h-5" />
             <input
               type={showConfirmPassword ? "text" : "password"}
-              name="repeat_password" placeholder="Confirmar contraseña"
+              name="signup_repeat_password" data-field="repeat_password" placeholder="Confirmar contraseña" autoComplete="new-password"
               value={repeat_password} onChange={onChange} required
               className="w-full pl-12 pr-12 py-3.5 bg-[#0b0f19] border border-white/10 rounded-xl focus:outline-none focus:border-cyan-500 focus:ring-4 focus:ring-cyan-500/10 text-white font-medium transition-all"
             />

@@ -1,12 +1,25 @@
 import React, { useState } from "react";
+import { motion } from "framer-motion";
 import { Upload, Image as ImageIcon } from "lucide-react";
 
 interface StepCreativeProps {
     data: any;
     setData: (data: any) => void;
+    errors?: Record<string, boolean>;
+    shakeTrigger?: number;
 }
 
-const StepCreative: React.FC<StepCreativeProps> = ({ data, setData }) => {
+const shake = {
+    x: [0, -8, 8, -8, 8, -4, 4, 0],
+    transition: { duration: 0.45 }
+}
+
+const fieldClass = (hasError: boolean) =>
+    `w-full bg-white/5 border rounded-xl px-4 py-3 text-white text-sm focus:outline-none transition-all ${
+        hasError ? 'border-red-500' : 'border-white/10 focus:border-cyan-500'
+    }`
+
+const StepCreative: React.FC<StepCreativeProps> = ({ data, setData, errors = {}, shakeTrigger = 0 }) => {
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -18,120 +31,121 @@ const StepCreative: React.FC<StepCreativeProps> = ({ data, setData }) => {
     };
 
     return (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
-            {/* Editor */}
-            <div className="space-y-6">
-                <div className="space-y-4">
-                    <h3 className="text-lg font-black text-white uppercase tracking-wider">Diseño del Anuncio</h3>
-                    <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-1">Personaliza tu creatividad</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 h-full">
+
+            {/* ── Left: Editor ── */}
+            <div className="flex flex-col gap-2 min-h-0">
+                <div>
+                    <h3 className="text-sm font-black text-white uppercase tracking-wider">Diseño del Anuncio</h3>
+                    <p className="text-[9px] text-gray-500 font-bold uppercase tracking-widest mt-0.5">Personaliza tu creatividad</p>
                 </div>
 
-                <div className="space-y-4">
-                    <div className="space-y-2">
-                        <label className="text-[10px] text-gray-500 uppercase font-bold">Título Gancho</label>
-                        <input
-                            type="text"
-                            value={data.creative.title}
-                            onChange={(e) => setData({ ...data, creative: { ...data.creative, title: e.target.value } })}
-                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm"
-                            placeholder="Ej: ¡Oferta exclusiva solo hoy!"
+                <div className="space-y-1">
+                    <label className="text-[9px] text-gray-500 uppercase font-bold">Título Gancho</label>
+                    <motion.input
+                        key={`title-${shakeTrigger}`}
+                        animate={errors.title ? shake : {}}
+                        type="text"
+                        value={data.creative.title}
+                        onChange={(e) => setData({ ...data, creative: { ...data.creative, title: e.target.value } })}
+                        className={fieldClass(errors.title)}
+                        placeholder="Ej: ¡Oferta exclusiva solo hoy!"
+                    />
+                </div>
+
+                <div className="space-y-1">
+                    <label className="text-[9px] text-gray-500 uppercase font-bold">Descripción Corta</label>
+                    <motion.textarea
+                        key={`desc-${shakeTrigger}`}
+                        animate={errors.description ? shake : {}}
+                        value={data.creative.description}
+                        onChange={(e) => setData({ ...data, creative: { ...data.creative, description: e.target.value } })}
+                        className={`${fieldClass(errors.description)} h-20 resize-none`}
+                        placeholder="Cuéntales por qué deberían hacer clic..."
+                    />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                        <label className="text-[9px] text-gray-500 uppercase font-bold">Llamado a la Acción</label>
+                        <select
+                            value={data.creative.cta_text}
+                            onChange={(e) => setData({ ...data, creative: { ...data.creative, cta_text: e.target.value } })}
+                            className="w-full bg-[#0d1117] border border-white/10 rounded-xl px-4 py-3 text-white text-sm appearance-none focus:outline-none focus:border-cyan-500 transition-all [&>option]:bg-[#0d1117] [&>option]:text-white"
+                        >
+                            <option value="LEARN_MORE">Más Información</option>
+                            <option value="SHOP_NOW">Comprar Ahora</option>
+                            <option value="SIGN_UP">Registrarse</option>
+                            <option value="WATCH_VIDEO">Ver Video</option>
+                        </select>
+                    </div>
+                    <div className="space-y-1">
+                        <label className="text-[9px] text-gray-500 uppercase font-bold">URL de Destino</label>
+                        <motion.input
+                            key={`url-${shakeTrigger}`}
+                            animate={errors.destination_url ? shake : {}}
+                            type="url"
+                            value={data.creative.destination_url}
+                            onChange={(e) => setData({ ...data, creative: { ...data.creative, destination_url: e.target.value } })}
+                            className={fieldClass(errors.destination_url)}
+                            placeholder="https://tusitio.com"
                         />
                     </div>
+                </div>
 
-                    <div className="space-y-2">
-                        <label className="text-[10px] text-gray-500 uppercase font-bold">Descripción Corta</label>
-                        <textarea
-                            value={data.creative.description}
-                            onChange={(e) => setData({ ...data, creative: { ...data.creative, description: e.target.value } })}
-                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm h-24 resize-none"
-                            placeholder="Cuéntales por qué deberían hacer clic..."
-                        />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                            <label className="text-[10px] text-gray-500 uppercase font-bold">Llamado a la Acción</label>
-                            <select
-                                value={data.creative.cta_text}
-                                onChange={(e) => setData({ ...data, creative: { ...data.creative, cta_text: e.target.value } })}
-                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm appearance-none"
-                            >
-                                <option value="LEARN_MORE">Más Información</option>
-                                <option value="SHOP_NOW">Comprar Ahora</option>
-                                <option value="SIGN_UP">Registrarse</option>
-                                <option value="WATCH_VIDEO">Ver Video</option>
-                            </select>
-                        </div>
-                        <div className="space-y-2">
-                            <label className="text-[10px] text-gray-500 uppercase font-bold">URL de Destino</label>
-                            <input
-                                type="url"
-                                value={data.creative.destination_url}
-                                onChange={(e) => setData({ ...data, creative: { ...data.creative, destination_url: e.target.value } })}
-                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm"
-                                placeholder="https://tusitio.com"
-                            />
-                        </div>
-                    </div>
-
-                    <div className="space-y-2">
-                        <label className="text-[10px] text-gray-500 uppercase font-bold">Media (Video/Imagen)</label>
-                        <div className="relative group overflow-hidden">
-                            <input
-                                type="file"
-                                id="media-upload"
-                                onChange={handleFileChange}
-                                className="hidden"
-                                accept="image/*,video/*"
-                            />
-                            <label
-                                htmlFor="media-upload"
-                                className="flex flex-col items-center justify-center border-2 border-dashed border-white/10 rounded-2xl p-8 hover:bg-white/5 hover:border-cyan-500/50 cursor-pointer transition-all"
-                            >
-                                <Upload className="w-8 h-8 text-gray-500 mb-2 group-hover:text-cyan-400 group-hover:scale-110 transition-all" />
-                                <span className="text-xs text-gray-400">{data.creative.media ? data.creative.media.name : "Sube tu video o imagen"}</span>
-                            </label>
-                        </div>
-                    </div>
+                <div className="space-y-1">
+                    <label className="text-[9px] text-gray-500 uppercase font-bold">Media (Video/Imagen)</label>
+                    <motion.div key={`media-${shakeTrigger}`} animate={errors.media ? shake : {}}>
+                        <input type="file" id="media-upload" onChange={handleFileChange} className="hidden" accept="image/*,video/*" />
+                        <label
+                            htmlFor="media-upload"
+                            className={`flex items-center gap-3 border-2 border-dashed rounded-2xl px-4 py-3 cursor-pointer transition-all hover:bg-white/5 ${
+                                errors.media ? 'border-red-500/60' : 'border-white/10 hover:border-cyan-500/50'
+                            }`}
+                        >
+                            <Upload className={`w-5 h-5 flex-shrink-0 ${errors.media ? 'text-red-400' : 'text-gray-500'}`} />
+                            <span className="text-xs text-gray-400 truncate">
+                                {data.creative.media ? data.creative.media.name : "Sube tu video o imagen"}
+                            </span>
+                        </label>
+                    </motion.div>
                 </div>
             </div>
 
-            {/* Real-time Preview */}
-            <div className="flex flex-col items-center justify-center p-8 bg-white/[0.02] border border-white/5 rounded-3xl">
-                <h4 className="text-[10px] font-black text-gray-600 uppercase tracking-[0.25em] mb-6">Vista Previa Real</h4>
+            {/* ── Right: Phone preview ── */}
+            <div className="flex flex-col items-center justify-center gap-2">
+                <p className="text-[9px] font-black text-gray-600 uppercase tracking-[0.25em]">Vista Previa Real</p>
 
-                <div className="w-[280px] h-[500px] bg-black rounded-[40px] border-8 border-gray-900 shadow-2xl overflow-hidden relative group">
+                <div className="w-[200px] h-[340px] bg-black rounded-[32px] border-[6px] border-gray-900 shadow-2xl overflow-hidden relative">
                     {previewUrl ? (
-                        <div className="absolute inset-0">
-                            {data.creative.media?.type.startsWith('video') ? (
-                                <video src={previewUrl} autoPlay muted loop className="w-full h-full object-cover" />
-                            ) : (
-                                <img src={previewUrl} className="w-full h-full object-cover" alt="preview" />
-                            )}
-                        </div>
+                        data.creative.media?.type.startsWith('video') ? (
+                            <video src={previewUrl} autoPlay muted loop className="w-full h-full object-cover" />
+                        ) : (
+                            <img src={previewUrl} className="w-full h-full object-cover" alt="preview" />
+                        )
                     ) : (
                         <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
-                            <ImageIcon className="w-12 h-12 text-gray-800" />
+                            <ImageIcon className="w-8 h-8 text-gray-800" />
                         </div>
                     )}
 
-                    {/* Ad Overlay */}
-                    <div className="absolute inset-x-0 bottom-0 p-4 bg-gradient-to-t from-black via-black/50 to-transparent pt-12">
-                        <div className="flex items-center gap-2 mb-2">
-                            <div className="w-8 h-8 rounded-full bg-cyan-500 flex items-center justify-center text-[10px] font-bold">AD</div>
+                    <div className="absolute inset-x-0 bottom-0 p-2.5 bg-gradient-to-t from-black via-black/50 to-transparent pt-8">
+                        <div className="flex items-center gap-1.5 mb-1">
+                            <div className="w-5 h-5 rounded-full bg-cyan-500 flex items-center justify-center text-[7px] font-bold">AD</div>
                             <div>
-                                <h5 className="text-xs font-bold text-white leading-tight">Patrocinado</h5>
-                                <p className="text-[10px] text-gray-300">Buzzy Ads</p>
+                                <p className="text-[8px] font-bold text-white leading-none">Patrocinado</p>
+                                <p className="text-[7px] text-gray-400">Buzzy Ads</p>
                             </div>
                         </div>
-                        <h6 className="text-sm font-bold text-white mb-1 line-clamp-1">{data.creative.title || "Tu título aquí"}</h6>
-                        <p className="text-[10px] text-gray-300 line-clamp-2 mb-3">{data.creative.description || "Tu descripción publicitaria aparecerá en esta sección para atraer usuarios."}</p>
-                        <button className="w-full py-2 bg-white text-black rounded-lg text-xs font-bold hover:bg-cyan-400 transition-colors uppercase tracking-wider">
+                        <p className="text-[9px] font-bold text-white truncate">{data.creative.title || "Tu título aquí"}</p>
+                        <p className="text-[8px] text-gray-300 line-clamp-2 mt-0.5">{data.creative.description || "Tu descripción aparecerá aquí para atraer usuarios."}</p>
+                        <button className="w-full mt-1.5 py-1 bg-white text-black rounded-lg text-[8px] font-black uppercase tracking-wide">
                             {data.creative.cta_text.replace('_', ' ')}
                         </button>
                     </div>
                 </div>
             </div>
+
         </div>
     );
 };

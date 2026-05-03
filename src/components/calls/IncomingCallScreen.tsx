@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { Mic, MicOff, Phone, PhoneOff, Clock, Volume2, VolumeX, Video, VideoOff } from "lucide-react";
-import { getBaseUrl } from "../../redux/client/api-client";
+import { getMediaUrl } from "../../redux/client/api-client";
 
 type CallPayload = {
     uuid: string;
@@ -42,11 +42,7 @@ export default function IncomingCallScreen({
     toggleMic,
     toggleSpeaker
 }: Props) {
-    const avatarSrc = callerAvatar
-        ? callerAvatar.startsWith("http")
-            ? callerAvatar
-            : `${getBaseUrl()}${callerAvatar.replace(/^\//, "")}`
-        : `${getBaseUrl()}media/profile_pics/avatar.webp`;
+    const avatarSrc = getMediaUrl(callerAvatar) || getMediaUrl("profile_pics/avatar.webp");
 
     const isActive = call?.status === 'active';
 

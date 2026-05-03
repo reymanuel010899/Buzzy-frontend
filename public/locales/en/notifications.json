@@ -1,0 +1,27 @@
+{
+  "title": "Notifications",
+  "empty": "No notifications yet",
+  "markAllRead": "Mark all as read",
+  "loading": "Loading…",
+  "types": {
+    "like": "{{username}} liked your video",
+    "comment": "{{username}} commented on your video",
+    "comment_reply": "{{username}} replied to your comment",
+    "follow": "{{username}} started following you",
+    "profile_visit": "{{username}} visited your profile",
+    "story_like": "{{username}} liked your story",
+    "mention": "{{username}} mentioned you in a comment",
+    "gift": "{{username}} sent you a gift"
+  },
+  "settings": {
+    "title": "Notification preferences",
+    "push": "Push notifications",
+    "email": "Email notifications",
+    "likes": "Likes",
+    "comments": "Comments",
+    "follows": "New followers",
+    "mentions": "Mentions",
+    "liveAlerts": "Live alerts",
+    "marketing": "Promotions & offers"
+  }
+}
