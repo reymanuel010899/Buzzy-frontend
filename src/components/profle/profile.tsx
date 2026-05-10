@@ -29,6 +29,7 @@ import {
   Trash2,
   Phone,
   LogOut,
+  Gift,
 } from "lucide-react"
 import { Button } from "../ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs"
@@ -66,6 +67,7 @@ import TokenShopModal from "../giftModal/TokenShopModal"
 import InsufficientFundsModal from "../giftModal/InsufficientFundsModal"
 import TokenPurchaseSuccessModal from "../giftModal/TokenPurchaseSuccessModal"
 import { getActiveGift } from "../../redux/actions/gift/listGiftActive"
+import { getVideoGiftsReceived, markVideoGiftsSeen } from "../../redux/actions/gift/getVideoGiftsReceived"
 import { sendVideoGift } from "../../redux/actions/gift/sendVideoGift"
 import { getWallet } from "../../redux/actions/getWallet"
 import type { GiftI } from "../../interfaces/gift"
@@ -102,6 +104,7 @@ interface VideoItem {
   id: string
   uuid?: string
   video: string
+  video_url?: string
   user_id?: { username: string; profile_picture: string; id: number }
   likes_count: number
   comments_count: number
@@ -316,6 +319,11 @@ function ProfileSeccion({
   ]);
   const [availabilitySaveSuccess, setAvailabilitySaveSuccess] = useState(false);
   const [showEditProfileModal, setShowEditProfileModal] = useState(false);
+  const [showReceivedGiftsModal, setShowReceivedGiftsModal] = useState(false);
+  const [receivedVideoGifts, setReceivedVideoGifts] = useState<any[]>([]);
+  const [unseenGiftsCount, setUnseenGiftsCount] = useState(0);
+  const [playingGiftUuid, setPlayingGiftUuid] = useState<string | null>(null);
+  const [giftBlackout, setGiftBlackout] = useState(false);
   const [showBankAccountModal, setShowBankAccountModal] = useState(false);
   const [showChatPrivacyModal, setShowChatPrivacyModal] = useState(false);
   const { setShowMessages, setSelectedChat, setPendingFolder } = useChat();
@@ -421,6 +429,16 @@ function ProfileSeccion({
   }, [dispatch]);
 
   useEffect(() => {
+    if (!isOwnProfile) return;
+    getVideoGiftsReceived()(dispatch).then((res: any) => {
+      if (res?.gifts) {
+        setReceivedVideoGifts(res.gifts);
+        setUnseenGiftsCount(res.unseen_count ?? 0);
+      }
+    });
+  }, [isOwnProfile, dispatch]);
+
+  useEffect(() => {
     if (activeGifts !== null) {
       const mappedGifts = activeGifts.map((gift: any) => ({
         id: gift.id?.toString(),
@@ -429,7 +447,7 @@ function ProfileSeccion({
         cost: gift.token_price,
         color: "getColorFromSlug(gift.slug)",
         animation: "getAnimationFromSlug(gift.slug)",
-        video: gift.video ? `${getBaseUrl()}${gift.video}` : "",
+        video: gift.video ? getMediaUrl(gift.video) : "",
         slug: gift.slug,
         token_price: gift.token_price || 0,
         is_active: gift.is_active ?? true,
@@ -448,7 +466,7 @@ function ProfileSeccion({
         cost: gift.token_price,
         color: "getColorFromSlug(gift.slug)",
         animation: "getAnimationFromSlug(gift.slug)",
-        video: gift.video ? `${getBaseUrl()}${gift.video}` : "",
+        video: gift.video ? getMediaUrl(gift.video) : "",
         slug: gift.slug,
         token_price: gift.token_price || 0,
         is_active: gift.is_active ?? true,
@@ -532,19 +550,15 @@ function ProfileSeccion({
 
   // --- 2. Carga Inicial de Usuario ---
   useEffect(() => {
-    console.log("ProfileSeccion useEffect triggering for username:", username);
     if (username) {
-      console.log("Calling getUser and getUserMedia for:", username);
       getUser(username)
       getUserMedia(username)
     } else {
-      console.log("No username found in params");
     }
   }, [getUser, getUserMedia, username])
 
   // Sincronizar localMedia cuando cambian los videos de Redux
   useEffect(() => {
-    console.log("Syncing localMedia with media_user:", media_user);
     setLocalMedia(media_user || []);
   }, [media_user]);
 
@@ -581,7 +595,6 @@ function ProfileSeccion({
       }, 300);
     }
   };
-  // console.log(user, "**********")
   const handleGridVideoToggle = (videoId: string, videoElement: HTMLVideoElement | null) => {
     if (!videoElement) return;
     const currentlyPlaying = isGridVideoPlaying[videoId] || false;
@@ -896,7 +909,6 @@ function ProfileSeccion({
         setShowMessages(true);
         setSelectedChat(res?.data.chat_uuid ?? null);
         navigate("/");
-        if (user) user.is_following = true;
       }).catch(err => {
         console.error("Error following:", err);
         setShowFollowPrompt(false);
@@ -1366,7 +1378,7 @@ function ProfileSeccion({
                 <div className="absolute -inset-1 rounded-2xl bg-gradient-to-r from-[#7000ff] to-[#00f0ff] opacity-40 blur-md group-hover:opacity-75 transition-opacity duration-500"></div>
                 <Button
                   onClick={handleOpenSubscriptionModal}
-                  className="relative w-full h-11 bg-black/40 backdrop-blur-xl border border-white/20 text-white font-bold rounded-2xl shadow-2xl overflow-hidden group transition-all duration-300 hover:border-[#00f0ff]/50 active:scale-95"
+                  className="relative w-full h-11 bg-black/40 backdrop-blur-sm border border-white/20 text-white font-bold rounded-2xl shadow-2xl overflow-hidden group transition-all duration-300 hover:border-[#00f0ff]/50 active:scale-95"
                 >
                   <div className="absolute inset-0 bg-gradient-to-r from-[#7000ff]/20 to-[#00f0ff]/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
                     <span className="relative flex items-center justify-center gap-2 text-[10px] tracking-widest uppercase">
@@ -1387,7 +1399,7 @@ function ProfileSeccion({
           >
             <Tabs defaultValue="latest" value={activeTab} onValueChange={setActiveTab} className="w-full">
               {/* Botones de acción + Tabs — sticky al hacer scroll */}
-              <div className="sticky top-0 z-30 backdrop-blur-xl  pb-3 rounded-xl flex flex-col gap-4">
+              <div className="sticky top-0 z-30 backdrop-blur-sm  pb-3 rounded-xl flex flex-col gap-4">
                 {/* Botones de acción sticky */}
                 <div className="flex justify-center gap-4 pb-3">
                   {/* <Button variant="ghost" size="icon" className="rounded-xl bg-white/5 hover:bg-white/10 text-white border border-white/5 h-10 w-10">
@@ -1403,6 +1415,23 @@ function ProfileSeccion({
                         style={{ background: 'linear-gradient(135deg, #7c3aed, #a855f7, #ec4899)' }}
                       >
                         <span className="relative z-10 text-white font-black text-base">✦</span>
+                      </Button>
+                      <Button
+                        onClick={() => setShowReceivedGiftsModal(true)}
+                        variant="ghost"
+                        size="icon"
+                        className="rounded-xl bg-white/5 hover:bg-white/10 text-white border border-white/5 h-10 w-10 relative"
+                      >
+                        <Gift size={18} />
+                        {unseenGiftsCount > 0 && (
+                          <motion.span
+                            animate={{ scale: [1, 1.3, 1] }}
+                            transition={{ repeat: Infinity, duration: 1.2, ease: "easeInOut" }}
+                            className="absolute -top-1 -right-1 min-w-[16px] h-4 px-0.5 rounded-full bg-pink-500 text-white text-[9px] font-bold flex items-center justify-center shadow-lg shadow-pink-500/50"
+                          >
+                            {unseenGiftsCount > 99 ? "99+" : unseenGiftsCount}
+                          </motion.span>
+                        )}
                       </Button>
                       <Button onClick={() => setShowEditProfileModal(true)} variant="ghost" size="icon" className="rounded-xl bg-white/5 hover:bg-white/10 text-white border border-white/5 h-10 w-10">
                         <UserCog size={18} />
@@ -1448,7 +1477,7 @@ function ProfileSeccion({
                       <div className="relative h-full w-full">
                         {video.media_type === 'image' ? (
                           <img
-                            src={video.video}
+                            src={getMediaUrl(video.video_url || video.video)}
                             className="w-full h-full object-cover transform group-hover:scale-105 transition-transform duration-700"
                             alt="Profile Media"
                           />
@@ -1460,13 +1489,22 @@ function ProfileSeccion({
                             playsInline
                             className="w-full h-full object-cover transform group-hover:scale-105 transition-transform duration-700"
                           >
-                            <source src={video.video} type="video/mp4" />
+                            <source src={getMediaUrl(video.video_url || video.video)} type="video/mp4" />
                           </video>
                         )}
                         <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/60"></div>
                         <div className="absolute bottom-2 left-2 flex items-center gap-1 text-xs font-medium">
-                          <Play className="h-3 w-3 text-white" fill="white" />
-                          <span className="text-white">{video.view_acount || 0}</span>
+                          {video.media_type === 'image' ? (
+                            <>
+                              <Heart className="h-3 w-3 text-red-400" fill="currentColor" />
+                              <span className="text-white">{(video as any).like_count || 0}</span>
+                            </>
+                          ) : (
+                            <>
+                              <Play className="h-3 w-3 text-white" fill="white" />
+                              <span className="text-white">{video.view_acount || 0}</span>
+                            </>
+                          )}
                         </div>
                         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                           <AnimatePresence>
@@ -1487,6 +1525,228 @@ function ProfileSeccion({
         </div>
         <BottomNavbar />
       </div >
+
+      {/* Modal de regalos de video recibidos */}
+      <AnimatePresence>
+        {showReceivedGiftsModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[200] flex items-end justify-center bg-black/70 backdrop-blur-sm"
+            onClick={() => setShowReceivedGiftsModal(false)}
+          >
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 28, stiffness: 300 }}
+              className="w-full max-w-lg bg-[#0e0e1a] rounded-t-3xl overflow-hidden border-t border-white/10 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-5 pt-5 pb-3">
+                <div className="flex items-center gap-2">
+                  <Gift size={20} className="text-pink-400" />
+                  <span className="text-white font-bold text-base">Regalos recibidos</span>
+                  {unseenGiftsCount > 0 && (
+                    <span className="bg-pink-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                      {unseenGiftsCount} nuevos
+                    </span>
+                  )}
+                </div>
+                <button
+                  onClick={() => setShowReceivedGiftsModal(false)}
+                  className="p-1.5 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              {/* Lista de regalos */}
+              <div className="overflow-y-auto max-h-[70vh] px-4 pb-8 space-y-3">
+                {receivedVideoGifts.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-16 gap-3 text-white/30">
+                    <Gift size={48} />
+                    <p className="text-sm">Aún no tienes regalos recibidos</p>
+                  </div>
+                ) : (
+                  receivedVideoGifts.map((gift, i: number) => {
+                    const isNew = !gift.is_seen;
+                    const isPlaying = playingGiftUuid === gift.uuid;
+                    return (
+                      <motion.div
+                        key={gift.uuid}
+                        initial={{ opacity: 0, y: 16 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: i * 0.04 }}
+                        className={`flex items-center gap-3 rounded-2xl p-3 border transition-all cursor-pointer ${isNew ? 'bg-pink-500/10 border-pink-500/30' : 'bg-white/5 border-white/5'}`}
+                        onClick={() => {
+                          if (!isPlaying) {
+                            // Marcar como visto en BD inmediatamente al tocar
+                            markVideoGiftsSeen(gift.uuid)(dispatch);
+                            if (isNew) setUnseenGiftsCount(prev => Math.max(0, prev - 1));
+                            setPlayingGiftUuid(gift.uuid);
+                          }
+                        }}
+                      >
+                        {/* Miniatura del regalo — al hacer click muestra la animación full */}
+                        <div className="relative flex-shrink-0 w-14 h-14 rounded-xl overflow-hidden bg-black/40">
+                          {gift.gift_video_url ? (
+                            <video
+                              src={gift.gift_video_url}
+                              autoPlay={isPlaying}
+                              loop
+                              muted={!isPlaying}
+                              playsInline
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-2xl">
+                              {gift.gift_emoji || "🎁"}
+                            </div>
+                          )}
+                          {/* Overlay play hint */}
+                          {!isPlaying && gift.gift_video_url && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                              <Play size={16} className="text-white/80" fill="white" />
+                            </div>
+                          )}
+                          {isNew && (
+                            <motion.div
+                              animate={{ scale: [1, 1.2, 1] }}
+                              transition={{ repeat: Infinity, duration: 1.2 }}
+                              className="absolute top-0.5 right-0.5 w-2.5 h-2.5 rounded-full bg-pink-500 shadow-lg shadow-pink-500/60"
+                            />
+                          )}
+                        </div>
+
+                        {/* Info */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            {gift.sender_avatar ? (
+                              <img
+                                src={gift.sender_avatar.startsWith('http') ? gift.sender_avatar : getMediaUrl(gift.sender_avatar)}
+                                className="w-5 h-5 rounded-full object-cover"
+                                alt=""
+                              />
+                            ) : (
+                              <div className="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center">
+                                <User size={10} className="text-white/50" />
+                              </div>
+                            )}
+                            <span className="text-white/80 text-xs font-semibold truncate">@{gift.sender_username}</span>
+                          </div>
+                          <p className="text-white font-bold text-sm mt-0.5 truncate">
+                            {gift.gift_emoji} {gift.gift_name}
+                          </p>
+                          <p className="text-white/40 text-[10px] mt-0.5">
+                            {isPlaying ? "▶ Reproduciendo..." : "Toca para ver"}
+                          </p>
+                        </div>
+
+                        {/* Miniatura del video + tiempo */}
+                        <div className="flex-shrink-0 flex flex-col items-end gap-1">
+                          {gift.video_thumbnail ? (
+                            <img
+                              src={gift.video_thumbnail}
+                              className="w-10 h-14 rounded-lg object-cover border border-white/10"
+                              alt=""
+                              onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+                            />
+                          ) : null}
+                          <span className="text-white/30 text-[10px]">
+                            {new Date(gift.created_at).toLocaleDateString("es-DO", { day: "numeric", month: "short" })}
+                          </span>
+                        </div>
+                      </motion.div>
+                    );
+                  })
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Blackout de regalo (Space/agujero negro) */}
+      <AnimatePresence>
+        {giftBlackout && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="fixed inset-0 z-[9999] bg-black pointer-events-none"
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Overlay de reproducción del regalo — emerge de la pantalla */}
+      <AnimatePresence>
+        {playingGiftUuid && (() => {
+          const giftItem = receivedVideoGifts.find(g => g.uuid === playingGiftUuid);
+          if (!giftItem?.gift_video_url) return null;
+          return (
+            <motion.div
+              key="gift-play-overlay"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.35 }}
+              className="fixed inset-0 z-[300] pointer-events-auto"
+              onClick={() => setPlayingGiftUuid(null)}
+            >
+              {/* Video a pantalla completa con máscara que disuelve todos los bordes */}
+              <motion.video
+                key={giftItem.uuid}
+                src={giftItem.gift_video_url}
+                autoPlay
+                playsInline
+                initial={{ scale: 0.6, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.6, opacity: 0 }}
+                transition={{ type: "spring", damping: 22, stiffness: 200 }}
+                className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+                style={{
+                  maskImage: `radial-gradient(ellipse 70% 65% at 50% 45%, black 30%, transparent 75%)`,
+                  WebkitMaskImage: `radial-gradient(ellipse 70% 65% at 50% 45%, black 30%, transparent 75%)`,
+                }}
+                onTimeUpdate={(e) => {
+                  const v = e.currentTarget;
+                  const slug = giftItem.gift_name?.toLowerCase();
+                  if (slug?.includes('space') || slug?.includes('Space') || giftItem.gift_emoji === '🪐') {
+                    if (v.currentTime >= 4.0 && v.currentTime < 6.0) {
+                      if (!giftBlackout) setGiftBlackout(true);
+                    } else if (v.currentTime >= 6.0 && giftBlackout) {
+                      setGiftBlackout(false);
+                    }
+                  }
+                }}
+                onEnded={() => {
+                  setGiftBlackout(false);
+                  setReceivedVideoGifts(prev => prev.filter(g => g.uuid !== playingGiftUuid));
+                  setPlayingGiftUuid(null);
+                }}
+              />
+              {/* Nombre + sender centrado abajo */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.3 }}
+                className="absolute bottom-24 left-0 right-0 flex flex-col items-center gap-1 pointer-events-none"
+              >
+                <p className="text-white font-black text-2xl drop-shadow-[0_2px_12px_rgba(0,0,0,0.9)]">
+                  {giftItem.gift_emoji} {giftItem.gift_name}
+                </p>
+                <p className="text-white/70 text-sm drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]">
+                  de @{giftItem.sender_username}
+                </p>
+              </motion.div>
+            </motion.div>
+          );
+        })()}
+      </AnimatePresence>
 
       {showEditProfileModal && (user || currentUser) && (
         <EditProfileModal
@@ -1685,7 +1945,7 @@ function ProfileSeccion({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-xl p-4"
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4"
             onClick={() => { stopRingtonePreview(); setShowRingtonePanel(false); setShowSettingsModal(false); }}
           >
             <motion.div
@@ -1693,68 +1953,67 @@ function ProfileSeccion({
               animate={{ scale: 1, y: 0, opacity: 1 }}
               exit={{ scale: 0.88, y: 30, opacity: 0 }}
               transition={{ type: "spring", bounce: 0.3 }}
-              className=" bg-[#0a0a0f] border border-white/10 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl"
+              className="bg-[#0a0a0f] border border-white/10 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col max-h-[88vh]"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="absolute top-0 right-0 w-[400px] h-[400px] bg-purple-600/10 blur-[100px] rounded-full -translate-y-1/2 translate-x-1/2 pointer-events-none"> </div>
               {/* Header */}
-              <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-white/10">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 bg-gradient-to-brrounded-2xl flex items-center justify-center">
-                    <Settings className="w-5 h-5 text-white" />
+              <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-white/10 shrink-0">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-xl flex items-center justify-center">
+                    <Settings className="w-4 h-4 text-white" />
                   </div>
-                  <h2 className="text-2xl font-bold text-white">{t('profile:settings.title')}</h2>
+                  <h2 className="text-lg font-bold text-white">{t('profile:settings.title')}</h2>
                 </div>
                 <button
                   onClick={() => { stopRingtonePreview(); setShowRingtonePanel(false); setShowSettingsModal(false); }}
-                  className="w-9 h-9 flex items-center justify-center text-white/70 hover:text-white hover:bg-white/10 rounded-full transition-all"
+                  className="w-8 h-8 flex items-center justify-center text-white/70 hover:text-white hover:bg-white/10 rounded-full transition-all"
                 >
-                  <X size={22} />
+                  <X size={18} />
                 </button>
               </div>
 
               {/* Lista de opciones */}
-              <div className="p-3">
+              <div className="p-2 overflow-y-auto flex-1">
                 {/* 1. Cuenta Bancaria (especial) */}
                 <div
                   onClick={handleSaveBankAccount}
-                  className="group flex items-center gap-4 px-5 py-4 rounded-2xl hover:bg-white/5 cursor-pointer transition-all active:scale-[0.985]"
+                  className="group flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-white/5 cursor-pointer transition-all active:scale-[0.985]"
                 >
-                  <div className="w-11 h-11 bg-emerald-500/10 text-emerald-400 rounded-2xl flex items-center justify-center">
-                    <CreditCard size={26} />
+                  <div className="w-9 h-9 bg-emerald-500/10 text-emerald-400 rounded-xl flex items-center justify-center shrink-0">
+                    <CreditCard size={18} />
                   </div>
-                  <div className="flex-1">
-                    <p className="font-semibold text-lg text-white group-hover:text-emerald-400 transition-colors">{t('profile:settings.bankAccount')}</p>
-                    <p className="text-xs text-gray-400">{t('profile:settings.bankSubtitle')}</p>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-sm text-white group-hover:text-emerald-400 transition-colors">{t('profile:settings.bankAccount')}</p>
+                    <p className="text-xs text-gray-400 truncate">{t('profile:settings.bankSubtitle')}</p>
                   </div>
-                  <div className="text-emerald-400">
+                  <div className="text-emerald-400 shrink-0">
                     <span className="text-xs font-medium">{t('profile:settings.add')}</span>
                   </div>
                 </div>
 
-
                 <div
                   onClick={() => handleEditOption("Privacidad de chats")}
-                  className="group flex items-center gap-4 px-5 py-4 rounded-2xl hover:bg-white/5 cursor-pointer transition-all active:scale-[0.985]"
+                  className="group flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-white/5 cursor-pointer transition-all active:scale-[0.985]"
                 >
-                  <div className="w-11 h-11 bg-amber-500/10 text-amber-400 rounded-2xl flex items-center justify-center">
-                    <Shield size={26} />
+                  <div className="w-9 h-9 bg-amber-500/10 text-amber-400 rounded-xl flex items-center justify-center shrink-0">
+                    <Shield size={18} />
                   </div>
-                  <div className="flex-1">
-                    <p className="font-semibold text-white group-hover:text-amber-400">{t('profile:settings.privacy', 'Privacidad de chats')}</p>
-                    <p className="text-xs text-gray-400">PIN de 6 dígitos para ocultos</p>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-sm text-white group-hover:text-amber-400">{t('profile:settings.privacy', 'Privacy')}</p>
+                    <p className="text-xs text-gray-400 truncate">PIN de 6 dígitos para ocultos</p>
                   </div>
                 </div>
 
                 <div
                   onClick={() => handleEditOption("Notificaciones")}
-                  className="group flex items-center gap-4 px-5 py-4 rounded-2xl hover:bg-white/5 cursor-pointer transition-all active:scale-[0.985]"
+                  className="group flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-white/5 cursor-pointer transition-all active:scale-[0.985]"
                 >
-                  <div className="w-11 h-11 bg-sky-500/10 text-sky-400 rounded-2xl flex items-center justify-center">
-                    <Bell size={26} />
+                  <div className="w-9 h-9 bg-sky-500/10 text-sky-400 rounded-xl flex items-center justify-center shrink-0">
+                    <Bell size={18} />
                   </div>
-                  <div className="flex-1">
-                    <p className="font-semibold text-white group-hover:text-sky-400">{t('profile:settings.notifications')}</p>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-sm text-white group-hover:text-sky-400">{t('profile:settings.notifications')}</p>
                   </div>
                 </div>
 
@@ -1772,20 +2031,20 @@ function ProfileSeccion({
                     // // Aquí puedes reemplazar el alert por una llamada al backend/Redux
                     // alert("Horario guardado: " + horario);
                   }}
-                  className="group flex items-center gap-4 px-5 py-4 rounded-2xl hover:bg-white/5 cursor-pointer transition-all active:scale-[0.985] mt-2"
+                  className="group flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-white/5 cursor-pointer transition-all active:scale-[0.985]"
                 >
-                  <div className="w-11 h-11 bg-violet-500/10 text-violet-400 rounded-2xl flex items-center justify-center">
-                    <UserCog size={26} />
+                  <div className="w-9 h-9 bg-violet-500/10 text-violet-400 rounded-xl flex items-center justify-center shrink-0">
+                    <UserCog size={18} />
                   </div>
-                  <div className="flex-1" onClick={() => {
+                  <div className="flex-1 min-w-0" onClick={() => {
                     setShowSettingsModal(false);
                     setTimeout(() => handleOpenAvailabilityModal(), 280);
                   }}
                   >
-                    <p className="font-semibold text-white group-hover:text-violet-400">{t('profile:settings.availability')}</p>
-                    <p className="text-xs text-gray-400">{t('profile:settings.availabilitySubtitle')}</p>
+                    <p className="font-semibold text-sm text-white group-hover:text-violet-400">{t('profile:settings.availability')}</p>
+                    <p className="text-xs text-gray-400 truncate">{t('profile:settings.availabilitySubtitle')}</p>
                   </div>
-                  <div className="text-violet-400">
+                  <div className="text-violet-400 shrink-0">
                     <span className="text-xs font-medium">{t('profile:settings.edit')}</span>
                   </div>
                 </div>
@@ -1794,14 +2053,14 @@ function ProfileSeccion({
                 <div className="rounded-2xl overflow-hidden">
                   <div
                     onClick={() => { stopRingtonePreview(); setShowRingtonePanel(p => !p); }}
-                    className="group flex items-center gap-4 px-5 py-4 hover:bg-white/5 cursor-pointer transition-all active:scale-[0.985]"
+                    className="group flex items-center gap-3 px-4 py-3 hover:bg-white/5 cursor-pointer transition-all active:scale-[0.985]"
                   >
-                    <div className="w-11 h-11 bg-pink-500/10 text-pink-400 rounded-2xl flex items-center justify-center">
-                      <Phone size={22} />
+                    <div className="w-9 h-9 bg-pink-500/10 text-pink-400 rounded-xl flex items-center justify-center shrink-0">
+                      <Phone size={18} />
                     </div>
-                    <div className="flex-1">
-                      <p className="font-semibold text-white group-hover:text-pink-400 transition-colors">Sonido de llamada</p>
-                      <p className="text-xs text-gray-400">{RINGTONE_OPTIONS.find(r => r.id === ringtoneId)?.label ?? '—'}</p>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-sm text-white group-hover:text-pink-400 transition-colors">Sonido de llamada</p>
+                      <p className="text-xs text-gray-400 truncate">{RINGTONE_OPTIONS.find(r => r.id === ringtoneId)?.label ?? '—'}</p>
                     </div>
                     <span className={`text-white/40 transition-transform duration-200 ${showRingtonePanel ? 'rotate-180' : ''}`}>▾</span>
                   </div>
@@ -1846,31 +2105,31 @@ function ProfileSeccion({
                 </div>
 
                 {/* Idioma */}
-                <div className="flex items-center gap-4 px-5 py-4 rounded-2xl hover:bg-white/5 transition-all">
-                  <div className="w-11 h-11 bg-indigo-500/10 text-indigo-400 rounded-2xl flex items-center justify-center text-xl">
+                <div className="flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-white/5 transition-all">
+                  <div className="w-9 h-9 bg-indigo-500/10 text-indigo-400 rounded-xl flex items-center justify-center text-base shrink-0">
                     🌐
                   </div>
-                  <div className="flex-1">
-                    <p className="font-semibold text-white">{t('profile:settings.language')}</p>
-                    <p className="text-xs text-gray-400">{t('profile:settings.languageSubtitle')}</p>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-sm text-white">{t('profile:settings.language')}</p>
+                    <p className="text-xs text-gray-400 truncate">{t('profile:settings.languageSubtitle')}</p>
                   </div>
                   <LanguageSwitcher isAuthenticated={!!currentUser} compact />
                 </div>
 
-                {/* ===================== BOTÓN CONECTAR REDES (item de abajo) ===================== */}
+                {/* ===================== BOTÓN CONECTAR REDES ===================== */}
                 <div
                   onClick={() => {
                     setShowSettingsModal(false);
                     setTimeout(() => setShowConnectSocialModal(true), 300);
                   }}
-                  className="mt-6 mx-auto flex items-center justify-center gap-3 bg-gradient-to-r from-[#1c1427] to-[#142122] text-white font-semibold py-4 px-8 rounded-2xl shadow-xl shadow-[#7000ff]/30 hover:scale-105 active:scale-95 transition-all cursor-pointer"
+                  className="mt-3 mx-1 flex items-center justify-center gap-2 bg-gradient-to-r from-[#1c1427] to-[#142122] text-white font-semibold py-3 px-6 rounded-2xl shadow-xl shadow-[#7000ff]/30 active:scale-95 transition-all cursor-pointer"
                 >
-                  <Share2 size={20} />
-                  {t('profile:settings.connectSocial')}
+                  <Share2 size={16} />
+                  <span className="text-sm">{t('profile:settings.connectSocial')}</span>
                 </div>
               </div>
 
-              <div className="px-8 py-6 flex items-center justify-between text-[10px] text-white/40">
+              <div className="px-5 py-3 flex items-center justify-between text-[10px] text-white/40 border-t border-white/5 shrink-0">
                 <div className="flex flex-col">
                   <span>{t('profile:settings.version', { version: '1.4.2' })}</span>
                   <span>{t('profile:settings.walletSupport')}</span>
@@ -1895,7 +2154,7 @@ function ProfileSeccion({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[70] flex items-center justify-center bg-black/90 backdrop-blur-xl p-4"
+            className="fixed inset-0 z-[70] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4"
             onClick={() => setShowAvailabilityModal(false)}
           >
             <motion.div
@@ -2038,7 +2297,7 @@ function ProfileSeccion({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[70] flex items-center justify-center bg-black/90 backdrop-blur-xl p-4"
+            className="fixed inset-0 z-[70] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4"
             onClick={() => setShowConnectSocialModal(false)}
           >
             <motion.div
@@ -2255,14 +2514,14 @@ function ProfileSeccion({
                   >
                     {video.media_type === 'image' ? (
                       <img
-                        src={video.video}
+                        src={getMediaUrl(video.video_url || video.video)}
                         className="w-full h-full object-cover md:object-contain max-h-screen"
                         alt="Profile Media Full"
                       />
                     ) : (
                       <video
                         ref={(el) => (modalVideoRefs.current[index] = el)}
-                        src={video.video}
+                        src={getMediaUrl(video.video_url || video.video)}
                         className="w-full h-full object-cover md:object-contain max-h-screen"
                         loop
                         muted={isMuted}
@@ -2480,7 +2739,7 @@ function ProfileSeccion({
           >
             <video
               key={giftAnimation.giftId}
-              src={`${getBaseUrl()}${giftAnimation.gift}`}
+              src={getMediaUrl(giftAnimation.gift)}
               autoPlay
               playsInline
               muted={false}
@@ -2530,7 +2789,7 @@ function ProfileSeccion({
             initial={{ opacity: 0, y: -12, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -12, scale: 0.98 }}
-            className="fixed top-5 left-1/2 -translate-x-1/2 z-[120] rounded-2xl border border-[#00f0ff]/20 bg-[#08101f]/95 px-4 py-3 text-sm text-white shadow-[0_16px_50px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+            className="fixed top-5 left-1/2 -translate-x-1/2 z-[120] rounded-2xl border border-[#00f0ff]/20 bg-[#08101f]/95 px-4 py-3 text-sm text-white shadow-[0_16px_50px_rgba(0,0,0,0.45)] backdrop-blur-sm"
           >
             {callAlert}
           </motion.div>
@@ -2554,7 +2813,7 @@ function ProfileSeccion({
                 animate={{ y: 0 }}
                 exit={{ y: "100%" }}
                 transition={{ type: "spring", damping: 30, stiffness: 250 }}
-                className="fixed bottom-0 left-0 right-0 h-[72vh] z-[80] bg-[#0a0a0f]/95 rounded-t-[40px] flex flex-col border-t border-white/10 backdrop-blur-xl shadow-2xl overflow-hidden"
+                className="fixed bottom-0 left-0 right-0 h-[72vh] z-[80] bg-[#0a0a0f]/95 rounded-t-[40px] flex flex-col border-t border-white/10 backdrop-blur-sm shadow-2xl overflow-hidden"
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="flex justify-center pt-3">
@@ -2619,7 +2878,7 @@ function ProfileSeccion({
                                   ? 'bg-gradient-to-tr from-purple-400 to-pink-500'
                                   : 'bg-transparent'
                               }`}>
-                              <img src={`${getBaseUrl()}${c.user_id.profile_picture}`} className="w-8 h-8 rounded-full object-cover border border-black" alt="u" />
+                              <img src={getMediaUrl(c.user_id.profile_picture)} className="w-8 h-8 rounded-full object-cover border border-black" alt="u" />
                               {(isVip || isFriend) && (
                                 <div className={`absolute -top-1 -right-1 ${isFriend ? 'bg-cyan-400' : 'bg-amber-400'} rounded-full p-0.5 border border-black shadow-sm`}>
                                   <Sparkles size={6} className="text-black" />
@@ -2650,9 +2909,9 @@ function ProfileSeccion({
                   )}
                 </div>
                 <div className="border-t border-white/8 bg-gradient-to-t from-[#0a0a0f] via-[#0a0a0f] to-transparent px-4 py-3 pb-6 md:pb-3">
-                  <div className="flex items-end gap-3 rounded-[28px] border border-white/10 bg-[#1a1a24] p-2 backdrop-blur-xl">
+                  <div className="flex items-end gap-3 rounded-[28px] border border-white/10 bg-[#1a1a24] p-2 backdrop-blur-sm">
                     <img
-                      src={`${getBaseUrl()}${currentUser?.profile_picture}`}
+                      src={getMediaUrl(currentUser?.profile_picture)}
                       className="w-10 h-10 rounded-full object-cover border-2 border-white/10 shadow-lg"
                       alt="me"
                     />
@@ -2697,7 +2956,7 @@ function ProfileSeccion({
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
               className="fixed z-50 left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-[320px] px-4"
             >
-              <div className="bg-[#0c1033]/95 border border-white/10 rounded-3xl shadow-[0_0_40px_-10px_rgba(0,0,0,0.5)] overflow-hidden backdrop-blur-xl">
+              <div className="bg-[#0c1033]/95 border border-white/10 rounded-3xl shadow-[0_0_40px_-10px_rgba(0,0,0,0.5)] overflow-hidden backdrop-blur-sm">
                 {/* Header con gradiente sutil */}
                 <div className="bg-gradient-to-r from-white/5 to-transparent px-5 py-4 flex justify-between items-center border-b border-white/5">
                   <h3 className="text-white font-semibold text-lg tracking-tight">Opciones de perfil</h3>
@@ -2909,50 +3168,64 @@ function ProfileSeccion({
       {/* Follow Before Message Prompt */}
       <AnimatePresence>
         {showFollowPrompt && (
-          <>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setShowFollowPrompt(false)}
+            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 backdrop-blur-md p-4"
+          >
             <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowFollowPrompt(false)}
-              className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="fixed z-50 left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm px-4"
+              initial={{ y: 40, opacity: 0, scale: 0.97 }}
+              animate={{ y: 0, opacity: 1, scale: 1 }}
+              exit={{ y: 40, opacity: 0, scale: 0.97 }}
+              transition={{ type: "spring", damping: 28, stiffness: 300 }}
+              onClick={(e) => e.stopPropagation()}
+              className="relative w-full max-w-[340px] overflow-hidden rounded-[28px]"
+              style={{ background: "rgba(8,10,24,0.98)", border: "1px solid rgba(255,255,255,0.07)" }}
             >
-              <div className="bg-[#0c1033] border border-white/10 rounded-2xl shadow-2xl p-6 text-center">
-                <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-tr from-[#7000ff] to-[#00f0ff] p-1">
-                  <img
-                    className="w-full h-full object-cover rounded-full"
-                    src={getMediaUrl(user?.profile_picture)}
-                    alt="user"
-                  />
+              {/* ambient glow */}
+              <div className="absolute top-0 left-1/2 -translate-x-1/2 w-56 h-28 rounded-full blur-3xl pointer-events-none" style={{ background: "rgba(168,85,247,0.12)" }} />
+
+              <div className="relative z-10 px-6 pt-7 pb-6 text-center">
+                {/* avatar */}
+                <div className="relative mx-auto mb-5 w-fit">
+                  <div className="absolute inset-0 rounded-full blur-xl" style={{ background: "rgba(168,85,247,0.3)" }} />
+                  <div className="relative w-18 h-18 rounded-full p-[2px]" style={{ background: "linear-gradient(135deg,#a855f7,#ec4899)" }}>
+                    <img
+                      className="w-16 h-16 object-cover rounded-full"
+                      src={getMediaUrl(user?.profile_picture)}
+                      alt="user"
+                    />
+                  </div>
                 </div>
-                <h3 className="text-xl text-white font-bold mb-2">{t('profile:prompts.followToMessage.title')}</h3>
-                <p className="text-gray-400 text-sm mb-6">
+
+                <h3 className="text-[17px] font-bold text-white mb-1.5 tracking-tight">
+                  {t('profile:prompts.followToMessage.title')}
+                </h3>
+                <p className="text-[13px] leading-relaxed mb-7" style={{ color: "rgba(255,255,255,0.4)" }}>
                   {t('profile:prompts.followToMessage.description', { username: user?.username })}
                 </p>
-                <div className="flex gap-3">
-                  <Button
-                    variant="outline"
-                    className="flex-1 bg-transparent border-white/20 text-white hover:bg-white/5 rounded-xl h-11"
+
+                <div className="flex gap-2.5">
+                  <button
                     onClick={() => setShowFollowPrompt(false)}
+                    className="flex-1 h-11 rounded-2xl text-sm font-semibold transition-all duration-200 hover:bg-white/8"
+                    style={{ background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.6)", border: "1px solid rgba(255,255,255,0.08)" }}
                   >
                     {t('common:actions.cancel')}
-                  </Button>
-                  <Button
-                    className="flex-1 bg-gradient-to-r from-[#7000ff] to-[#00f0ff] text-white hover:opacity-90 rounded-xl h-11 border-none shadow-lg shadow-[#00f0ff]/20"
+                  </button>
+                  <button
                     onClick={handleFollowAndMessage}
+                    className="flex-1 h-11 rounded-2xl text-sm font-bold text-white transition-all duration-200 hover:opacity-90 active:scale-[0.98]"
+                    style={{ background: "linear-gradient(135deg,#a855f7,#ec4899)", boxShadow: "0 0 20px rgba(168,85,247,0.35)" }}
                   >
                     {t('profile:actions.followAndMessage')}
-                  </Button>
+                  </button>
                 </div>
               </div>
             </motion.div>
-          </>
+          </motion.div>
         )}
       </AnimatePresence>
 

@@ -26,24 +26,13 @@ const Main = ({ media, getMedia, getComment }: MainProps) => {
     const hasCalled = useRef(false);
     const dispatch = useDispatch();
 
-    const userId = LoginReducer.user?.id;
-    const onboardingKey = userId ? `onboarding_complete_${userId}` : null;
-
-    // Si ya tiene teléfono, marcar como completado para que nunca más aparezca
-    if (onboardingKey && LoginReducer.user?.phone_number && !localStorage.getItem(onboardingKey)) {
-        localStorage.setItem(onboardingKey, "true");
-    }
-
     const needsOnboarding =
         LoginReducer.user &&
-        !LoginReducer.user.phone_number &&
-        onboardingKey &&
-        !localStorage.getItem(onboardingKey);
+        !LoginReducer.user.onboarding_completed;
 
     const [showOnboarding, setShowOnboarding] = useState<boolean>(!!needsOnboarding);
 
     const handleOnboardingComplete = () => {
-        if (onboardingKey) localStorage.setItem(onboardingKey, "true");
         setShowOnboarding(false);
     };
 

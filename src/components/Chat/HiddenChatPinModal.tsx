@@ -112,7 +112,7 @@ const HiddenChatPinModal: React.FC<HiddenChatPinModalProps> = ({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[120] flex items-end justify-center sm:items-center bg-black/80 backdrop-blur-xl p-4"
+          className="fixed inset-0 z-[120] flex items-end justify-center sm:items-center bg-black/80 backdrop-blur-sm p-4"
           onClick={onClose}
         >
           <motion.div
@@ -121,7 +121,7 @@ const HiddenChatPinModal: React.FC<HiddenChatPinModalProps> = ({
             exit={{ y: 60, opacity: 0, scale: 0.96 }}
             transition={{ type: "spring", damping: 26, stiffness: 280 }}
             className="relative w-full max-w-[360px] overflow-hidden rounded-[32px] border border-white/8"
-            style={{ background: "rgba(5,7,20,0.97)", backdropFilter: "blur(30px)" }}
+            style={{ background: "rgba(5,7,20,0.97)", backdropFilter: "blur(8px)" }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* glow blobs */}

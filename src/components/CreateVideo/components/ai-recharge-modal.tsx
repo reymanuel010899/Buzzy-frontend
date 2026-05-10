@@ -19,8 +19,9 @@ interface AIRechargeModalProps {
 }
 
 // Tasa personalizada — debe coincidir con el backend
-const CUSTOM_VIDEOS_PER_DOLLAR = 2
-const CUSTOM_IMAGES_PER_DOLLAR = 8
+// 3 videos por dólar | 2 imágenes por dólar (prioridad en videos)
+const CUSTOM_VIDEOS_PER_DOLLAR = 3
+const CUSTOM_IMAGES_PER_DOLLAR = 2
 
 type Step = 'packages' | 'confirm' | 'processing' | 'success' | 'error'
 
@@ -238,7 +239,7 @@ const AIRechargeModal: React.FC<AIRechargeModalProps> = ({
                       <div>
                         <span className="text-white text-sm font-semibold">Cantidad personalizada</span>
                         <p className="text-gray-500 text-[10px]">
-                          ${CUSTOM_VIDEOS_PER_DOLLAR} video · ${1 / CUSTOM_IMAGES_PER_DOLLAR * 100}¢ imagen
+                          $0.33 video · $0.50 imagen
                         </p>
                       </div>
                     </div>

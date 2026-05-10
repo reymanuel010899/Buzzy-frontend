@@ -70,7 +70,7 @@ const WalletModal: React.FC<WalletModalProps> = ({ isOpen, onClose, balance, onA
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
                         onClick={onClose}
-                        className="absolute inset-0 bg-black/80 backdrop-blur-2xl"
+                        className="absolute inset-0 bg-black/80 backdrop-blur-sm"
                     />
 
                     <motion.div

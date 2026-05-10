@@ -192,6 +192,8 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [showViewersModal, setShowViewersModal] = useState(false);
   const [realViewers, setRealViewers] = useState<any[]>([]);
   const [giftRecived, setGiftRecived] = useState<any[]>([]);
+  const [viewerGiftOverlay, setViewerGiftOverlay] = useState<{ gift_video: string; gift_type: string; sender: string } | null>(null);
+  const [viewerGiftBlackout, setViewerGiftBlackout] = useState(false);
   // --- Fixed State for Viewed Items per Media UUID ---
   const [viewedItems, setViewedItems] = useState<Record<string, boolean>>({});
   // --- New States for Gift System ---
@@ -271,7 +273,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       // or if we have less than 5 videos left to show
       if (currentLength > lastFetchedLengthRef.current) {
 
-        console.log("Fetching next batch of recommendations...");
         setIsFetchingFeed(true);
         lastFetchedLengthRef.current = currentLength;
 
@@ -279,7 +280,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
           .then((res: any) => {
             setIsFetchingFeed(false);
             if (!res || res.length === 0) {
-              console.log("End of feed reached or no more content.");
               // We keep lastFetchedLengthRef at currentLength to avoid re-triggering 
               // until more media is added from somewhere else
             }
@@ -400,7 +400,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
   const mergedFeed = useMemo(() => {
     if (!mediaVideo) {
-      console.log("mergedFeed: mediaVideo is null");
       return [];
     }
     const feed: any[] = [];
@@ -410,13 +409,11 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       feed.push({ ...video, type: 'video' });
       // Premium users never see ads in the static feed
       if (!isPremiumUser && (index + 1) % (adConfig.ad_every_nth_video * 5) === 0 && ads[adIndex]) {
-        console.log(`Inserting ad at index ${index + 1}`);
         feed.push({ ...ads[adIndex], type: 'ad' });
         adIndex++;
       }
     });
 
-    console.log("mergedFeed total items:", feed.length);
     return feed;
   }, [mediaVideo, ads]);
 
@@ -573,7 +570,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         return;
       }
       if (index === activeVideo && activeAdIndex === null) {
-        if (video.paused && (index !== 0 || hasPlayedFirstVideo.current)) {
+        if (video.paused) {
           video.play().catch(() => { })
         }
       } else if (!video.paused) {
@@ -759,7 +756,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
           sendAudioRef.current!.currentTime = 0;
           audioUnlockedRef.current = true;
           setIsAudioUnlocked(true);
-          console.log("🔓 Audio desbloqueado");
         })
         .catch(() => { });
 
@@ -908,7 +904,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   }, [user.id, setGiftAnimation, setIsGift, setGiftRecived]));
 
   useWsEvent("video_gift_received", useCallback((data: any) => {
-    if (user.id == data.from_user || activeVideo !== null) {
+    if (user.id == data.from_user) {
       setGiftAnimation({
         type: data.gift_type, giftId: data.gift_uuid, videoId: data.video_id,
         sender: data.sender, amount: data.amount || 1, gift: data.gift_video,
@@ -1040,7 +1036,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       setShowCommentsModal(true);
       getComment({ video_id: mediaVideo?.[index]?.uuid?.toString() ?? "" })(dispatch).then((res: any) => {
         setComments(Array.isArray(res) ? res : [])
-        console.log("Comentarios cargados:", res);
       })
     }
   }
@@ -1114,7 +1109,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       : 10;
     if (videoElement.currentTime >= viewThreshold && !viewedVideos.has(videoId)) {
       createView({ video_id: videoId })(dispatch)
-        .then((res: any) => console.log("API View Response:", res))
+        .then(() => {})
         .catch((err: any) => console.error("API View Error:", err));
       setViewedVideos((prev) => {
         const newSet = new Set(prev instanceof Set ? prev : []);
@@ -1164,10 +1159,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
               onIntersectionChange(videoItem.id, true, videoItem.category?.id || videoItem.category || null);
             }
 
-            // First video starts paused — user must tap to play
-            if (index === 0 && !hasPlayedFirstVideo.current) {
-              video.pause()
-            } else if (activeAdIndex !== index) {
+            if (activeAdIndex !== index) {
               video.play().catch(() => {/* Autoplay ignored */ })
             }
             setActiveVideo(index)
@@ -1230,7 +1222,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     }
 
     createLike({ video_id: videoId })(dispatch).then((res: any) => {
-      console.log("Like action dispatched for video ID:", res);
     }).catch((error: any) => {
       console.error("Error dispatching like action for video ID:", videoId, error);
     });
@@ -1447,7 +1438,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         console.error("Error creating viewStory:", err);
       });
     }
-    console.log(currentGroup.user, user)
     const next_media_uuid = currentGroup.media[currentStoryItemIndex + 1]?.id;
     if (next_media_uuid && user.id == currentGroup.user?.id) {
       getRecivedGiftByUser(next_media_uuid)(dispatch).then((res) => {
@@ -1607,6 +1597,8 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [storyLikedStates, setStoryLikedStates] = useState<{ [key: string]: boolean }>({});
   const [storyLikeCounts, setStoryLikeCounts] = useState<{ [key: string]: number }>({});
   const [showStoryLikeAnimation, setShowStoryLikeAnimation] = useState<{ [key: string]: boolean }>({});
+  const [storyReplyText, setStoryReplyText] = useState("")
+  const [storyReplySending, setStoryReplySending] = useState(false)
 
   const [gifts, setGifts] = useState<GiftI[]>([]);
 
@@ -1630,7 +1622,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     }, 1000);
     // Dispatch action
     likeStory({ story_uuid: storyId })(dispatch).then((res: any) => {
-      console.log("Like story action dispatched:", res);
       // Update from response if available
       if (res && res.like_count !== undefined && res.liked !== undefined) {
         setStoryLikeCounts(prev => ({ ...prev, [storyId]: res.like_count }));
@@ -1659,6 +1650,34 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     currentStoryUuidRef.current = currentStoryUuid;
   }, [currentStoryUuid]);
 
+  const handleStoryReply = async () => {
+    if (!storyReplyText.trim() || storyReplySending || viewingStoryUserIndex === null) return
+    const currentGroup = groupedStories[viewingStoryUserIndex]
+    const recipientId = currentGroup?.user?.id
+    if (!recipientId) return
+    const currentMedia = currentGroup?.media?.[currentStoryItemIndex]
+    const storyMediaUrl = currentMedia?.file ?? null
+    const storyUuid = currentMedia?.id ?? null
+    const storyAudioUrl = currentGroup?.audio_track_url ?? null
+    setStoryReplySending(true)
+    try {
+      const { apiClient } = await import("../../redux/client/api-client")
+      const form = new FormData()
+      form.append("recipient_id", String(recipientId))
+      form.append("content", storyReplyText.trim())
+      form.append("message_type", "story_reply")
+      if (storyUuid) form.append("story_uuid", String(storyUuid))
+      if (storyMediaUrl) form.append("story_media_url", storyMediaUrl)
+      if (storyAudioUrl) form.append("story_audio_url", storyAudioUrl)
+      await apiClient.post("api/chats/send/", form, { headers: { "Content-Type": "multipart/form-data" } })
+      setStoryReplyText("")
+    } catch (e) {
+      console.error("Error enviando respuesta a historia:", e)
+    } finally {
+      setStoryReplySending(false)
+    }
+  }
+
   const handleGiftClick = () => {
     if (currentStoryUuid) {
       setIsStoryPaused(true);
@@ -1680,7 +1699,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         cost: gift.token_price,
         color: "getColorFromSlug(gift.slug)",
         animation: "getAnimationFromSlug(gift.slug)",
-        video: gift.video ? `${getBaseUrl()}${gift.video}` : "",
+        video: getMediaUrl(gift.video),
         slug: gift.slug,
         token_price: gift.token_price || 0,
         is_active: gift.is_active ?? true,
@@ -1702,7 +1721,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
             cost: gift.token_price,
             color: "getColorFromSlug(gift.slug)",
             animation: "getAnimationFromSlug(gift.slug)",
-            video: gift.video ? `${getBaseUrl()}${gift.video}` : "",
+            video: getMediaUrl(gift.video),
             slug: gift.slug,
             token_price: gift.token_price || 0,
             is_active: gift.is_active ?? true,
@@ -1828,8 +1847,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       cost = giftTypeOrGift.token_price;
       sound = giftTypeOrGift.video
     }
-    console.log(sound)
-    console.log(giftId)
 
     if (cost !== null && cost !== undefined && walletTokens < Number(cost)) {
       setShowFullGiftMenu(false);
@@ -1882,7 +1899,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       }
     }
     setShowVideoGiftModal(true);
-    console.log("==============")
   };
   const sendVideoGiftCount = useRef(false)
   const handleSendVideoGift = async (giftTypeOrGift: string | GiftI, amount?: number) => {
@@ -1940,10 +1956,8 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     ) || [];
   }, [giftRecived]);
 
-  console.log(giftRecived, isGifts, "===2==")
 
   const showGiftRecived = (viewer: any) => {
-    console.log("1", viewer, giftRecived)
     const gifts = giftRecived?.filter((gift: any) => {
       if (gift.sender === viewer.user_id) {
         return gift;
@@ -1967,7 +1981,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         });
       }
     } else {
-      console.log("Este viewer no ha enviado regalos aún");
     }
   }
 
@@ -2038,6 +2051,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                       src={getMediaUrl(user.profile_picture)}
                       className={`w-full h-full rounded-full object-cover filter ${isUploadingStory ? 'brightness-50' : 'brightness-90 group-hover:brightness-100'} transition-all`}
                       alt="Tu historia"
+                      loading="lazy"
                     />
                     {isUploadingStory ? (
                       <div className="absolute inset-0 flex items-center justify-center">
@@ -2079,6 +2093,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                           src={getMediaUrl(story.user.profile_picture)}
                           className="w-full h-full rounded-full object-cover group-hover:scale-105 transition-transform duration-300"
                           alt={story.user.username}
+                          loading="lazy"
                         />
                       </div>
                     </div>
@@ -2179,7 +2194,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
               };
 
               const { content: truncatedContent, needsTruncation } = renderDescriptionWithMentions(data.description || "", !isExpanded);
-              const fullContent = renderDescriptionWithMentions(data.description || "", false).content;
+              const { content: fullContent } = renderDescriptionWithMentions(data.description || "", false);
 
               if (data.type === 'ad') {
                 return (
@@ -2237,6 +2252,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                             className="h-full w-full object-cover border-[#00f0ff]/5"
                             alt="Feed Content"
                             onClick={() => handleVideoClick(index)}
+                            loading="lazy"
                           />
                         ) : (
                           <video
@@ -2434,6 +2450,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                                       (e.target as HTMLImageElement).src = `https://picsum.photos/100/100?random=${index}`;
                                     }}
                                     alt={data.user_id?.username}
+                                    loading="lazy"
                                   />
                                   <div className="absolute inset-0 rounded-full border-2 border-white/5 pointer-events-none" />
 
@@ -2689,7 +2706,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                                 handleVideoGiftClick(data.id);
                               }}
                               className="flex flex-col items-center gap-1"
-                              whileHover={{ scale: 1.1 }}
                               whileTap={{ scale: 0.95 }}
                               animate={{
                                 rotate: [0, -12, 12, -12, 12, 0],
@@ -2853,7 +2869,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                                 handleVideoGiftClick(data.id);
                               }}
                               className="flex flex-col items-center relative"
-                              whileHover={{ scale: 1.1 }}
                               whileTap={{ scale: 0.9 }}
                               animate={{
                                 scale: [1, 1.04, 1],
@@ -2931,12 +2946,12 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
             {/* <div className="absolute inset-0 z-0 opacity-30 blur-3xl">
                  {isVideoContent(groupedStories[viewingStoryUserIndex].media[currentStoryItemIndex].file) ? (
                     <video
-                        src={`${getBaseUrl()}${groupedStories[viewingStoryUserIndex].media[currentStoryItemIndex].file}`}
+                        src={getMediaUrl(groupedStories[viewingStoryUserIndex].media[currentStoryItemIndex].file)}
                         className="w-full h-full object-cover"
                     />
                  ) : (
                     <img
-                        src={`${getBaseUrl()}${groupedStories[viewingStoryUserIndex].media[currentStoryItemIndex].file}`}
+                        src={getMediaUrl(groupedStories[viewingStoryUserIndex].media[currentStoryItemIndex].file)}
                         className="w-full h-full object-cover"
                         alt="Background"
                     />
@@ -3005,7 +3020,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                       onError={(e) => {
                         (e.target as HTMLImageElement).src =
                           user?.profile_picture
-                            ? `${getBaseUrl()}${user.profile_picture}`
+                            ? getMediaUrl(user.profile_picture)
                             : "https://picsum.photos/100/100";
                       }}
                     />
@@ -3032,18 +3047,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 </div>
               </div>
 
-              {/* Blackout Overlay */}
-              <AnimatePresence>
-                {isBlackout && (
-                  <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ duration: 0.2 }}
-                    className="fixed inset-0 z-[9999] bg-black pointer-events-none"
-                  />
-                )}
-              </AnimatePresence>
+              {/* Blackout Overlay — movido al nivel raíz del componente */}
 
             </div>
             {/* Story Main Content - With slide animation during user switch */}
@@ -3070,7 +3074,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 const storyForThisMedia = (stories as Story[])?.find(s => s.id === currentMediaItem?.story);
                 const hasCustomAudio = Boolean(storyForThisMedia?.audio_track_url);
                 const hasStoryFilter = Boolean(storyForThisMedia?.filter_css && storyForThisMedia.filter_css !== "none");
-                const storyMediaSrc = `${getBaseUrl()}/media/${currentMediaItem.file}`;
+                const storyMediaSrc = getMediaUrl(currentMediaItem.file);
                 const textLayers = (storyForThisMedia?.text_layers ?? []) as StoryTextLayer[];
                 const stickerLayers = (storyForThisMedia?.sticker_layers ?? []) as StoryStickerLayer[];
                 return isVideoContent(currentMediaItem.file) ? (
@@ -3213,11 +3217,25 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 type="text"
                 placeholder={t('videos:comments.sendMessage')}
                 className="flex-1 bg-white/10 border border-white/20 rounded-full px-3 py-1 text-white placeholder-gray-400 focus:outline-none focus:border-[#00f0ff] backdrop-blur-md"
+                value={storyReplyText}
+                onChange={(e) => setStoryReplyText(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleStoryReply() }}
+                disabled={storyReplySending || isOwner}
               />
+              {storyReplyText.trim() && !isOwner && (
+                <motion.button
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  onClick={handleStoryReply}
+                  disabled={storyReplySending}
+                  className="p-2 rounded-full bg-[#00f0ff]/20 border border-[#00f0ff]/40 text-[#00f0ff] disabled:opacity-50"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                </motion.button>
+              )}
               {isOwner ?
                 <motion.button
                   className="p-2  hover:from-[#ff0099]/80 rounded-full backdrop-blur-md text-white shadow-lg shadow-pink-500/20"
-                  whileHover={{ scale: 1.1 }}
                   whileTap={{ scale: 0.95 }}
                   animate={{
                     x: [-2, 2, -2, 0],
@@ -3277,7 +3295,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 <motion.button
                   onClick={handleGiftClick}
                   className="p-2  hover:from-[#ff0099]/80 rounded-full backdrop-blur-md text-white shadow-lg shadow-pink-500/20"
-                  whileHover={{ scale: 1.1 }}
                   whileTap={{ scale: 0.95 }}
                   animate={{
                     rotate: [0, -12, 12, -12, 12, 0], // sacudida más intensa
@@ -3330,7 +3347,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                       </motion.button>
                       <motion.button
                         whileTap={{ scale: 0.98 }}
-                        onClick={() => handleCategoryClick('invest', 10)}
+                        onClick={() => { setShowGiftMenu(false); setShowTokenShopModal(true); }}
                         className="w-full bg-blue-500/20 text-blue-300 p-3 rounded-xl border border-blue-500/30"
                       >
                         💎 {t('videos:actions.giftInvest')}
@@ -3393,7 +3410,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                   <div className="flex flex-col items-center gap-3 p-4 bg-black/60 backdrop-blur-md rounded-2xl border border-white/10 shadow-2xl shadow-black/50">
                     <div className="relative">
                       <img
-                        src={`${getBaseUrl()}${incomingUser.profile_picture}`}
+                        src={getMediaUrl(incomingUser.profile_picture)}
                         className="w-16 h-16 rounded-full object-cover border-2 border-white/20"
                         alt={incomingUser.username}
                         onError={(e) => {
@@ -3487,19 +3504,13 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                           damping: 15
                         }}
                         className={`flex items-center bg-white/5 backdrop-blur-md rounded-2xl border ${giftsSentByThisViewer(viewer) && giftsSentByThisViewer(viewer).length > 0 ? "border-pink-500" : " border-white/10"} shadow-2xl shadow-[#00f0ff]/10 hover:shadow-[#00f0ff]/20 transition-all pr-4 py-2 gap-2 pl-1`}
-                        whileHover={{
-                          scale: 1.02,
-                          rotateY: 5,
-                          boxShadow: "0 10px 30px rgba(0, 240, 255, 0.3)"
-                        }}
 
                       >
                         <motion.div
                           className="relative w-12 h-12 rounded-full overflow-hidden"
-                          whileHover={{ scale: 1.1 }}
                         >
                           <img
-                            src={viewer.profile_picture?.startsWith('http') ? viewer.profile_picture : `${getBaseUrl()}${viewer.profile_picture}`}
+                            src={getMediaUrl(viewer.profile_picture)}
                             className="w-full h-full object-cover"
                             alt={viewer.username}
                             onError={(e) => {
@@ -3523,10 +3534,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                         {/* Surprise: Mini sparkles on hover */}
                         <motion.div
                           className="flex items-center justify-center w-8 h-8 rounded-full"
-                          whileHover={{
-                            scale: 1.2,
-                            backgroundColor: "#00f0ff"
-                          }}
                         >
                           <div className="flex items-center gap-3 pr-15">
                             {viewer.user_liked && (
@@ -3553,14 +3560,20 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
                               const hasGifts = giftsSentByThisViewer(viewer) && giftsSentByThisViewer(viewer).length > 0;
                               const giftCount = giftsSentByThisViewer(viewer)?.length || 0;
-                              console.log(giftsSentByThisViewer(viewer), viewer, "9999999999999")
                               return hasGifts ? (
                                 <div className="relative">
                                   <motion.div
-                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-pink-600/40 to-purple-600/40 
-                                          rounded-full border border-pink-500/60 backdrop-blur-md shadow-lg shadow-pink-500/30"
-                                    whileHover={{ scale: 1.08 }}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-pink-600/40 to-purple-600/40
+                                          rounded-full border border-pink-500/60 backdrop-blur-md shadow-lg shadow-pink-500/30 cursor-pointer"
                                     whileTap={{ scale: 0.95 }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const gifts = giftsSentByThisViewer(viewer);
+                                      if (gifts && gifts.length > 0) {
+                                        const g = gifts[0];
+                                        setViewerGiftOverlay({ gift_video: g.gift, gift_type: g.type, sender: viewer.username });
+                                      }
+                                    }}
                                   >
                                     <svg width="18" height="18" viewBox="0 0 120 120" fill="none" className="drop-shadow">
                                       <path d="M94 58H26V104H94V58Z" fill="#FF3366" />
@@ -3904,33 +3917,31 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         )}
       </AnimatePresence>
 
-      {/* Gift Animation Overlay - Moved to top level to show in videos too */}
+      {/* Gift Animation Overlay — pantalla completa, emerge como en el perfil */}
       <AnimatePresence>
         {giftAnimation && (
           <motion.div
             key="gift-animation-overlay"
-            initial={{ opacity: 0, y: 200, scale: 0.7 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 400, scale: 0.7 }}
-            transition={{ type: "tween", duration: 0.4, ease: "easeInOut" }}
-            className="fixed bottom-32 left-1/2 -translate-x-1/2 z-[100] pointer-events-none w-[90vw] max-w-lg overflow-visible"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.35 }}
+            className="fixed inset-0 z-[100] pointer-events-none"
           >
-            <video
+            <motion.video
               key={giftAnimation.giftId}
-              src={`${getBaseUrl()}${giftAnimation.gift}`}
+              src={getMediaUrl(giftAnimation.gift)}
               autoPlay
               playsInline
               muted={false}
-              className="w-full drop-shadow-[0_0_30px_rgba(255,255,255,0.3)] rounded-3xl"
+              initial={{ scale: 0.6, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.6, opacity: 0 }}
+              transition={{ type: "spring", damping: 22, stiffness: 200 }}
+              className="absolute inset-0 w-full h-full object-cover"
               style={{
-                WebkitMaskImage: `
-                    linear-gradient(to top, transparent 10%, black 50%),
-                    linear-gradient(to bottom, transparent 10%, black 50%),
-                    linear-gradient(to left, transparent 0%, black 30%),
-                    linear-gradient(to right, transparent 0%, black 30%)
-                  `,
-                WebkitMaskComposite: "destination-in",
-                maskComposite: "intersect"
+                maskImage: `radial-gradient(ellipse 70% 65% at 50% 45%, black 30%, transparent 75%)`,
+                WebkitMaskImage: `radial-gradient(ellipse 70% 65% at 50% 45%, black 30%, transparent 75%)`,
               }}
               onTimeUpdate={(e) => {
                 const video = e.currentTarget;
@@ -3955,6 +3966,20 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 setGiftAnimation(null);
               }}
             />
+            {/* Nombre del regalo abajo */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3 }}
+              className="absolute bottom-24 left-0 right-0 flex flex-col items-center gap-1"
+            >
+              <p className="text-white font-black text-2xl drop-shadow-[0_2px_12px_rgba(0,0,0,0.9)]">
+                {giftAnimation.type}
+              </p>
+              <p className="text-white/70 text-sm drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]">
+                para @{typeof giftAnimation.sender === 'string' ? giftAnimation.sender : (giftAnimation.sender as any)?.username ?? ''}
+              </p>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -3964,6 +3989,90 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
           ? null
           : <BottomNavbar />
       }
+
+      {/* Overlay regalo viewer historia — pantalla completa, no cierra el modal */}
+      <AnimatePresence>
+        {viewerGiftOverlay && (
+          <motion.div
+            key="viewer-gift-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.35 }}
+            style={{ position: 'fixed', inset: 0, zIndex: 9000, pointerEvents: 'auto' }}
+            onClick={() => { setViewerGiftOverlay(null); setViewerGiftBlackout(false); }}
+          >
+            <motion.video
+              key={viewerGiftOverlay.gift_video}
+              src={getMediaUrl(viewerGiftOverlay.gift_video)}
+              autoPlay
+              playsInline
+              muted={false}
+              initial={{ scale: 0.6, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.6, opacity: 0 }}
+              transition={{ type: "spring", damping: 22, stiffness: 200 }}
+              style={{
+                position: 'absolute', inset: 0, width: '100%', height: '100%',
+                objectFit: 'cover', pointerEvents: 'none',
+                maskImage: 'radial-gradient(ellipse 70% 65% at 50% 45%, black 30%, transparent 75%)',
+                WebkitMaskImage: 'radial-gradient(ellipse 70% 65% at 50% 45%, black 30%, transparent 75%)',
+              }}
+              onTimeUpdate={(e) => {
+                const v = e.currentTarget;
+                const type = viewerGiftOverlay.gift_type?.toLowerCase();
+                if (type?.includes('space') || type === '🪐') {
+                  if (v.currentTime >= 4.0 && v.currentTime < 6.0) {
+                    if (!viewerGiftBlackout) setViewerGiftBlackout(true);
+                  } else if (v.currentTime >= 6.0 && viewerGiftBlackout) {
+                    setViewerGiftBlackout(false);
+                  }
+                }
+              }}
+              onEnded={() => { setViewerGiftOverlay(null); setViewerGiftBlackout(false); }}
+            />
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3 }}
+              style={{ position: 'absolute', bottom: 96, left: 0, right: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, pointerEvents: 'none' }}
+            >
+              <p style={{ color: 'white', fontWeight: 900, fontSize: 24, textShadow: '0 2px 12px rgba(0,0,0,0.9)' }}>
+                {viewerGiftOverlay.gift_type}
+              </p>
+              <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: 14, textShadow: '0 2px 8px rgba(0,0,0,0.9)' }}>
+                de @{viewerGiftOverlay.sender}
+              </p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Blackout del regalo del viewer */}
+      <AnimatePresence>
+        {viewerGiftBlackout && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            style={{ position: 'fixed', inset: 0, zIndex: 99999, background: 'black', pointerEvents: 'none' }}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Blackout global — cubre absolutamente todo incluyendo navbar e inputs */}
+      <AnimatePresence>
+        {isBlackout && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            style={{ position: 'fixed', inset: 0, zIndex: 99999, background: 'black', pointerEvents: 'none' }}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Token Shop Modal */}
       <TokenShopModal

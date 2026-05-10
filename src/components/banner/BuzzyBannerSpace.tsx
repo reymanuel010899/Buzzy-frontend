@@ -121,7 +121,7 @@ export default function BuzzyBannerSpace() {
 
         {/* Contenido principal (oculto cuando es SCRATCH o NARRATIVE — ellos lo manejan) */}
         {!isNarrative && !isScratch && (
-          <div className="relative z-10 flex flex-col items-center justify-center px-8 py-4 text-center gap-0.5">
+          <div className="relative z-10 flex flex-col items-center justify-center px-8 pt-14 pb-4 text-center gap-0.5 w-full h-full">
             <div className="flex items-center gap-2">
               <span className="text-base">{getTypeIcon(banner.type)}</span>
               <p className="font-bold text-sm leading-snug" style={{ color: tc }}>

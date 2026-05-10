@@ -3,7 +3,6 @@ import { AnimatePresence, motion } from "framer-motion"
 import { ArrowRight, Loader2, Lock, Shield, ShieldCheck, X } from "lucide-react"
 import { getChatPrivacyStatus, verifyChatPin } from "../../redux/actions/chatPrivacy"
 
-
 interface WithdrawPinModalProps {
   isOpen: boolean
   onClose: () => void
@@ -36,9 +35,7 @@ const WithdrawPinModal: React.FC<WithdrawPinModalProps> = ({ isOpen, onClose, on
       setVerified(false)
       setHasPin(null)
       return
-
     }
-
     setCheckingPin(true)
     getChatPrivacyStatus()
       .then((data) => setHasPin(data.has_pin))
@@ -46,10 +43,8 @@ const WithdrawPinModal: React.FC<WithdrawPinModalProps> = ({ isOpen, onClose, on
       .finally(() => setCheckingPin(false))
   }, [isOpen])
 
-
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (loading || verified) return
-
     if (/^\d$/.test(e.key)) {
       e.preventDefault()
       setPin((prev) => {
@@ -60,7 +55,6 @@ const WithdrawPinModal: React.FC<WithdrawPinModalProps> = ({ isOpen, onClose, on
       })
       return
     }
-
     if (e.key === "Backspace") {
       e.preventDefault()
       setError(null)
@@ -71,7 +65,6 @@ const WithdrawPinModal: React.FC<WithdrawPinModalProps> = ({ isOpen, onClose, on
       })
       return
     }
-
     if (e.key === "Enter") {
       e.preventDefault()
       handleSubmit()
@@ -112,220 +105,257 @@ const WithdrawPinModal: React.FC<WithdrawPinModalProps> = ({ isOpen, onClose, on
   }, [pin]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <>
-      <AnimatePresence>
-        {isOpen && (
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[130] flex items-end justify-center sm:items-center p-4"
+          style={{ background: "rgba(0,10,8,0.88)", backdropFilter: "blur(12px)" }}
+          onClick={onClose}
+        >
           <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[130] flex items-end justify-center sm:items-center bg-black/80 backdrop-blur-xl p-4"
-            onClick={onClose}
+            initial={{ y: 80, opacity: 0, scale: 0.94 }}
+            animate={{ y: 0, opacity: 1, scale: 1 }}
+            exit={{ y: 80, opacity: 0, scale: 0.94 }}
+            transition={{ type: "spring", damping: 26, stiffness: 280 }}
+            className="relative w-full max-w-[360px] overflow-hidden"
+            style={{
+              background: "linear-gradient(160deg, #071a14 0%, #050f0a 60%, #020a06 100%)",
+              borderRadius: 32,
+              border: "1px solid rgba(16,185,129,0.18)",
+              boxShadow: "0 0 60px rgba(16,185,129,0.12), 0 32px 80px rgba(0,0,0,0.7)",
+            }}
+            onClick={(e) => e.stopPropagation()}
           >
-            <motion.div
-              initial={{ y: 60, opacity: 0, scale: 0.96 }}
-              animate={{ y: 0, opacity: 1, scale: 1 }}
-              exit={{ y: 60, opacity: 0, scale: 0.96 }}
-              transition={{ type: "spring", damping: 26, stiffness: 280 }}
-              className="relative w-full max-w-[360px] overflow-hidden rounded-[32px] border border-white/8"
-              style={{ background: "rgba(5,7,20,0.97)", backdropFilter: "blur(30px)" }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* glow blobs */}
-              <div className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-32 bg-[#ffcc00]/8 rounded-full blur-3xl pointer-events-none" />
-              <div className="absolute bottom-0 right-0 w-40 h-40 bg-[#10b981]/6 rounded-full blur-3xl pointer-events-none" />
+            {/* Glow blobs */}
+            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-64 h-40 rounded-full blur-3xl pointer-events-none"
+              style={{ background: "radial-gradient(ellipse, rgba(16,185,129,0.15) 0%, transparent 70%)" }} />
+            <div className="absolute bottom-0 right-0 w-48 h-48 rounded-full blur-3xl pointer-events-none"
+              style={{ background: "radial-gradient(ellipse, rgba(6,214,160,0.08) 0%, transparent 70%)" }} />
 
-              {/* header */}
-              <div className="relative z-10 flex items-center justify-between px-5 pt-5 pb-4 border-b border-white/6">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#ffcc00]/10 border border-[#ffcc00]/20">
-                    <Shield size={20} className="text-[#ffcc00]" />
-                  </div>
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-[#ffcc00]/60">Wallet</p>
-                    <h2 className="text-lg font-black text-white leading-tight">Confirmar retiro</h2>
-                  </div>
+            {/* Header */}
+            <div className="relative z-10 flex items-center justify-between px-6 pt-6 pb-4"
+              style={{ borderBottom: "1px solid rgba(16,185,129,0.1)" }}>
+              <div className="flex items-center gap-3">
+                <div className="relative flex h-11 w-11 items-center justify-center rounded-2xl"
+                  style={{
+                    background: "linear-gradient(135deg, rgba(16,185,129,0.2), rgba(6,214,160,0.1))",
+                    border: "1px solid rgba(16,185,129,0.3)",
+                    boxShadow: "0 0 20px rgba(16,185,129,0.2)",
+                  }}>
+                  <Shield size={20} style={{ color: "#10b981" }} />
                 </div>
-                <button
-                  onClick={onClose}
-                  className="rounded-full p-2 text-white/40 hover:text-white hover:bg-white/5 transition"
-                >
-                  <X size={18} />
-                </button>
+                <div>
+                  <p className="text-[9px] font-bold uppercase tracking-[0.35em]" style={{ color: "rgba(16,185,129,0.6)" }}>
+                    WALLET
+                  </p>
+                  <h2 className="text-lg font-black text-white leading-tight">Confirmar retiro</h2>
+                </div>
               </div>
+              <button
+                onClick={onClose}
+                className="rounded-full p-2 transition"
+                style={{ color: "rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.04)" }}
+              >
+                <X size={18} />
+              </button>
+            </div>
 
-              {/* body */}
-              <div className="relative z-10 px-5 py-5">
+            {/* Body */}
+            <div className="relative z-10 px-6 py-6">
 
-                {/* loading check */}
-                {checkingPin && (
-                  <div className="flex flex-col items-center justify-center py-12 gap-3">
-                    <Loader2 size={28} className="animate-spin text-[#ffcc00]/60" />
-                    <p className="text-xs text-white/30 uppercase tracking-widest">Verificando...</p>
+              {/* Checking */}
+              {checkingPin && (
+                <div className="flex flex-col items-center justify-center py-12 gap-3">
+                  <Loader2 size={28} className="animate-spin" style={{ color: "rgba(16,185,129,0.6)" }} />
+                  <p className="text-xs uppercase tracking-widest" style={{ color: "rgba(255,255,255,0.25)" }}>
+                    Verificando...
+                  </p>
+                </div>
+              )}
+
+              {/* No PIN */}
+              {!checkingPin && hasPin === false && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex flex-col items-center text-center py-6"
+                >
+                  <div className="relative mb-6">
+                    <div className="absolute inset-0 rounded-full blur-2xl" style={{ background: "rgba(16,185,129,0.25)" }} />
+                    <div className="relative flex h-20 w-20 items-center justify-center rounded-full"
+                      style={{
+                        background: "linear-gradient(135deg, rgba(16,185,129,0.15), rgba(6,214,160,0.08))",
+                        border: "1px solid rgba(16,185,129,0.25)",
+                      }}>
+                      <Lock size={30} style={{ color: "#10b981" }} />
+                    </div>
                   </div>
-                )}
-
-                {/* no PIN configured */}
-                {!checkingPin && hasPin === false && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="flex flex-col items-center text-center py-6"
+                  <h3 className="text-xl font-bold text-white mb-2">No tienes PIN configurado</h3>
+                  <p className="text-sm leading-6 max-w-[260px] mb-7" style={{ color: "rgba(255,255,255,0.4)" }}>
+                    Para retirar fondos necesitas crear tu PIN de seguridad de 6 dígitos en Privacidad de chats.
+                  </p>
+                  <motion.button
+                    whileTap={{ scale: 0.97 }}
+                    onClick={onConfigurePin}
+                    className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl font-bold text-sm text-white transition"
+                    style={{
+                      background: "linear-gradient(135deg, #10b981, #059669)",
+                      boxShadow: "0 0 28px rgba(16,185,129,0.35)",
+                    }}
                   >
-                    <div className="relative mb-5">
-                      <div className="absolute inset-0 rounded-full bg-[#ffcc00]/20 blur-2xl" />
-                      <div className="relative flex h-20 w-20 items-center justify-center rounded-full border border-white/10 bg-white/4">
-                        <Lock size={30} className="text-[#ffcc00]" />
-                      </div>
+                    Configurar PIN ahora
+                    <motion.div animate={{ x: [0, 5, 0] }} transition={{ duration: 1.2, repeat: Infinity, ease: "easeInOut" }}>
+                      <ArrowRight size={16} />
+                    </motion.div>
+                  </motion.button>
+                </motion.div>
+              )}
+
+              {/* PIN entry */}
+              {!checkingPin && hasPin === true && (
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                  <motion.div animate={shake ? { x: [0, -10, 10, -7, 7, 0] } : { x: 0 }} transition={{ duration: 0.38 }}>
+
+                    {/* Info box */}
+                    <div className="mb-6 rounded-2xl px-4 py-3"
+                      style={{ background: "rgba(16,185,129,0.07)", border: "1px solid rgba(16,185,129,0.15)" }}>
+                      <p className="text-sm font-semibold text-white">Ingresa tu PIN de seguridad</p>
+                      <p className="text-xs mt-0.5 leading-5" style={{ color: "rgba(255,255,255,0.38)" }}>
+                        Por tu seguridad, necesitamos verificar tu identidad antes de procesar el retiro.
+                      </p>
                     </div>
 
-                    <h3 className="text-xl font-bold text-white mb-2">No tienes PIN configurado</h3>
-                    <p className="text-sm text-white/45 leading-6 max-w-[260px] mb-7">
-                      Para retirar fondos necesitas crear tu PIN de seguridad de 6 dígitos en Privacidad de chats.
-                    </p>
+                    {/* Hidden input */}
+                    <input
+                      ref={hiddenInputRef}
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      aria-hidden="true"
+                      tabIndex={-1}
+                      value=""
+                      onChange={() => undefined}
+                      onKeyDown={handleKeyDown}
+                      className="sr-only"
+                    />
 
-                    <motion.button
-                      whileTap={{ scale: 0.97 }}
-                      onClick={onConfigurePin}
-                      className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl font-semibold text-sm text-black transition hover:scale-[1.02]"
-                      style={{ background: "linear-gradient(135deg, #ffcc00, #f59e0b)", boxShadow: "0 0 24px rgba(255,204,0,0.25)" }}
-                    >
-                      Configurar PIN ahora
-                      <motion.div
-                        animate={{ x: [0, 5, 0] }}
-                        transition={{ duration: 1.2, repeat: Infinity, ease: "easeInOut" }}
-                      >
-                        <ArrowRight size={16} />
-                      </motion.div>
-                    </motion.button>
-                  </motion.div>
-                )}
-
-                {/* PIN entry */}
-                {!checkingPin && hasPin === true && (
-                  <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    animate-shake={shake ? "shake" : undefined}
-                  >
-                    <motion.div
-                      animate={shake ? { x: [0, -10, 10, -7, 7, 0] } : { x: 0 }}
-                      transition={{ duration: 0.38 }}
-                    >
-                      {/* info box */}
-                      <div className="mb-5 rounded-2xl border border-white/6 bg-white/3 px-4 py-3">
-                        <p className="text-sm font-semibold text-white">Ingresa tu PIN de seguridad</p>
-                        <p className="text-xs text-white/40 mt-0.5 leading-5">
-                          Por tu seguridad, necesitamos verificar tu identidad antes de procesar el retiro.
-                        </p>
-                      </div>
-
-                      {/* hidden input */}
-                      <input
-                        ref={hiddenInputRef}
-                        type="text"
-                        inputMode="numeric"
-                        autoComplete="one-time-code"
-                        aria-hidden="true"
-                        tabIndex={-1}
-                        value=""
-                        onChange={() => undefined}
-                        onKeyDown={handleKeyDown}
-                        className="sr-only"
-                      />
-
-                      {/* PIN slots */}
-                      <div className="grid grid-cols-6 gap-2 mb-4">
-                        {Array.from({ length: PIN_LENGTH }).map((_, i) => (
+                    {/* PIN slots */}
+                    <div className="grid grid-cols-6 gap-2.5 mb-3">
+                      {Array.from({ length: PIN_LENGTH }).map((_, i) => {
+                        const isActive = i === activeIndex && pin.length < PIN_LENGTH
+                        const isFilled = !!pin[i]
+                        return (
                           <motion.div
                             key={i}
                             role="button"
                             tabIndex={0}
                             onClick={() => handleSlotClick(i)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter" || e.key === " ") handleSlotClick(i)
-                            }}
-                            animate={verified ? { scale: [1, 1.15, 1] } : {}}
+                            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") handleSlotClick(i) }}
+                            animate={verified ? { scale: [1, 1.2, 1] } : {}}
                             transition={{ delay: i * 0.05, duration: 0.3 }}
-                            className={`flex h-12 items-center justify-center rounded-2xl border transition-all duration-200 cursor-pointer ${
-                              verified
-                                ? "border-[#10b981]/60 bg-[#10b981]/15"
-                                : i === activeIndex && pin.length < PIN_LENGTH
-                                ? "border-[#ffcc00]/60 bg-[#ffcc00]/8 shadow-[0_0_16px_rgba(255,204,0,0.15)]"
-                                : pin[i]
-                                ? "border-[#ffcc00]/40 bg-[#ffcc00]/6"
-                                : "border-white/8 bg-white/3"
-                            }`}
+                            className="flex h-13 items-center justify-center rounded-2xl cursor-pointer transition-all duration-200"
+                            style={{
+                              height: 52,
+                              background: verified
+                                ? "rgba(16,185,129,0.18)"
+                                : isActive
+                                  ? "rgba(16,185,129,0.12)"
+                                  : isFilled
+                                    ? "rgba(16,185,129,0.08)"
+                                    : "rgba(255,255,255,0.04)",
+                              border: verified
+                                ? "1px solid rgba(16,185,129,0.55)"
+                                : isActive
+                                  ? "1px solid rgba(16,185,129,0.6)"
+                                  : isFilled
+                                    ? "1px solid rgba(16,185,129,0.35)"
+                                    : "1px solid rgba(255,255,255,0.07)",
+                              boxShadow: isActive ? "0 0 16px rgba(16,185,129,0.2)" : "none",
+                            }}
                           >
-                            {verified ? (
-                              <div className="h-2.5 w-2.5 rounded-full bg-[#10b981]" />
-                            ) : (
-                              <div className={`h-2.5 w-2.5 rounded-full transition-all duration-150 ${
-                                pin[i] ? "bg-[#ffcc00] scale-100" : "bg-white/15 scale-75"
-                              }`} />
-                            )}
+                            <div className="h-2.5 w-2.5 rounded-full transition-all duration-150"
+                              style={{
+                                background: verified
+                                  ? "#10b981"
+                                  : isFilled
+                                    ? "#10b981"
+                                    : "rgba(255,255,255,0.15)",
+                                transform: isFilled || verified ? "scale(1)" : "scale(0.75)",
+                                boxShadow: (isFilled || verified) ? "0 0 8px rgba(16,185,129,0.6)" : "none",
+                              }}
+                            />
                           </motion.div>
-                        ))}
-                      </div>
+                        )
+                      })}
+                    </div>
 
-                      <p className="text-center text-[10px] uppercase tracking-[0.25em] text-white/20 mb-4">
-                        Toca una casilla y escribe con el teclado
-                      </p>
+                    <p className="text-center text-[9px] uppercase tracking-[0.28em] mb-5"
+                      style={{ color: "rgba(255,255,255,0.18)" }}>
+                      Toca una casilla y escribe con el teclado
+                    </p>
 
-                      <AnimatePresence>
-                        {error && (
-                          <motion.p
-                            initial={{ opacity: 0, y: -4 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0 }}
-                            className="text-center text-xs text-red-400 mb-4"
-                          >
-                            {error}
-                          </motion.p>
-                        )}
-                      </AnimatePresence>
+                    <AnimatePresence>
+                      {error && (
+                        <motion.p
+                          initial={{ opacity: 0, y: -4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0 }}
+                          className="text-center text-xs mb-4"
+                          style={{ color: "#f87171" }}
+                        >
+                          {error}
+                        </motion.p>
+                      )}
+                    </AnimatePresence>
 
-                      <motion.button
-                        whileTap={{ scale: 0.97 }}
-                        onClick={handleSubmit}
-                        disabled={!filled || loading || verified}
-                        className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl font-bold text-sm transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-                        style={{
-                          background: verified
-                            ? "linear-gradient(135deg, #10b981, #059669)"
-                            : "linear-gradient(135deg, #ffcc00, #f59e0b)",
-                          boxShadow: verified
-                            ? "0 0 24px rgba(16,185,129,0.35)"
-                            : filled
-                            ? "0 0 24px rgba(255,204,0,0.3)"
-                            : "none",
-                          color: "#000",
-                        }}
-                      >
-                        {loading ? (
-                          <Loader2 size={18} className="animate-spin" />
-                        ) : verified ? (
-                          <>
-                            <ShieldCheck size={18} />
-                            Verificado
-                          </>
-                        ) : (
-                          <>
-                            <Shield size={16} />
-                            Confirmar
-                          </>
-                        )}
-                      </motion.button>
-                    </motion.div>
+                    {/* Confirm button */}
+                    <motion.button
+                      whileTap={{ scale: 0.97 }}
+                      onClick={handleSubmit}
+                      disabled={!filled || loading || verified}
+                      className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl font-bold text-sm transition-all duration-300 text-white"
+                      style={{
+                        background: verified
+                          ? "linear-gradient(135deg, #10b981, #059669)"
+                          : filled
+                            ? "linear-gradient(135deg, #10b981, #047857)"
+                            : "rgba(16,185,129,0.15)",
+                        border: filled || verified
+                          ? "none"
+                          : "1px solid rgba(16,185,129,0.2)",
+                        boxShadow: filled || verified
+                          ? "0 0 32px rgba(16,185,129,0.4), 0 8px 24px rgba(0,0,0,0.3)"
+                          : "none",
+                        opacity: (!filled && !verified) ? 0.5 : 1,
+                        cursor: (!filled || loading || verified) ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      {loading ? (
+                        <Loader2 size={18} className="animate-spin" />
+                      ) : verified ? (
+                        <>
+                          <ShieldCheck size={18} />
+                          Verificado
+                        </>
+                      ) : (
+                        <>
+                          <Shield size={16} />
+                          Confirmar
+                        </>
+                      )}
+                    </motion.button>
+
                   </motion.div>
-                )}
-              </div>
-            </motion.div>
+                </motion.div>
+              )}
+            </div>
           </motion.div>
-        )}
-      </AnimatePresence>
-
-    </>
+        </motion.div>
+      )}
+    </AnimatePresence>
   )
 }
 

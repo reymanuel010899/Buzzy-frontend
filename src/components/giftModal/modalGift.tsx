@@ -229,7 +229,7 @@ const GiftPanel: React.FC<{
     walletTokens: number;
     theme: any;
 }> = ({ message, setMessage, cost, walletTokens, theme }) => (
-    <div className="relative w-full max-w-2xl bg-white/5 backdrop-blur-2xl border border-white/10 rounded-[2rem] p-5 md:p-6 shadow-2xl z-10 mx-4">
+    <div className="relative w-full max-w-2xl bg-white/5 backdrop-blur-sm border border-white/10 rounded-[2rem] p-5 md:p-6 shadow-2xl z-10 mx-4">
         <h2 className="text-lg md:text-2xl font-black text-center mb-6 text-gray-100/90 tracking-[0.4em] uppercase drop-shadow-lg">
             Gift Presential
         </h2>
@@ -356,7 +356,7 @@ const SuccessOverlay: React.FC<{ onClose: () => void; theme: any }> = ({ onClose
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 z-[120] bg-black/95 backdrop-blur-2xl flex items-center justify-center p-6"
+        className="fixed inset-0 z-[120] bg-black/95 backdrop-blur-sm flex items-center justify-center p-6"
     >
         <div className="text-center">
             <div className="relative inline-block mb-6">
@@ -376,7 +376,6 @@ const SuccessOverlay: React.FC<{ onClose: () => void; theme: any }> = ({ onClose
             </p>
 
             <motion.button
-                whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
                 onClick={onClose}
                 className={`mt-12 px-10 py-3.5 bg-gradient-to-r ${theme.bgGradient} rounded-full font-black text-white tracking-[0.2em] shadow-xl transition-all uppercase border-2 shadow-inner text-xs`}

@@ -1,13 +1,31 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
 
 interface FullscreenMediaPreviewProps {
-    activePreview: { url: string; type: 'image' | 'video' } | null;
+    activePreview: { url: string; type: 'image' | 'video'; audioUrl?: string } | null;
     onClose: () => void;
 }
 
 const FullscreenMediaPreview: React.FC<FullscreenMediaPreviewProps> = ({ activePreview, onClose }) => {
+    const audioRef = useRef<HTMLAudioElement | null>(null);
+
+    useEffect(() => {
+        if (activePreview?.audioUrl) {
+            const audio = new Audio(activePreview.audioUrl);
+            audio.loop = true;
+            audio.volume = 0.8;
+            audio.play().catch(() => {});
+            audioRef.current = audio;
+        }
+        return () => {
+            if (audioRef.current) {
+                audioRef.current.pause();
+                audioRef.current = null;
+            }
+        };
+    }, [activePreview?.audioUrl]);
+
     return (
         <AnimatePresence>
             {activePreview && (

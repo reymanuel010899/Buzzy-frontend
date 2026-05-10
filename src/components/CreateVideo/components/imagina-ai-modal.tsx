@@ -5,10 +5,11 @@ import { motion, AnimatePresence } from "framer-motion"
 import {
   X, Sparkles, Wand2, ChevronRight,
   Play, Zap, Image as ImageIcon, History,
-  Mic, Clock,
+  Mic, Clock, Download, Heart,
   Paintbrush, Clapperboard, Brain, ArrowRight, Upload, Trash2
 } from "lucide-react"
-import { getTemplatesByStyleSlug, getAIHistory, generateAIAndWait, getAICredits, type AITemplate, type AIGenerationHistory, type PurchaseResult } from "@/services/aiService"
+import { getTemplatesByStyleSlug, getAIHistory, generateAIAndWait, getAICredits, publishAIContent, type AITemplate, type AIGenerationHistory, type PurchaseResult } from "@/services/aiService"
+import { getMediaUrl } from "@/redux/client/api-client"
 import AIRechargeModal from "./ai-recharge-modal"
 
 interface ImaginaAIModalProps {
@@ -71,7 +72,7 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
   const [videoStep, setVideoStep] = useState<VideoStep>('style')
   const [selectedStyle, setSelectedStyle] = useState<string | null>(null)
   const [prompt, setPrompt] = useState('')
-  const [duration, setDuration] = useState<'6' | '18' | '30'>('6')
+  const [duration, setDuration] = useState<'5' | '6' | '10'>('6')
   const [generatingProgress, setGeneratingProgress] = useState(0)
   const [isRecording, setIsRecording] = useState(false)
   const [referenceImage, setReferenceImage] = useState<File | null>(null)
@@ -83,10 +84,20 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
   const [templatesLoading, setTemplatesLoading] = useState(false)
   const [selectedTemplatePrompt, setSelectedTemplatePrompt] = useState<string | null>(null)
   const [generatedMediaUrl, setGeneratedMediaUrl] = useState<string | null>(null)
+  const [generatedHistoryId, setGeneratedHistoryId] = useState<number | null>(null)
+  const [publishLoading, setPublishLoading] = useState(false)
   const [generateError, setGenerateError] = useState<string | null>(null)
   const [historyItems, setHistoryItems] = useState<AIGenerationHistory[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
+  const [selectedHistoryItem, setSelectedHistoryItem] = useState<AIGenerationHistory | null>(null)
+  const [historyPublishLoading, setHistoryPublishLoading] = useState(false)
   const progressIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Seconds-based credit helpers (1 video credit = 6 seconds)
+  const SECS_PER_CREDIT = 6
+  const availableSeconds = videoCredits * SECS_PER_CREDIT
+  const videoCost = Math.ceil(parseInt(duration) / SECS_PER_CREDIT) // credits consumed
+  const hasEnoughCredits = videoCredits >= videoCost
 
   // Handle reference image upload
   const handleReferenceUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -151,6 +162,7 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
       if (progressIntervalRef.current) clearInterval(progressIntervalRef.current)
       setGeneratingProgress(100)
       setGeneratedMediaUrl(result.media_url)
+      setGeneratedHistoryId(result.history_id)
       if (result.video_credits !== undefined) setVideoCredits(result.video_credits)
       if (result.image_credits !== undefined) setImageCredits(result.image_credits)
       setTimeout(() => setVideoStep('complete'), 500)
@@ -160,6 +172,19 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
         || (err as { message?: string })?.message
       setGenerateError(msg || 'Error al generar. Intenta de nuevo.')
       setVideoStep('prompt')
+    }
+  }
+
+  const handlePublish = async () => {
+    if (!generatedHistoryId || publishLoading) return
+    setPublishLoading(true)
+    try {
+      await publishAIContent(generatedHistoryId)
+      handleClose()
+    } catch (err) {
+      console.error('Error publicando:', err)
+    } finally {
+      setPublishLoading(false)
     }
   }
 
@@ -259,7 +284,7 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
                   </button>
                   <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/30">
                     <Clapperboard size={13} className="text-amber-400" />
-                    <span className="text-amber-400 font-bold text-sm">{videoCredits}</span>
+                    <span className="text-amber-400 font-bold text-sm">{availableSeconds}s</span>
                   </div>
                 </div>
 
@@ -305,7 +330,6 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
                     <div className="grid grid-cols-2 gap-4">
                       {/* Crear Video */}
                       <motion.button
-                        whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.98 }}
                         onClick={() => { setMode('video'); setVideoStep('style'); setSelectedStyle(null); setSelectedTemplatePrompt(null); setGenerateError(null); setGeneratedMediaUrl(null); }}
                         className="relative aspect-[4/5] rounded-3xl overflow-hidden group"
@@ -348,7 +372,6 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
 
                       {/* Crear Imagen */}
                       <motion.button
-                        whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.98 }}
                         onClick={() => { setMode('image'); setVideoStep('style'); setSelectedStyle(null); setSelectedTemplatePrompt(null); setGenerateError(null); setGeneratedMediaUrl(null); }}
                         className="relative aspect-[4/5] rounded-3xl overflow-hidden group"
@@ -391,7 +414,6 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
 
                     {/* Historial */}
                     <motion.button
-                      whileHover={{ scale: 1.01 }}
                       whileTap={{ scale: 0.99 }}
                       onClick={() => setMode('history')}
                       className="w-full p-4 rounded-2xl bg-white/5 border border-white/10 flex items-center gap-4"
@@ -411,9 +433,9 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
                       <div className="p-3 rounded-xl bg-white/5 border border-white/5 text-center">
                         <div className="flex items-center justify-center gap-1.5 mb-1">
                           <Clapperboard size={13} className="text-amber-400" />
-                          <span className="text-xl font-bold text-amber-400">{videoCredits}</span>
+                          <span className="text-xl font-bold text-amber-400">{availableSeconds}s</span>
                         </div>
-                        <p className="text-gray-500 text-[10px]">Videos disponibles</p>
+                        <p className="text-gray-500 text-[10px]">Segundos disponibles</p>
                       </div>
                       <div className="p-3 rounded-xl bg-white/5 border border-white/5 text-center">
                         <div className="flex items-center justify-center gap-1.5 mb-1">
@@ -426,7 +448,6 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
 
                     {/* Recargar button */}
                     <motion.button
-                      whileHover={{ scale: 1.01 }}
                       whileTap={{ scale: 0.98 }}
                       onClick={() => setRechargeOpen(true)}
                       className="w-full p-3.5 rounded-2xl bg-gradient-to-r from-amber-500/15 to-orange-500/15 border border-amber-500/30 flex items-center gap-3 hover:border-amber-500/50 transition-all"
@@ -495,7 +516,6 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
                             {creationStyles.map((style) => (
                               <motion.button
                                 key={style.id}
-                                whileHover={{ scale: 1.03 }}
                                 whileTap={{ scale: 0.97 }}
                                 onClick={() => setSelectedStyle(style.id)}
                                 className={`relative aspect-[3/2] rounded-xl overflow-hidden transition-all ${
@@ -535,7 +555,7 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
                               {(['5', '6', '10'] as const).map((d) => (
                                 <button
                                   key={d}
-                                  onClick={() => setDuration(d as '6' | '18' | '30')}
+                                  onClick={() => setDuration(d)}
                                   className={`py-1.5 rounded-lg text-xs font-medium transition-all ${
                                     duration === d
                                       ? 'bg-gradient-to-r from-cyan-500 to-purple-600 text-white'
@@ -550,7 +570,6 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
 
                           {/* Boton Continuar */}
                           <motion.button
-                            whileHover={{ scale: 1.02 }}
                             whileTap={{ scale: 0.98 }}
                             onClick={() => selectedStyle && setVideoStep('prompt')}
                             disabled={!selectedStyle}
@@ -665,6 +684,11 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
                                           src={tpl.image_url}
                                           alt={tpl.title}
                                           className="w-full h-full object-cover"
+                                          onError={(e) => {
+                                            const t = e.currentTarget;
+                                            t.style.display = 'none';
+                                            t.parentElement!.classList.add('bg-white/5', 'flex', 'items-center', 'justify-center');
+                                          }}
                                         />
                                         <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
                                         {selectedTemplatePrompt === tpl.prompt && (
@@ -730,24 +754,28 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
                    
 
                           {/* Costo */}
-                          <div className="flex items-center justify-between p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                          <div className={`flex items-center justify-between p-3 rounded-xl border ${hasEnoughCredits ? 'bg-amber-500/10 border-amber-500/20' : 'bg-red-500/10 border-red-500/30'}`}>
                             <div className="flex items-center gap-2">
-                              <Zap size={16} className="text-amber-400" />
+                              <Zap size={16} className={hasEnoughCredits ? 'text-amber-400' : 'text-red-400'} />
                               <span className="text-white text-sm">Costo de generacion</span>
                             </div>
-                            <span className="text-amber-400 font-bold">
-                              {duration === '6' ? 1 : duration === '18' ? 3 : 5} {duration === '6' ? 'video' : 'videos'}
-                            </span>
+                            <div className="text-right">
+                              <span className={`font-bold text-sm ${hasEnoughCredits ? 'text-amber-400' : 'text-red-400'}`}>
+                                {duration}s
+                              </span>
+                              {!hasEnoughCredits && (
+                                <p className="text-red-400 text-[10px]">Solo tienes {availableSeconds}s</p>
+                              )}
+                            </div>
                           </div>
 
                           {/* Boton Generar */}
                           <motion.button
-                            whileHover={{ scale: 1.02 }}
                             whileTap={{ scale: 0.98 }}
                             onClick={handleGenerate}
-                            disabled={!selectedTemplatePrompt && !prompt.trim()}
+                            disabled={(!selectedTemplatePrompt && !prompt.trim()) || !hasEnoughCredits}
                             className={`w-full py-3 rounded-xl font-semibold flex items-center justify-center gap-2 transition-all ${
-                              selectedTemplatePrompt || prompt.trim()
+                              (selectedTemplatePrompt || prompt.trim()) && hasEnoughCredits
                                 ? 'bg-gradient-to-r from-cyan-500 to-purple-600 text-white shadow-lg shadow-cyan-500/25'
                                 : 'bg-white/10 text-gray-500 cursor-not-allowed'
                             }`}
@@ -843,10 +871,13 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
                           {/* Preview real */}
                           <div className="relative w-full aspect-video rounded-2xl overflow-hidden border border-white/10">
                             {generatedMediaUrl ? (
-                              <img
+                              <video
                                 src={generatedMediaUrl}
-                                alt="Generado por IA"
                                 className="w-full h-full object-cover"
+                                autoPlay
+                                loop
+                                muted
+                                playsInline
                               />
                             ) : (
                               <div className="w-full h-full bg-gradient-to-br from-cyan-500/20 to-purple-500/20 flex items-center justify-center">
@@ -865,7 +896,7 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
                               initial={{ scale: 0 }}
                               animate={{ scale: 1 }}
                               transition={{ type: 'spring', delay: 0.1 }}
-                              className="w-12 h-12 rounded-full bg-gradient-to-br from-cyan-500 to-purple-600 flex items-center justify-center mx-auto mb-3"
+                              className="w-12 h-12 rounded-full bg-gradient-to-br from-amber-400 to-yellow-500 flex items-center justify-center mx-auto mb-3 shadow-lg shadow-amber-500/30"
                             >
                               <Sparkles size={22} className="text-white" />
                             </motion.div>
@@ -880,9 +911,18 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
                             >
                               Cerrar
                             </button>
-                            <button className="flex-1 py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-purple-600 text-white text-sm font-semibold flex items-center justify-center gap-1.5">
+                            {generatedMediaUrl && (
+                              <a
+                                href={generatedMediaUrl}
+                                download
+                                className="py-3 px-4 rounded-xl bg-white/10 text-white flex items-center justify-center"
+                              >
+                                <Download size={16} />
+                              </a>
+                            )}
+                            <button onClick={handlePublish} disabled={publishLoading} className="flex-1 py-3 rounded-xl bg-gradient-to-r from-amber-400 to-yellow-500 text-white text-sm font-semibold flex items-center justify-center gap-1.5 disabled:opacity-60 shadow-lg shadow-amber-500/30">
                               <Play size={14} />
-                              Publicar
+                              {publishLoading ? 'Publicando...' : 'Publicar'}
                             </button>
                           </div>
                         </motion.div>
@@ -920,7 +960,6 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
                             {creationStyles.slice(0, 6).map((style) => (
                               <motion.button
                                 key={style.id}
-                                whileHover={{ scale: 1.05 }}
                                 whileTap={{ scale: 0.95 }}
                                 onClick={() => setSelectedStyle(style.id)}
                                 className={`relative aspect-[4/3] rounded-xl overflow-hidden ${
@@ -1048,12 +1087,11 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
 
                           {/* Generar */}
                           <motion.button
-                            whileHover={{ scale: 1.02 }}
                             whileTap={{ scale: 0.98 }}
                             onClick={handleGenerate}
-                            disabled={(!selectedTemplatePrompt && !prompt.trim()) || !selectedStyle}
+                            disabled={!selectedTemplatePrompt && !prompt.trim() && !referenceImage}
                             className={`w-full py-3 rounded-xl font-semibold flex items-center justify-center gap-2 transition-all ${
-                              (selectedTemplatePrompt || prompt.trim()) && selectedStyle
+                              selectedTemplatePrompt || prompt.trim() || referenceImage
                                 ? 'bg-gradient-to-r from-pink-500 to-orange-500 text-white shadow-lg shadow-pink-500/25'
                                 : 'bg-white/10 text-gray-500 cursor-not-allowed'
                             }`}
@@ -1134,7 +1172,7 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
                               initial={{ scale: 0 }}
                               animate={{ scale: 1 }}
                               transition={{ type: 'spring', delay: 0.1 }}
-                              className="w-12 h-12 rounded-full bg-gradient-to-br from-pink-500 to-orange-500 flex items-center justify-center mx-auto mb-3"
+                              className="w-12 h-12 rounded-full bg-gradient-to-br from-amber-400 to-yellow-500 flex items-center justify-center mx-auto mb-3 shadow-lg shadow-amber-500/30"
                             >
                               <Sparkles size={22} className="text-white" />
                             </motion.div>
@@ -1145,9 +1183,18 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
                             <button onClick={handleClose} className="flex-1 py-3 rounded-xl bg-white/10 text-white text-sm font-medium">
                               Cerrar
                             </button>
-                            <button className="flex-1 py-3 rounded-xl bg-gradient-to-r from-pink-500 to-orange-500 text-white text-sm font-semibold flex items-center justify-center gap-1.5">
+                            {generatedMediaUrl && (
+                              <a
+                                href={generatedMediaUrl}
+                                download
+                                className="py-3 px-4 rounded-xl bg-white/10 text-white flex items-center justify-center"
+                              >
+                                <Download size={16} />
+                              </a>
+                            )}
+                            <button onClick={handlePublish} disabled={publishLoading} className="flex-1 py-3 rounded-xl bg-gradient-to-r from-amber-400 to-yellow-500 text-white text-sm font-semibold flex items-center justify-center gap-1.5 disabled:opacity-60 shadow-lg shadow-amber-500/30">
                               <Play size={14} />
-                              Publicar
+                              {publishLoading ? 'Publicando...' : 'Publicar'}
                             </button>
                           </div>
                         </motion.div>
@@ -1198,12 +1245,13 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
                             key={item.id}
                             initial={{ opacity: 0, y: 10 }}
                             animate={{ opacity: 1, y: 0 }}
-                            className="relative rounded-xl overflow-hidden border border-white/10 group"
+                            className="relative rounded-xl overflow-hidden border border-white/10 group cursor-pointer"
+                            onClick={() => setSelectedHistoryItem(item)}
                           >
                             {/* Thumbnail */}
                             <div className="aspect-video bg-white/5">
                               <img
-                                src={item.media_url}
+                                src={getMediaUrl(item.media_url)}
                                 alt={item.prompt}
                                 className="w-full h-full object-cover"
                                 onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
@@ -1237,9 +1285,12 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
 
                             {/* Hover actions */}
                             <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button className="w-7 h-7 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center">
-                                <Play size={12} className="text-white ml-0.5" />
-                              </button>
+                              <div className="w-7 h-7 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center">
+                                {item.media_type === 'video'
+                                  ? <Play size={12} className="text-white ml-0.5" />
+                                  : <Heart size={12} className="text-pink-400" />
+                                }
+                              </div>
                             </div>
                           </motion.div>
                         ))}
@@ -1249,6 +1300,112 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
                 )}
 
               </AnimatePresence>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+
+    {/* Modal detalle historial */}
+    <AnimatePresence>
+      {selectedHistoryItem && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[200] flex items-end justify-center bg-black/80 backdrop-blur-sm"
+          onClick={() => setSelectedHistoryItem(null)}
+        >
+          <motion.div
+            initial={{ y: '100%' }}
+            animate={{ y: 0 }}
+            exit={{ y: '100%' }}
+            transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+            className="w-full max-w-md bg-[#0c0c14] rounded-t-[32px] overflow-hidden h-[72vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Media — altura fija */}
+            <div className="relative w-full h-[52%] bg-[#111] flex items-center justify-center flex-shrink-0">
+              {selectedHistoryItem.media_type === 'video' ? (
+                <video
+                  src={getMediaUrl(selectedHistoryItem.media_url)}
+                  controls
+                  autoPlay
+                  className="w-full h-full object-contain"
+                />
+              ) : selectedHistoryItem.media_url ? (
+                <img
+                  src={getMediaUrl(selectedHistoryItem.media_url)}
+                  alt={selectedHistoryItem.prompt}
+                  className="w-full h-full object-cover"
+                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+                />
+              ) : (
+                <span className="text-gray-600 text-sm">Contenido no disponible</span>
+              )}
+              <div className="absolute top-3 left-3">
+                <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${
+                  selectedHistoryItem.media_type === 'video' ? 'bg-cyan-500/90 text-white' : 'bg-pink-500/90 text-white'
+                }`}>
+                  {selectedHistoryItem.media_type}
+                </span>
+              </div>
+              <button
+                onClick={() => setSelectedHistoryItem(null)}
+                className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center"
+              >
+                <X size={16} className="text-white" />
+              </button>
+            </div>
+
+            {/* Info — ocupa el resto */}
+            <div className="flex flex-col flex-1 p-5 gap-3 min-h-0">
+              <div className="flex-1 min-h-0 space-y-1 overflow-hidden">
+                {selectedHistoryItem.style_name && (
+                  <span className="text-xs text-amber-400 font-semibold uppercase tracking-wide block">
+                    {selectedHistoryItem.style_name}
+                  </span>
+                )}
+                <p className="text-white text-sm leading-relaxed line-clamp-3">{selectedHistoryItem.prompt}</p>
+                <p className="text-gray-500 text-xs">
+                  {new Date(selectedHistoryItem.created_at).toLocaleDateString('es', { day: '2-digit', month: 'long', year: 'numeric' })}
+                </p>
+              </div>
+
+              {/* Botones */}
+              <div className="flex gap-3 flex-shrink-0">
+                <button
+                  onClick={() => setSelectedHistoryItem(null)}
+                  className="flex-1 py-3 rounded-xl bg-white/10 text-white text-sm font-medium"
+                >
+                  Cerrar
+                </button>
+                <a
+                  href={getMediaUrl(selectedHistoryItem.media_url)}
+                  download
+                  className="py-3 px-4 rounded-xl bg-white/10 text-white flex items-center justify-center"
+                >
+                  <Download size={16} />
+                </a>
+                <button
+                  disabled={historyPublishLoading}
+                  onClick={async () => {
+                    setHistoryPublishLoading(true)
+                    try {
+                      await publishAIContent(selectedHistoryItem.id)
+                      setSelectedHistoryItem(null)
+                    } catch (err) {
+                      console.error('Error publicando:', err)
+                    } finally {
+                      setHistoryPublishLoading(false)
+                    }
+                  }}
+                  className="flex-1 py-3 rounded-xl bg-gradient-to-r from-amber-400 to-yellow-500 text-white text-sm font-semibold flex items-center justify-center gap-1.5 disabled:opacity-60 shadow-lg shadow-amber-500/30"
+                >
+                  <Play size={14} />
+                  {historyPublishLoading ? 'Publicando...' : 'Publicar'}
+                </button>
+              </div>
             </div>
           </motion.div>
         </motion.div>

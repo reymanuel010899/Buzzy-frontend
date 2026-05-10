@@ -69,7 +69,6 @@ function SlideActions({ video, onLike, onComment, onGift }: SlideActionsProps) {
       <motion.button
         onClick={() => onGift(video.id)}
         className="flex flex-col items-center relative"
-        whileHover={{ scale: 1.1 }}
         whileTap={{ scale: 0.9 }}
         animate={{ scale: [1, 1.04, 1], rotate: [0, -4, 4, -4, 4, 0] }}
         transition={{ duration: 1.4, repeat: Infinity, repeatDelay: 12 }}
@@ -97,7 +96,7 @@ interface Props {
   children: React.ReactNode
 }
 
-function SlideVideo({ video, isMuted, isVisible, isNear }: { video: Video; isMuted: boolean; isVisible: boolean; isNear: boolean }) {
+const SlideVideo = React.memo(function SlideVideo({ video, isMuted, isVisible, isNear }: { video: Video; isMuted: boolean; isVisible: boolean; isNear: boolean }) {
   const ref = useRef<HTMLVideoElement>(null)
   const src = video.video?.startsWith("http") ? video.video : getMediaUrl(video.video)
   const thumb = video.thumbnail_url?.startsWith("http") ? video.thumbnail_url : getMediaUrl(video.thumbnail_url)
@@ -124,7 +123,7 @@ function SlideVideo({ video, isMuted, isVisible, isNear }: { video: Video; isMut
       className="h-full w-full object-cover"
     />
   )
-}
+})
 
 function SwipeHint({ show }: { show: boolean }) {
   return (

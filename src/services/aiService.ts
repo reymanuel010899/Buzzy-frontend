@@ -97,7 +97,7 @@ export const generateAIAndWait = async (
   onProgress?: (status: AIGenerationStatus['status']) => void,
   pollIntervalMs = 5_000,
   maxWaitMs = 360_000,
-): Promise<{ media_url: string; video_credits: number; image_credits: number }> => {
+): Promise<{ media_url: string; history_id: number; video_credits: number; image_credits: number }> => {
   const accepted = await generateAI(params)
 
   const deadline = Date.now() + maxWaitMs
@@ -107,10 +107,12 @@ export const generateAIAndWait = async (
     onProgress?.(result.status)
 
     if (result.status === 'completed' && result.media_url) {
+      const credits = await getAICredits()
       return {
         media_url: result.media_url,
-        video_credits: accepted.video_credits,
-        image_credits: accepted.image_credits,
+        history_id: accepted.history_id,
+        video_credits: credits.video_credits,
+        image_credits: credits.image_credits,
       }
     }
     if (result.status === 'failed') {
@@ -157,6 +159,11 @@ export const getAICredits = async (): Promise<AICredits> => {
 
 export const getAIPackages = async (): Promise<AIPackage[]> => {
   const response = await apiClient.get('api/ai/packages/')
+  return response.data
+}
+
+export const publishAIContent = async (historyId: number): Promise<{ video_id: number; uuid: string }> => {
+  const response = await apiClient.post('api/ai/publish/', { history_id: historyId })
   return response.data
 }
 

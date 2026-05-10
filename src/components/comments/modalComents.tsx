@@ -490,7 +490,7 @@ export const ShowComments = ({
                         animate={{ y: 0 }}
                         exit={{ y: "100%" }}
                         transition={{ type: "spring", damping: 25, stiffness: 200 }}
-                        className="fixed bottom-0 left-0 right-0 h-[60vh] z-[70] flex flex-col bg-[#050718] rounded-t-[2rem] border-t border-white/10 backdrop-blur-2xl shadow-[0_-20px_80px_rgba(0,0,0,0.45)] overflow-hidden"
+                        className="fixed bottom-0 left-0 right-0 h-[60vh] z-[70] flex flex-col bg-[#050718] rounded-t-[2rem] border-t border-white/10 backdrop-blur-sm shadow-[0_-20px_80px_rgba(0,0,0,0.45)] overflow-hidden"
                         onClick={(e) => e.stopPropagation()}
                     >
                         {/* Rayita — click para cerrar */}
@@ -765,7 +765,7 @@ export const ShowComments = ({
                                 initial={{ opacity: 0, scale: 0.95, y: 20 }}
                                 animate={{ opacity: 1, scale: 1, y: 0 }}
                                 exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                                className="fixed bottom-32 left-6 right-6 mx-auto max-w-md bg-[#1a1a24]/95 backdrop-blur-2xl border border-white/10 rounded-[32px] shadow-2xl overflow-hidden z-[80]"
+                                className="fixed bottom-32 left-6 right-6 mx-auto max-w-md bg-[#1a1a24]/95 backdrop-blur-sm border border-white/10 rounded-[32px] shadow-2xl overflow-hidden z-[80]"
                             >
                                 <div className="flex items-center justify-between px-6 py-4 border-b border-white/5">
                                     <h3 className="text-white font-black text-sm uppercase tracking-widest">Emojis</h3>
@@ -782,7 +782,6 @@ export const ShowComments = ({
                                         {allEmojis.map((emoji, i) => (
                                             <motion.button
                                                 key={i}
-                                                whileHover={{ scale: 1.3, rotate: 5 }}
                                                 whileTap={{ scale: 0.8 }}
                                                 className="text-2xl h-11 w-11 flex items-center justify-center rounded-xl hover:bg-white/5 transition-all"
                                                 onClick={() => handleEmojiSelect(emoji)}

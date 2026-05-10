@@ -4,7 +4,7 @@ import { X, User, UserPlus, UserCheck, Loader2, Search } from 'lucide-react';
 import { useDispatch, useSelector } from 'react-redux';
 import { getFollowers, getFollowing, getSubscribers, getSuggestions } from '../../redux/actions/socialConnections';
 import { createFollower } from '../../redux/actions/createFollower';
-import { getBaseUrl } from '../../redux/client/api-client';
+import { getMediaUrl } from '../../redux/client/api-client';
 import { useNavigate } from 'react-router-dom';
 
 interface SocialConnectionsModalProps {
@@ -76,12 +76,6 @@ const SocialConnectionsModal: React.FC<SocialConnectionsModalProps> = ({
             },
         }));
         await dispatch(createFollower({ follower_user_id: targetUserId }) as any);
-    };
-
-    const getMediaUrl = (path: string | undefined) => {
-        if (!path) return null;
-        if (path.startsWith('http')) return path;
-        return `${getBaseUrl()}${path}`;
     };
 
     const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;

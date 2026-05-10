@@ -24,7 +24,7 @@ const BottomNavbar: React.FC = () => {
   return (
     <>
       <nav className="fixed bottom-0 left-0 right-0 z-50"
-        style={{ background: 'rgba(5,7,24,0.92)', backdropFilter: 'blur(20px)', borderTop: '1px solid rgba(112,0,255,0.15)' }}
+        style={{ background: 'rgba(5,7,24,0.96)', backdropFilter: 'blur(8px)', borderTop: '1px solid rgba(112,0,255,0.15)' }}
       >
         <div className="flex h-14 items-center justify-around px-4 max-w-lg mx-auto">
 
@@ -116,4 +116,4 @@ const BottomNavbar: React.FC = () => {
   )
 }
 
-export default BottomNavbar
+export default React.memo(BottomNavbar)

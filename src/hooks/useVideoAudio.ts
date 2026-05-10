@@ -1,5 +1,14 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { Howl } from 'howler'
+import { Howl, Howler } from 'howler'
+
+// On mobile, AudioContext starts suspended until a user gesture.
+// Resume it on first user interaction so Howl can play immediately on tap.
+function ensureAudioContextResumed() {
+  const ctx = Howler.ctx as AudioContext | undefined
+  if (ctx && ctx.state === 'suspended') {
+    ctx.resume().catch(() => {})
+  }
+}
 
 export interface MusicTrack {
   id: string
@@ -63,7 +72,7 @@ function createLoopingHowl(opts: {
   const howl = new Howl({
     src: [track.audio_url],
     volume,
-    html5: false, // Web Audio API — full buffer control, no DOM audio element reuse
+    html5: false, // Web Audio API — best seek precision; AudioContext unlocked via ensureAudioContextResumed()
     loop: false,
     onload: beginPlayback,
     onplay() {
@@ -178,6 +187,8 @@ export function useVideoAudio({ videoRef }: UseVideoAudioOptions) {
     trimStart: number,
     trimEnd: number,
   ) => {
+    // Unlock AudioContext on mobile — must be called inside a user gesture handler
+    ensureAudioContextResumed()
     const isSame = previewTrackId === track.id && previewHowlRef.current !== null
 
     if (isSame) {
@@ -258,6 +269,7 @@ export function useVideoAudio({ videoRef }: UseVideoAudioOptions) {
     volOriginal?: number,
     volMusic?: number,
   ) => {
+    ensureAudioContextResumed()
     destroyPreview()
     destroyMusic()
 

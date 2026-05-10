@@ -7,7 +7,6 @@ import store, { persistor } from "./store";
 import './App.css';
 import UploadProgressBar from "./components/Layout/UploadProgressBar";
 import { WebSocketProvider } from "./context/WebSocketContext";
-
 function App() {
   return (
     <Provider store={store}>

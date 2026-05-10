@@ -1,7 +1,8 @@
+import React from "react";
 import { useSelector } from "react-redux";
 import { getMediaUrl } from "../../redux/client/api-client"
 
-const ProfileIconC = () => {
+const ProfileIconC = React.memo(() => {
   const LoginReducer = useSelector((state: { LoginReducer: { user?: { profile_picture?: string } } }) => state.LoginReducer);
   const picture = LoginReducer?.user?.profile_picture;
 
@@ -21,6 +22,6 @@ const ProfileIconC = () => {
       </div>
     </div>
   )
-}
+})
 
 export default ProfileIconC

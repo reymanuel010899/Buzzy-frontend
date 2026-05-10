@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import type { MusicTrack } from './useVideoAudio'
-import { apiClient } from '../redux/client/api-client'
+import { apiClient, getMediaUrl } from '../redux/client/api-client'
 
 interface ApiTrack {
   id: number
@@ -20,8 +20,8 @@ function toMusicTrack(t: ApiTrack): MusicTrack {
     artist: t.artist,
     duration: t.duration,
     durationSecs: t.duration_secs,
-    cover: t.cover_url ?? '',
-    audio_url: t.audio_url,
+    cover: getMediaUrl(t.cover_url),
+    audio_url: t.audio_url.startsWith('http') ? t.audio_url : getMediaUrl(t.audio_url),
     category: t.category,
   }
 }

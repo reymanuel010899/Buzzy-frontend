@@ -11,7 +11,9 @@ export interface BuzzyNotification {
     | "profile_visit"
     | "story_like"
     | "gift"
-    | "mention";
+    | "mention"
+    | "earning"
+    | "welcome";
   message: string;
   is_read: boolean;
   read_at: string | null;

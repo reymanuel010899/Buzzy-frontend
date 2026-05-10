@@ -6,7 +6,7 @@ import { X, Bell, Heart, MessageCircle, UserPlus, Eye, Star, Gift, AtSign, Check
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
 import { useNotificationsStore, BuzzyNotification } from "../../context/NotificationsStore"
-import { getBaseUrl } from "../../redux/client/api-client"
+import { getBaseUrl, getMediaUrl } from "../../redux/client/api-client"
 
 interface Props {
   open: boolean
@@ -22,6 +22,8 @@ const TYPE_ICON: Record<BuzzyNotification["notification_type"], React.ReactNode>
   story_like:    <Star          className="w-4 h-4 text-yellow-400" />,
   gift:          <Gift          className="w-4 h-4 text-orange-400" />,
   mention:       <AtSign        className="w-4 h-4 text-indigo-400" />,
+  earning:       <Star          className="w-4 h-4 text-amber-400" />,
+  welcome:       <Gift          className="w-4 h-4 text-cyan-400" />,
 }
 
 function timeAgo(iso: string): string {
@@ -49,7 +51,7 @@ function dayKey(iso: string): string {
 function avatar(n: BuzzyNotification): string | null {
   if (!n.actor?.profile_picture) return null
   const pic = n.actor.profile_picture
-  return pic.startsWith("http") ? pic : `${getBaseUrl()}${pic}`
+  return pic.startsWith("http") ? pic : getMediaUrl(pic)
 }
 
 function AvatarOrInitial({ n, size = "w-10 h-10" }: { n: BuzzyNotification; size?: string }) {
@@ -264,7 +266,7 @@ export default function NotificationPanel({ open, onClose }: Props) {
                     </div>
                     {n.video_thumbnail && (
                       <img
-                        src={n.video_thumbnail.startsWith("http") ? n.video_thumbnail : `${getBaseUrl()}${n.video_thumbnail}`}
+                        src={n.video_thumbnail.startsWith("http") ? n.video_thumbnail : getMediaUrl(n.video_thumbnail)}
                         alt="" className="w-10 h-10 rounded-lg object-cover flex-shrink-0"
                       />
                     )}
