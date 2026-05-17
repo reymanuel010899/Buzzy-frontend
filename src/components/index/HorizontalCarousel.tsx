@@ -151,6 +151,9 @@ export default function HorizontalCarousel({ video, isActive, isMuted, isExpande
 
   // Cargar desde cache inmediatamente — sin esperar fetch
   const [userVideos, setUserVideos] = useState<Video[]>(() => getFromCache(video.user_id.username))
+  const userVideosRef = useRef(userVideos)
+  userVideosRef.current = userVideos
+
   const [slideIndex, setSlideIndex] = useState(0)
   const [showHint, setShowHint] = useState(false)
   const [dragPct, setDragPct] = useState(0)
@@ -264,7 +267,7 @@ export default function HorizontalCarousel({ video, isActive, isMuted, isExpande
           commitSlide(nextIdx)
           // Al llegar al slide 1, expandir a 5 en background (el evento notifica cuando llega)
           if (nextIdx === 1) {
-            const excludeIds = [video.id, ...userVideos.map(v => v.id)]
+            const excludeIds = [video.id, ...userVideosRef.current.map(v => v.id)]
             expandInBackground(video.user_id.username, excludeIds)
           }
         } else {
@@ -283,7 +286,7 @@ export default function HorizontalCarousel({ video, isActive, isMuted, isExpande
       el.removeEventListener("touchmove", onMove)
       el.removeEventListener("touchend", onEnd)
     }
-  }, [commitSlide, expandInBackground, video.id, video.user_id.username, userVideos, getFromCache])
+  }, [commitSlide, expandInBackground, video.id, video.user_id.username])
 
   // Calcular posición X del strip
   const pctPerSlide = 100 / slides.length

@@ -9,7 +9,7 @@ import { useTranslation } from "react-i18next"
 import {
   FileText, Image as ImageIcon, Camera, Headphones, User,
   Mic, Trash2, StopCircle, Search, X, Phone, Video, Plus, Send, Download, Play, MessageCircleMore,
-  Sparkles, Shield, ChevronRight, Users, EyeOff, Inbox, UserCheck,
+  Sparkles, Shield, ChevronRight, Users, EyeOff, Inbox, UserCheck, Forward, CheckCheck, Check,
 } from "lucide-react"
 import { motion, AnimatePresence, LayoutGroup } from "framer-motion"
 import { useNavigate } from "react-router-dom"
@@ -32,6 +32,7 @@ import { startCall } from "../../redux/actions/subscriptionActions"
 import { useTypingUsers } from "../../context/useTyping";
 import { useUnreadMessages } from "../../context/UnreadAcount";
 import { apiClient, getBaseUrl, getMediaUrl } from "../../redux/client/api-client";
+import { isNotifEnabled } from "../../utils/notifPrefs";
 import { useAgora } from "../../hooks/useAgora";
 import { useCallStore } from "../../store/callStore";
 import { completeUpload } from "../../redux/reducers/uploadProgressReducer";
@@ -92,9 +93,30 @@ const ChatModal: React.FC = () => {
   const { typingByChat, setTypingUser, removeTypingUser } = useTypingUsers();
   const [activePreview, setActivePreview] = useState<{ url: string; type: 'image' | 'video'; audioUrl?: string } | null>(null);
   const [showContactModal, setShowContactModal] = useState(false);
+  // Search inside chat
+  const [showChatSearch, setShowChatSearch] = useState(false);
+  const [chatSearchQuery, setChatSearchQuery] = useState("");
+  const [chatSearchResults, setChatSearchResults] = useState<any[]>([]);
+  const [chatSearchLoading, setChatSearchLoading] = useState(false);
+  // Forward message
+  const [forwardMsg, setForwardMsg] = useState<any | null>(null);
+  const [forwardRecipients, setForwardRecipients] = useState<number[]>([]);
+  // Message action menu
+  const [msgMenuTarget, setMsgMenuTarget] = useState<string | null>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Edit message
+  const [editingMsgUuid, setEditingMsgUuid] = useState<string | null>(null);
+  const [editingContent, setEditingContent] = useState("");
   const [chatFolder, setChatFolder] = useState<ChatFolderFilter>(ChatFolderFilter.Friends);
   const [chatPrivacy, setChatPrivacy] = useState<{ has_pin: boolean; hidden_verified: boolean; hidden_verified_at: string | null; updated_at: string | null } | null>(null);
   const [showHiddenPinModal, setShowHiddenPinModal] = useState(false);
+  const [chatToast, setChatToast] = useState<{ message: string; error?: boolean } | null>(null);
+  const chatToastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showChatToast = useCallback((message: string, error = false) => {
+    if (chatToastTimeoutRef.current) clearTimeout(chatToastTimeoutRef.current);
+    setChatToast({ message, error });
+    chatToastTimeoutRef.current = setTimeout(() => setChatToast(null), 3500);
+  }, []);
   const { connections } = useSelector((state: RootState) => state.socialReducer);
   const [messageText, setMessageText] = useState("")
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -196,7 +218,7 @@ const ChatModal: React.FC = () => {
       sender_username: user.username,
       sender_avatar: user.profile_picture,
       created_at: new Date().toISOString(),
-      message_type: type as any,
+      message_type: type,
     };
     setRealtimeMessages(prev => [...prev, optimisticMsg]);
 
@@ -284,7 +306,7 @@ const ChatModal: React.FC = () => {
       }, 1000);
     } catch (err) {
       console.error("Error accessing microphone:", err);
-      alert("No se pudo acceder al micrófono.");
+      showChatToast("No se pudo acceder al micrófono.", true);
     }
   };
 
@@ -357,7 +379,7 @@ const ChatModal: React.FC = () => {
       const next = { ...prev };
       for (const chat of backendChats.chats) {
         if (chat.last_message && !next[chat.uuid]) {
-          next[chat.uuid] = chat.last_message;
+          next[chat.uuid] = chat.last_message.content;
         }
       }
       return next;
@@ -483,9 +505,18 @@ const ChatModal: React.FC = () => {
     const msg = data.message;
     if (!msg) return;
 
+    const msgPreview = (content: string, type?: string): string => {
+      if (type === 'contact') { try { const c = JSON.parse(content); return `Contacto: @${c.username ?? ''}`; } catch { return 'Contacto compartido'; } }
+      if (type === 'voice') return '🎤 Audio';
+      if (type === 'image') return '📷 Imagen';
+      if (type === 'video') return '🎥 Video';
+      if (type === 'document' || type === 'file') return '📄 Documento';
+      return content;
+    };
+
     if (data.is_own_confirmation) {
       if (data.chat_uuid && msg.content) {
-        setLastMessageMap(prev => ({ ...prev, [data.chat_uuid]: msg.content }));
+        setLastMessageMap(prev => ({ ...prev, [data.chat_uuid]: msgPreview(msg.content, msg.message_type) }));
       }
       if (data.chat_uuid === selectedChatRef.current) {
         setRealtimeMessages(prev => {
@@ -510,14 +541,22 @@ const ChatModal: React.FC = () => {
     if (msg.sender_id !== undefined && msg.sender_id === user.id) return;
 
     if (data.chat_uuid && msg.content) {
-      setLastMessageMap(prev => ({ ...prev, [data.chat_uuid]: msg.content }));
+      setLastMessageMap(prev => ({ ...prev, [data.chat_uuid]: msgPreview(msg.content, msg.message_type) }));
     }
 
     if (data.chat_uuid && data.chat_uuid === selectedChatRef.current) {
       setRealtimeMessages(prev => {
         if (prev.some((m: any) => m.uuid === msg.uuid)) return prev;
-        return [...prev, msg];
+        return [...prev, { ...msg, is_read: true }];
       });
+      // Notify sender that we read it immediately
+      wsSend({
+        type: "messages_read",
+        chat_uuid: data.chat_uuid,
+        receiver_id: msg.sender_id ?? data.sender_id,
+        reader: user.username,
+      });
+      apiClient.post(`/api/chats/${data.chat_uuid}/read-messages/`).catch(() => {});
     } else {
       if (data.unread_count_target !== undefined) {
         setUnreadCount(data.chat_uuid, data.unread_count_target);
@@ -526,7 +565,7 @@ const ChatModal: React.FC = () => {
       }
     }
 
-    if (audioUnlockedRef.current && sendAudioRef.current && !showMessagesRef.current) {
+    if (audioUnlockedRef.current && sendAudioRef.current && !showMessagesRef.current && isNotifEnabled('notif_messages')) {
       sendAudioRef.current.currentTime = 0;
       sendAudioRef.current.play().catch(() => {});
     }
@@ -534,7 +573,7 @@ const ChatModal: React.FC = () => {
 
   useWsEvent("typing", useCallback((data: any) => {
     if (data.user_id === user.id) return;
-    if (data.chat_uuid && data.chat_uuid === selectedChatRef.current) {
+    if (data.chat_uuid && data.chat_uuid === selectedChatRef.current && isNotifEnabled('notif_messages')) {
       typingAudioRef.current?.play().catch(() => {});
     }
     if (data.is_typing) {
@@ -561,6 +600,29 @@ const ChatModal: React.FC = () => {
     });
   }, []));
 
+  useWsEvent("message_deleted", useCallback((data: any) => {
+    if (!data.uuid) return;
+    setRealtimeMessages(prev => prev.map(m => {
+      if (m.uuid !== data.uuid) return m;
+      if (data.for_all) return { ...m, content: "[Este mensaje fue eliminado]", deleted_for_all: true, file: null };
+      return m; // for_all=false only hides for sender (already removed locally)
+    }));
+  }, []));
+
+  useWsEvent("messages_read", useCallback((data: any) => {
+    if (!data.chat_uuid) return;
+    setRealtimeMessages(prev => prev.map(m =>
+      m.sender_username === user.username ? { ...m, is_read: true } : m
+    ));
+  }, [user.username]));
+
+  useWsEvent("message_edited", useCallback((data: any) => {
+    if (!data.uuid || !data.content) return;
+    setRealtimeMessages(prev => prev.map(m =>
+      m.uuid === data.uuid ? { ...m, content: data.content, is_edited: true } : m
+    ));
+  }, []));
+
   useWsEvent("video_ready", useCallback(() => {
     dispatch(completeUpload('done'));
   }, [dispatch]));
@@ -570,20 +632,124 @@ const ChatModal: React.FC = () => {
   }, [dispatch]));
 
   useWsEvent("notification", useCallback((data: any) => {
+    const type: string = data?.notification_type ?? "";
+    if (type === "follow" && !isNotifEnabled('notif_followers')) return;
+    if (type === "gift" && !isNotifEnabled('notif_gifts')) return;
     useNotificationsStore.getState().pushRealtime(data);
   }, []));
+
+  // ── Delete message ──────────────────────────────────────────────────
+  const handleDeleteMessage = async (msgUuid: string, forAll: boolean) => {
+    setMsgMenuTarget(null);
+    setClickedMessage(null);
+    if (forAll) {
+      setRealtimeMessages(prev => prev.map(m =>
+        m.uuid === msgUuid ? { ...m, content: "[Este mensaje fue eliminado]", deleted_for_all: true, file: null } : m
+      ));
+      // Notify other user in real-time
+      const otherId = currentBackendChat?.other_user?.id ?? backendMessages?.other_user?.id;
+      if (otherId && selectedChat) {
+        wsSend({
+          type: "message_deleted",
+          uuid: msgUuid,
+          for_all: true,
+          chat_uuid: selectedChat,
+          receiver_id: otherId,
+        });
+      }
+    } else {
+      setRealtimeMessages(prev => prev.filter(m => m.uuid !== msgUuid));
+    }
+    try {
+      await apiClient.delete(`/api/messages/${msgUuid}/delete/?for_all=${forAll}`);
+    } catch {
+      showChatToast("No se pudo eliminar el mensaje.", true);
+    }
+  };
+
+  const handleEditMessage = async (msgUuid: string, newContent: string) => {
+    if (!newContent.trim()) return;
+    setRealtimeMessages(prev => prev.map(m =>
+      m.uuid === msgUuid ? { ...m, content: newContent.trim(), is_edited: true } : m
+    ));
+    const otherId = currentBackendChat?.other_user?.id ?? backendMessages?.other_user?.id;
+    if (otherId && selectedChat) {
+      wsSend({
+        type: "message_edited",
+        uuid: msgUuid,
+        content: newContent.trim(),
+        chat_uuid: selectedChat,
+        receiver_id: otherId,
+      });
+    }
+    setEditingMsgUuid(null);
+    setEditingContent("");
+    try {
+      await apiClient.patch(`/api/messages/${msgUuid}/edit/`, { content: newContent.trim() });
+    } catch {
+      showChatToast("No se pudo editar el mensaje.", true);
+    }
+  };
+
+  // ── Forward message ──────────────────────────────────────────────────
+  const handleForwardMessage = async () => {
+    if (!forwardMsg || forwardRecipients.length === 0) return;
+    try {
+      await apiClient.post('/api/messages/forward/', {
+        message_uuid: forwardMsg.uuid,
+        recipient_ids: forwardRecipients,
+      });
+      showChatToast("Mensaje reenviado.");
+    } catch {
+      showChatToast("No se pudo reenviar el mensaje.", true);
+    }
+    setForwardMsg(null);
+    setForwardRecipients([]);
+  };
+
+  // ── Search messages ──────────────────────────────────────────────────
+  const handleChatSearch = async (q: string) => {
+    setChatSearchQuery(q);
+    if (!q.trim() || !currentBackendChat) { setChatSearchResults([]); return; }
+    setChatSearchLoading(true);
+    try {
+      const res = await apiClient.get(`/api/chats/${currentBackendChat.uuid}/search/?q=${encodeURIComponent(q)}`);
+      setChatSearchResults(res.data.results || []);
+    } catch { setChatSearchResults([]); }
+    finally { setChatSearchLoading(false); }
+  };
+
+  // ── Mark read on open ────────────────────────────────────────────────
+  const markChatMessagesRead = useCallback(async (chatUuid: string, otherUserId?: number) => {
+    try {
+      await apiClient.post(`/api/chats/${chatUuid}/read-messages/`);
+    } catch { /* ignore */ }
+    // Notify sender via WS so their ✓✓ updates in real-time
+    const receiverId = otherUserId ?? currentBackendChat?.other_user?.id ?? backendMessages?.other_user?.id;
+    if (receiverId) {
+      wsSend({
+        type: "messages_read",
+        chat_uuid: chatUuid,
+        receiver_id: receiverId,
+        reader: user.username,
+      });
+    }
+  }, [wsSend, currentBackendChat?.other_user?.id, backendMessages?.other_user?.id, user.username]);
 
   const handleTyping = () => {
     if (!chatSocketActiveRef.current || !selectedChat) return;
 
     setMessageText(inputRef.current?.value || "");
 
+    const typingReceiverId = backendMessages?.other_user?.id;
+    if (!typingReceiverId) return;
+
     wsSend({
       type: "typing",
       is_typing: true,
-      receiver_id: backendMessages?.other_user?.id,
+      receiver_id: typingReceiverId,
       chat_uuid: backendMessages?.chat_uuid,
-    } as any);
+    });
 
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
 
@@ -591,9 +757,9 @@ const ChatModal: React.FC = () => {
       wsSend({
         type: "typing",
         is_typing: false,
-        receiver_id: backendMessages?.other_user?.id,
+        receiver_id: typingReceiverId,
         chat_uuid: backendMessages?.chat_uuid,
-      } as any);
+      });
     }, 1500);
   };
 
@@ -666,10 +832,10 @@ const ChatModal: React.FC = () => {
       setSelectedChat(null);
       setChatFolder(ChatFolderFilter.Friends);
       await loadChatsForFolder(ChatFolderFilter.Friends);
-    } catch (error) {
-      console.error("Unable to update chat folder", error);
+    } catch {
+      showChatToast("No se pudo mover el chat.", true);
     }
-  }, [currentBackendChat, loadChatsForFolder, refreshChatPrivacy, setSelectedChat]);
+  }, [currentBackendChat, loadChatsForFolder, refreshChatPrivacy, setSelectedChat, showChatToast]);
 
   const handleMoveChatToFolder = useCallback(async (targetFolder: ChatFolderFilter) => {
     if (!currentBackendChat) return;
@@ -679,10 +845,10 @@ const ChatModal: React.FC = () => {
       });
       setSelectedChat(null);
       await loadChatsForFolder(chatFolder);
-    } catch (error) {
-      console.error("Error moviendo chat de folder", error);
+    } catch {
+      showChatToast("No se pudo mover el chat.", true);
     }
-  }, [currentBackendChat, chatFolder, loadChatsForFolder, setSelectedChat]);
+  }, [currentBackendChat, chatFolder, loadChatsForFolder, setSelectedChat, showChatToast]);
 
   useEffect(() => {
     if (!showMessages) return;
@@ -707,9 +873,14 @@ const ChatModal: React.FC = () => {
 
   useEffect(() => {
     if (selectedChat) {
-      loadChatMessages(selectedChat)(dispatch)
+      loadChatMessages(selectedChat)(dispatch);
+      markChatMessagesRead(selectedChat, currentBackendChat?.other_user?.id);
+      // reset search on chat change
+      setShowChatSearch(false);
+      setChatSearchQuery("");
+      setChatSearchResults([]);
     }
-  }, [selectedChat, dispatch])
+  }, [selectedChat, dispatch, markChatMessagesRead, currentBackendChat?.other_user?.id])
 
   const seededChatRef = useRef<string | null>(null);
 
@@ -734,6 +905,17 @@ const ChatModal: React.FC = () => {
     }
     setReactionsMap(seeded);
   }, [backendMessages?.messages, selectedChat]);
+
+  // Once backendMessages loads, notify sender so ✓✓ updates without reload
+  useEffect(() => {
+    if (!backendMessages?.other_user?.id || !selectedChat || !showMessages) return;
+    wsSend({
+      type: "messages_read",
+      chat_uuid: selectedChat,
+      receiver_id: backendMessages.other_user.id,
+      reader: user.username,
+    });
+  }, [backendMessages?.other_user?.id, selectedChat, showMessages, wsSend, user.username]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -772,7 +954,7 @@ const ChatModal: React.FC = () => {
   }
 
   const sendReaction = (messageUuid: string, emoji: string) => {
-    wsSend({ type: "reaction", message_uuid: messageUuid, emoji } as any);
+    wsSend({ type: "reaction", message_uuid: messageUuid, emoji });
     setReactionsMap(prev => {
       const msgReactions = { ...(prev[messageUuid] || {}) };
       let users = [...(msgReactions[emoji] || [])];
@@ -817,6 +999,19 @@ const ChatModal: React.FC = () => {
             className="fixed top-5 left-1/2 -translate-x-1/2 z-[120] rounded-2xl border border-[#00f0ff]/20 bg-[#08101f]/95 px-4 py-3 text-sm text-white shadow-[0_16px_50px_rgba(0,0,0,0.45)] backdrop-blur-xl"
           >
             {callAlert}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {chatToast && (
+          <motion.div
+            initial={{ opacity: 0, y: 12, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 12, scale: 0.97 }}
+            className={`fixed bottom-24 left-1/2 -translate-x-1/2 z-[120] rounded-2xl px-4 py-3 text-sm text-white shadow-[0_16px_50px_rgba(0,0,0,0.45)] backdrop-blur-xl border ${chatToast.error ? "bg-red-900/90 border-red-500/30" : "bg-[#08101f]/95 border-[#00f0ff]/20"}`}
+          >
+            {chatToast.message}
           </motion.div>
         )}
       </AnimatePresence>
@@ -1019,7 +1214,6 @@ const ChatModal: React.FC = () => {
                             return (
                               <motion.li
                                 key={chat.uuid}
-                                layoutId={`chat-${chat.uuid}`}
                                 onClick={() => setSelectedChat(chat.uuid)}
                                 className={`p-4 mx-2 my-1 rounded-2xl transition-all cursor-pointer flex items-center gap-3 border border-white/5 last:border-b-0 group relative overflow-hidden ${itemBg}`}
                                 whileTap={{ scale: 0.98 }}
@@ -1077,7 +1271,7 @@ const ChatModal: React.FC = () => {
                                   </div>
                                   <div className="flex items-center justify-between gap-2 mt-0.5">
                                     <p className="text-xs text-gray-400 truncate group-hover:text-gray-300 transition-colors">
-                                      {typingContest(chat) || (() => { const msg = lastMessageMap[chat.uuid] || chat.last_message || ""; try { const p = JSON.parse(msg); return p.username ? `Contacto: @${p.username}` : msg; } catch { return msg; } })()}
+                                      {typingContest(chat) || lastMessageMap[chat.uuid] || chat.last_message?.content || ""}
                                     </p>
                                     {getUnreadAcount(chat.uuid) > 0 && (
                                       <div className={`min-w-[20px] h-5 px-1 flex items-center justify-center text-[10px] text-white font-bold rounded-full shadow-lg shrink-0 ${planName === 'FRIEND' ? 'bg-gradient-to-br from-[#00f0ff] to-blue-600 shadow-[0_0_10px_rgba(0,240,255,0.3)]' :
@@ -1183,9 +1377,11 @@ const ChatModal: React.FC = () => {
               />
 
               <motion.div
-                layoutId={`chat-${selectedChat}`}
+                initial={{ x: "100%" }}
+                animate={{ x: 0 }}
+                exit={{ x: "100%" }}
+                transition={{ type: "tween", duration: 0.22, ease: "easeInOut" }}
                 className="fixed inset-x-0 top-0 bottom-0 z-[60] mx-auto w-full max-w-md"
-                transition={{ type: "spring", damping: 30, stiffness: 300 }}
               >
                 <div className="absolute inset-0 overflow-hidden rounded-none">
                   <img
@@ -1272,10 +1468,18 @@ const ChatModal: React.FC = () => {
                     <motion.button
                       whileHover={{ scale: 1.08 }}
                       whileTap={{ scale: 0.92 }}
+                      onClick={() => { setShowChatSearch(v => !v); setChatSearchQuery(""); setChatSearchResults([]); }}
+                      className="w-12 h-12 flex items-center justify-center text-white/60 hover:bg-white/10 hover:text-white transition-all"
+                    >
+                      <Search className="w-[18px] h-[18px]" />
+                    </motion.button>
+                    <div className="w-7 h-px bg-white/12 mx-auto" />
+                    <motion.button
+                      whileHover={{ scale: 1.08 }}
+                      whileTap={{ scale: 0.92 }}
                       onClick={(e) => {
                         e.stopPropagation();
                         setSelectedChat(null);
-                        setShowMessages(false);
                       }}
                       className="w-12 h-12 flex items-center justify-center text-white/60 hover:bg-white/10 hover:text-white transition-all"
                     >
@@ -1283,13 +1487,60 @@ const ChatModal: React.FC = () => {
                     </motion.button>
                   </motion.div>
 
-                  <div className="flex-1 overflow-y-auto pt-20 pb-2 px-4 space-y-2" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+                  {/* Search bar */}
+                  <AnimatePresence>
+                    {showChatSearch && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -10 }}
+                        className="absolute top-16 left-16 right-4 z-20 bg-[#0c1033]/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden"
+                      >
+                        <div className="flex items-center gap-2 px-3 py-2.5 border-b border-white/5">
+                          <Search size={14} className="text-gray-400 flex-shrink-0" />
+                          <input
+                            autoFocus
+                            value={chatSearchQuery}
+                            onChange={e => handleChatSearch(e.target.value)}
+                            placeholder="Buscar en la conversación..."
+                            className="flex-1 bg-transparent text-sm text-white placeholder-gray-500 outline-none"
+                          />
+                          {chatSearchQuery && (
+                            <button onClick={() => { setChatSearchQuery(""); setChatSearchResults([]); }} className="text-gray-500 hover:text-white">
+                              <X size={13} />
+                            </button>
+                          )}
+                        </div>
+                        <div className="max-h-48 overflow-y-auto">
+                          {chatSearchLoading && <p className="text-xs text-gray-500 px-3 py-2">Buscando...</p>}
+                          {!chatSearchLoading && chatSearchResults.length === 0 && chatSearchQuery && (
+                            <p className="text-xs text-gray-500 px-3 py-2">Sin resultados</p>
+                          )}
+                          {chatSearchResults.map(msg => (
+                            <div key={msg.uuid} className="px-3 py-2 hover:bg-white/5 border-b border-white/5 last:border-0 cursor-pointer"
+                              onClick={() => {
+                                // scroll to message
+                                const el = document.getElementById(`msg-${msg.uuid}`);
+                                el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                setShowChatSearch(false);
+                              }}>
+                              <p className="text-xs text-white/80 truncate">{msg.content}</p>
+                              <p className="text-[10px] text-gray-500">{new Date(msg.created_at).toLocaleString('es-DO', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  <div className="flex-1 overflow-y-auto pt-20 pb-2 px-4 space-y-2" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }} onClick={() => { setMsgMenuTarget(null); }}>
                     {realtimeMessages.map((msg) => {
                       const isMe = msg.sender_username === user.username
 
                       return (
                         <motion.div
                           key={msg.uuid}
+                          id={`msg-${msg.uuid}`}
                           initial={{ opacity: 0, y: 14, scale: 0.97 }}
                           animate={{ opacity: 1, y: 0, scale: 1 }}
                           transition={{ duration: 0.22, ease: [0.25, 0.46, 0.45, 0.94] }}
@@ -1299,13 +1550,32 @@ const ChatModal: React.FC = () => {
                             if (clickedMessage === msg.uuid) {
                               setClickedMessage(null);
                               setEmojiTarget(null);
+                              setMsgMenuTarget(null);
                               return;
                             }
                             setEmojiTarget(null);
+                            setMsgMenuTarget(null);
                             setClickedMessage(msg.uuid);
                             clickedMessageTimerRef.current = setTimeout(() => {
                               setClickedMessage(null);
                             }, 3000);
+                          }}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            setMsgMenuTarget(msg.uuid);
+                            setClickedMessage(msg.uuid);
+                          }}
+                          onTouchStart={() => {
+                            longPressTimerRef.current = setTimeout(() => {
+                              setMsgMenuTarget(msg.uuid);
+                              setClickedMessage(msg.uuid);
+                            }, 500);
+                          }}
+                          onTouchEnd={() => {
+                            if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+                          }}
+                          onTouchMove={() => {
+                            if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
                           }}
                           className="relative flex items-end justify-end gap-2"
                         >
@@ -1328,9 +1598,9 @@ const ChatModal: React.FC = () => {
                             )}
 
                             <div
-                              className={`max-w-[72vw] ${msg.message_type === 'text' ? 'px-4 py-3' : 'p-[1px]'} ${isMe ? 'rounded-tl-[20px] rounded-tr-[20px] rounded-bl-[20px] rounded-br-[4px]' : 'rounded-tl-[20px] rounded-tr-[20px] rounded-br-[20px] rounded-bl-[4px]'} shadow-xl transition-all duration-300 ${
+                              className={`max-w-[72vw] ${msg.message_type === 'text' ? 'px-4 py-3' : msg.message_type === 'contact' ? 'p-0 overflow-hidden' : 'p-[1px]'} ${isMe ? 'rounded-tl-[20px] rounded-tr-[20px] rounded-bl-[20px] rounded-br-[4px]' : 'rounded-tl-[20px] rounded-tr-[20px] rounded-br-[20px] rounded-bl-[4px]'} shadow-xl transition-all duration-300 ${
                                 isMe
-                                  ? msg.message_type === 'text'
+                                  ? (msg.message_type === 'text' || msg.message_type === 'contact')
                                     ? user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND'
                                       ? "bg-gradient-to-br from-cyan-500 via-blue-600 to-indigo-800 text-white shadow-[0_0_20px_rgba(0,240,255,0.3)] border border-cyan-400/30"
                                       : user.subscription_status?.plan?.name?.toUpperCase() === 'VIP'
@@ -1339,7 +1609,7 @@ const ChatModal: React.FC = () => {
                                           ? "bg-gradient-to-br from-purple-600 via-pink-600 to-purple-800 text-white shadow-[0_0_15px_rgba(168,85,247,0.3)] border border-purple-400/20"
                                           : "bg-gradient-to-br from-gray-700 via-gray-800 to-gray-900 text-white shadow-lg border border-white/5"
                                     : "backdrop-blur-lg text-white"
-                                  : msg.message_type === 'text'
+                                  : (msg.message_type === 'text' || msg.message_type === 'contact')
                                     ? currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND'
                                       ? "bg-[#0c1a2e]/90 text-cyan-50 border border-cyan-400/40 shadow-[0_0_15px_rgba(0,240,255,0.15)]"
                                       : currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'VIP'
@@ -1360,10 +1630,36 @@ const ChatModal: React.FC = () => {
                                 </p>
                               )}
 
-                              {msg.message_type === "text" ? (
-                                <p className="text-sm leading-relaxed break-words">
-                                  {msg.content}
-                                </p>
+                              {msg.deleted_for_all ? (
+                                <div className="flex items-center gap-2 py-1 px-1 italic text-gray-500 text-sm select-none">
+                                  <span>🚫</span>
+                                  <span>Este mensaje fue eliminado</span>
+                                </div>
+                              ) : msg.message_type === "text" ? (
+                                editingMsgUuid === msg.uuid ? (
+                                  <div className="flex flex-col gap-1.5" onClick={e => e.stopPropagation()}>
+                                    <textarea
+                                      autoFocus
+                                      className="w-full bg-black/30 text-white text-sm rounded-lg px-3 py-2 outline-none border border-[#7000ff]/50 focus:border-[#00f0ff]/60 resize-none"
+                                      rows={2}
+                                      value={editingContent}
+                                      onChange={e => setEditingContent(e.target.value)}
+                                      onKeyDown={e => {
+                                        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleEditMessage(msg.uuid, editingContent); }
+                                        if (e.key === 'Escape') { setEditingMsgUuid(null); setEditingContent(""); }
+                                      }}
+                                    />
+                                    <div className="flex gap-2 justify-end">
+                                      <button onClick={() => { setEditingMsgUuid(null); setEditingContent(""); }} className="text-xs text-gray-400 hover:text-white px-2 py-1">Cancelar</button>
+                                      <button onClick={() => handleEditMessage(msg.uuid, editingContent)} className="text-xs text-white bg-gradient-to-r from-[#7000ff] to-[#00f0ff] px-3 py-1 rounded-full">Guardar</button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <p className="text-sm leading-relaxed break-words">
+                                    {msg.content}
+                                    {msg.is_edited && <span className="text-[10px] opacity-50 ml-1">editado</span>}
+                                  </p>
+                                )
                               ) : msg.message_type === "image" ? (
                                 <div
                                   className="rounded-xl overflow-hidden mb-1 border border-white/10 shadow-2xl relative group p-[0.5px] bg-[#1a1a2e] cursor-pointer"
@@ -1515,14 +1811,7 @@ const ChatModal: React.FC = () => {
                                   </div>
                                 </div>
                               ) : msg.message_type === "contact" ? (
-                                <div className={`rounded-xl p-3 flex flex-col gap-3 min-w-[200px] ${isMe
-                                  ? user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND' ? 'bg-gradient-to-br from-cyan-500/20 to-blue-600/20 border-cyan-500/30 border' :
-                                    user.subscription_status?.plan?.name?.toUpperCase() === 'VIP' ? 'bg-gradient-to-br from-amber-400/20 to-orange-600/20 border-amber-500/30 border' :
-                                      'bg-purple-600/20 border-purple-500/20 border'
-                                  : currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND' ? 'bg-[#1a1a2e]/90 border-cyan-400/30 shadow-[0_0_10px_rgba(0,240,255,0.1)] border' :
-                                    currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'VIP' ? 'bg-[#1f1a10]/90 border-amber-400/30 shadow-[0_0_10px_rgba(251,191,36,0.1)] border' :
-                                      'bg-[#23233b] border-transparent'
-                                  }`}>
+                                <div className="p-3 flex flex-col gap-3 min-w-[200px]">
                                   <div className="flex items-center gap-3">
                                     {(() => {
                                       try {
@@ -1530,13 +1819,13 @@ const ChatModal: React.FC = () => {
                                         return (
                                           <>
                                             <img
-                                              src={contact.avatar?.startsWith('http') ? contact.avatar : `${getBaseUrl()}media/${contact.avatar}`}
-                                              className="w-12 h-12 rounded-full object-cover border border-white/10"
+                                              src={contact.avatar?.startsWith('http') ? contact.avatar : `${getBaseUrl()}${contact.avatar?.startsWith('/') ? contact.avatar.slice(1) : contact.avatar}`}
+                                              className="w-12 h-12 rounded-full object-cover border border-white/20"
                                               alt="Contact"
                                             />
                                             <div className="flex-1 overflow-hidden">
                                               <p className="text-sm font-bold text-white truncate">@{contact.username}</p>
-                                              <p className="text-[10px] text-gray-500">Contacto compartido</p>
+                                              <p className="text-[10px] text-white/50">Contacto compartido</p>
                                             </div>
                                           </>
                                         );
@@ -1546,14 +1835,7 @@ const ChatModal: React.FC = () => {
                                     })()}
                                   </div>
                                   <button
-                                    className={`w-full py-2 text-xs font-semibold rounded-lg transition-colors border ${isMe
-                                      ? user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND' ? 'bg-cyan-400/20 hover:bg-cyan-400/30 text-cyan-100 border-cyan-400/20' :
-                                        user.subscription_status?.plan?.name?.toUpperCase() === 'VIP' ? 'bg-amber-400/20 hover:bg-amber-400/30 text-amber-100 border-amber-400/20' :
-                                          'bg-white/10 hover:bg-white/20 text-white border-white/10'
-                                      : currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND' ? 'bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border-cyan-500/20' :
-                                        currentBackendChat.other_user.subscription_status?.plan?.name?.toUpperCase() === 'VIP' ? 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border-amber-500/20' :
-                                          'bg-white/5 hover:bg-white/10 text-gray-300 border-transparent'
-                                      }`}
+                                    className="w-full py-2 text-xs font-semibold rounded-lg transition-colors bg-black/20 hover:bg-black/30 text-white border border-white/20"
                                     onClick={() => {
                                       try {
                                         const contact = JSON.parse(msg.content);
@@ -1573,9 +1855,16 @@ const ChatModal: React.FC = () => {
 
                               {msg.message_type !== 'image' && msg.message_type !== 'video' && msg.message_type !== 'voice' && (
                                 <div className="flex items-center justify-between w-full mt-1.5 gap-4">
-                                  <p className="text-[11px] text-white/40 font-normal">
-                                    {new Date(msg.created_at).toLocaleTimeString("es-DO", { hour: "2-digit", minute: "2-digit" })}
-                                  </p>
+                                  <div className="flex items-center gap-1">
+                                    <p className="text-[11px] text-white/40 font-normal">
+                                      {new Date(msg.created_at).toLocaleTimeString("es-DO", { hour: "2-digit", minute: "2-digit" })}
+                                    </p>
+                                    {isMe && (
+                                      msg.is_read
+                                        ? <CheckCheck size={12} className="text-[#00f0ff]" />
+                                        : <Check size={12} className="text-white/30" />
+                                    )}
+                                  </div>
                                   {reactionsMap[msg.uuid] && Object.keys(reactionsMap[msg.uuid]).length > 0 && (
                                     <div className="flex items-center gap-1 z-10">
                                       {Object.entries(reactionsMap[msg.uuid]).map(([emoji, users]) => {
@@ -1669,6 +1958,60 @@ const ChatModal: React.FC = () => {
                                       </motion.button>
                                     ))}
                                   </div>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+
+                            {/* Message action menu */}
+                            <AnimatePresence>
+                              {msgMenuTarget === msg.uuid && (
+                                <motion.div
+                                  initial={{ opacity: 0, scale: 0.85, y: 6 }}
+                                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                                  exit={{ opacity: 0, scale: 0.85 }}
+                                  transition={{ type: "spring", damping: 20, stiffness: 350 }}
+                                  className={`absolute -top-24 ${isMe ? 'right-0' : 'left-0'} z-50 bg-[#0c1033]/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden min-w-[140px]`}
+                                  onClick={e => e.stopPropagation()}
+                                >
+                                  <button
+                                    className="flex items-center gap-2 w-full px-4 py-2.5 text-sm text-white hover:bg-white/5 transition-colors"
+                                    onClick={() => { setForwardMsg(msg); setMsgMenuTarget(null); setClickedMessage(null); }}
+                                  >
+                                    <Forward size={14} className="text-[#00f0ff]" />
+                                    Reenviar
+                                  </button>
+                                  {isMe && !msg.deleted_for_all && msg.message_type === 'text' && (
+                                    <>
+                                      <div className="h-px bg-white/5 mx-3" />
+                                      <button
+                                        className="flex items-center gap-2 w-full px-4 py-2.5 text-sm text-[#a78bfa] hover:bg-white/5 transition-colors"
+                                        onClick={() => { setEditingMsgUuid(msg.uuid); setEditingContent(msg.content); setMsgMenuTarget(null); setClickedMessage(null); }}
+                                      >
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                        Editar
+                                      </button>
+                                    </>
+                                  )}
+                                  {isMe && !msg.deleted_for_all && (
+                                    <>
+                                      <div className="h-px bg-white/5 mx-3" />
+                                      <button
+                                        className="flex items-center gap-2 w-full px-4 py-2.5 text-sm text-red-400 hover:bg-white/5 transition-colors"
+                                        onClick={() => handleDeleteMessage(msg.uuid, true)}
+                                      >
+                                        <Trash2 size={14} />
+                                        Anular
+                                      </button>
+                                    </>
+                                  )}
+                                  <div className="h-px bg-white/5 mx-3" />
+                                  <button
+                                    className="flex items-center gap-2 w-full px-4 py-2.5 text-sm text-gray-400 hover:bg-white/5 transition-colors"
+                                    onClick={() => handleDeleteMessage(msg.uuid, false)}
+                                  >
+                                    <Trash2 size={14} />
+                                    Eliminar para mí
+                                  </button>
                                 </motion.div>
                               )}
                             </AnimatePresence>
@@ -1864,6 +2207,61 @@ const ChatModal: React.FC = () => {
           contacts={connections}
           onSelect={handleSendContact}
         />
+
+        {/* Forward message modal */}
+        <AnimatePresence>
+          {forwardMsg && (
+            <>
+              <motion.div
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                className="fixed inset-0 bg-black/70 z-[200]"
+                onClick={() => { setForwardMsg(null); setForwardRecipients([]); }}
+              />
+              <motion.div
+                initial={{ opacity: 0, y: 60 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 60 }}
+                transition={{ type: "spring", damping: 28, stiffness: 280 }}
+                className="fixed bottom-0 left-0 right-0 max-w-md mx-auto z-[201] bg-[#0c1033]/98 backdrop-blur-xl border-t border-white/10 rounded-t-3xl p-5"
+                onClick={e => e.stopPropagation()}
+              >
+                <div className="w-10 h-1 bg-white/20 rounded-full mx-auto mb-4" />
+                <div className="flex items-center gap-2 mb-4">
+                  <Forward size={16} className="text-[#00f0ff]" />
+                  <h3 className="text-white font-bold text-base">Reenviar mensaje</h3>
+                </div>
+                <p className="text-xs text-gray-400 bg-white/5 rounded-xl px-3 py-2 mb-4 truncate">
+                  {forwardMsg.content || "[Multimedia]"}
+                </p>
+                <p className="text-xs text-gray-500 mb-2">Selecciona destinatarios:</p>
+                <div className="max-h-48 overflow-y-auto space-y-1 mb-4">
+                  {backendChats?.chats?.map((chat: any) => {
+                    const other = chat.other_user;
+                    const selected = forwardRecipients.includes(other.id);
+                    return (
+                      <button
+                        key={chat.uuid}
+                        onClick={() => setForwardRecipients(prev =>
+                          selected ? prev.filter(id => id !== other.id) : [...prev, other.id]
+                        )}
+                        className={`flex items-center gap-3 w-full px-3 py-2 rounded-xl transition-all ${selected ? 'bg-[#00f0ff]/15 border border-[#00f0ff]/30' : 'hover:bg-white/5 border border-transparent'}`}
+                      >
+                        <img src={getMediaUrl(other.avatar)} className="w-8 h-8 rounded-full object-cover" alt={other.username} />
+                        <span className="text-sm text-white">@{other.username}</span>
+                        {selected && <CheckCheck size={14} className="text-[#00f0ff] ml-auto" />}
+                      </button>
+                    );
+                  })}
+                </div>
+                <button
+                  disabled={forwardRecipients.length === 0}
+                  onClick={handleForwardMessage}
+                  className="w-full py-3 rounded-2xl bg-gradient-to-r from-[#7000ff] to-[#00f0ff] text-white font-bold text-sm disabled:opacity-40 transition-opacity"
+                >
+                  Reenviar a {forwardRecipients.length} chat{forwardRecipients.length !== 1 ? 's' : ''}
+                </button>
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
 
       </LayoutGroup>
     </>

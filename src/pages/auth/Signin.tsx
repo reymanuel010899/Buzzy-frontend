@@ -39,7 +39,6 @@ const SignIn: React.FC = () => {
       if (token) {
         setLoading(true);
         try {
-          // @ts-ignore
           await googleLogin(token)(dispatch);
           navigate('/');
         } catch (apiError: any) {

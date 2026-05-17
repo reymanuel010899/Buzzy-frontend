@@ -26,9 +26,9 @@ const TokenShopModal: React.FC<TokenShopModalProps> = ({ isOpen, onClose, onPurc
     const dispatch = useDispatch();
     const [packages, setPackages] = React.useState<TokenOption[]>([]);
     const [loading, setLoading] = React.useState(false);
-    const [customTokenAmount, setCustomTokenAmount] = React.useState<number | ''>('');
-    const [customTokenPrice, setCustomTokenPrice] = React.useState<number | null>(null);
-    const [calculatingPrice, setCalculatingPrice] = React.useState<boolean>(false);
+    const [customUsdAmount, setCustomUsdAmount] = React.useState<string>('');
+    const [customTokens, setCustomTokens] = React.useState<number | null>(null);
+    const [calculatingTokens, setCalculatingTokens] = React.useState(false);
 
     React.useEffect(() => {
         if (isOpen) {
@@ -43,31 +43,20 @@ const TokenShopModal: React.FC<TokenShopModalProps> = ({ isOpen, onClose, onPurc
     }, [isOpen, dispatch]);
 
     React.useEffect(() => {
-        if (!customTokenAmount || customTokenAmount <= 0) {
-            setCustomTokenPrice(null);
-            setCalculatingPrice(false);
+        const usd = Number(customUsdAmount);
+        if (!customUsdAmount || usd <= 0) {
+            setCustomTokens(null);
             return;
         }
-
-        setCalculatingPrice(true);
-        const delayDebounceFn = setTimeout(() => {
-            apiClient.get(`/api/wallet/calculate-token-price/?tokens=${customTokenAmount}`)
-                .then(response => {
-                    if (response.data && response.data.total_price !== undefined) {
-                        setCustomTokenPrice(response.data.total_price);
-                    }
-                })
-                .catch(err => {
-                    console.error("Error calculating token price", err);
-                    setCustomTokenPrice(null);
-                })
-                .finally(() => {
-                    setCalculatingPrice(false);
-                });
-        }, 500);
-
-        return () => clearTimeout(delayDebounceFn);
-    }, [customTokenAmount]);
+        setCalculatingTokens(true);
+        const timer = setTimeout(() => {
+            apiClient.get(`/api/wallet/calculate-token-price/?usd=${usd}`)
+                .then(res => setCustomTokens(res.data.tokens ?? null))
+                .catch(() => setCustomTokens(null))
+                .finally(() => setCalculatingTokens(false));
+        }, 400);
+        return () => clearTimeout(timer);
+    }, [customUsdAmount]);
     return (
         <AnimatePresence>
             {isOpen && (
@@ -185,37 +174,39 @@ const TokenShopModal: React.FC<TokenShopModalProps> = ({ isOpen, onClose, onPurc
                                                 </div>
                                             </div>
 
-                                            <input
-                                                type="number"
-                                                min="1"
-                                                placeholder="Ej. 10000"
-                                                value={customTokenAmount === '' ? '' : customTokenAmount}
-                                                onChange={(e) => {
-                                                    const val = e.target.value;
-                                                    setCustomTokenAmount(val === '' ? '' : Number(val));
-                                                }}
-                                                className="w-full bg-black/40 text-white font-bold p-2 text-sm mt-1 rounded-lg border border-white/10 focus:outline-none focus:border-purple-500 transition-all text-center"
-                                            />
+                                            <div className="relative mt-1">
+                                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-white/50 font-bold text-sm">$</span>
+                                                <input
+                                                    type="number"
+                                                    min="0.01"
+                                                    step="0.01"
+                                                    placeholder="0.00"
+                                                    value={customUsdAmount}
+                                                    onChange={(e) => setCustomUsdAmount(e.target.value)}
+                                                    className="w-full bg-black/40 text-white font-bold pl-7 pr-3 py-2 text-sm rounded-lg border border-white/10 focus:outline-none focus:border-purple-500 transition-all text-center"
+                                                />
+                                            </div>
                                         </div>
 
                                         <div className="flex justify-between items-end mt-2">
                                             <div>
-                                                <p className="text-[8px] font-bold text-gray-500 uppercase tracking-widest mb-0.5">Precio Total</p>
-                                                <p className="text-base md:text-lg font-black text-white">
-                                                    {calculatingPrice ? (
-                                                        <span className="inline-block w-4 h-4 border-2 border-white/50 border-t-transparent rounded-full animate-spin"></span>
+                                                <p className="text-[8px] font-bold text-gray-500 uppercase tracking-widest mb-0.5">Tokens a recibir</p>
+                                                <p className="text-base md:text-lg font-black text-amber-400">
+                                                    {calculatingTokens ? (
+                                                        <span className="inline-block w-4 h-4 border-2 border-amber-400/50 border-t-transparent rounded-full animate-spin" />
                                                     ) : (
-                                                        `$${customTokenPrice !== null ? customTokenPrice.toFixed(2) : "0.00"}`
+                                                        `🪙 ${customTokens !== null ? customTokens.toLocaleString() : '0'}`
                                                     )}
                                                 </p>
                                             </div>
                                             <button
                                                 onClick={() => {
-                                                    if (customTokenAmount && Number(customTokenAmount) > 0 && customTokenPrice !== null) {
-                                                        onPurchase(Number(customTokenAmount), customTokenPrice);
+                                                    const usd = Number(customUsdAmount);
+                                                    if (usd > 0 && customTokens && customTokens > 0) {
+                                                        onPurchase(customTokens, usd);
                                                     }
                                                 }}
-                                                disabled={!customTokenAmount || Number(customTokenAmount) <= 0 || calculatingPrice || customTokenPrice === null}
+                                                disabled={!customUsdAmount || Number(customUsdAmount) <= 0 || calculatingTokens || !customTokens || customTokens <= 0}
                                                 className="p-1.5 bg-purple-600 rounded-lg hover:bg-purple-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                                             >
                                                 <ShoppingCart size={14} className="text-white" />

@@ -19,7 +19,6 @@ interface FluidSearchProps {
 type Tab = "populares" | "usuarios" | "videos"
 
 export default function FluidSearch({ onClose, searchTerm, setSearchTerm }: FluidSearchProps) {
-  console.log(searchTerm, "========================")
   const [isTyping, setIsTyping] = useState(false)
   const [activeTab, setActiveTab] = useState<Tab>("populares")
   const inputRef = useRef<HTMLInputElement>(null)
@@ -39,19 +38,13 @@ export default function FluidSearch({ onClose, searchTerm, setSearchTerm }: Flui
 
   // Real search with debounce
   useEffect(() => {
-      console.log("Efecto disparado por:", searchTerm); // <--- DEBUG 1
-
-      // Limpiamos el timeout anterior siempre que el usuario escriba
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
       }
-      
+
       if (searchTerm.trim().length > 1) {
         typingTimeoutRef.current = setTimeout(() => {
-          console.log("Enviando búsqueda al servidor:", searchTerm); // <--- DEBUG 2
-          globalSearch(searchTerm)(dispatch); // Forma estándar de Redux
-          
-          console.log("------------------------")
+          globalSearch(searchTerm)(dispatch);
         }, 500);
       }
 

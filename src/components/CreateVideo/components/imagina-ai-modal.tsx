@@ -282,9 +282,9 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
                       <ChevronRight size={20} className="text-white rotate-180" />
                     )}
                   </button>
-                  <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/30">
-                    <Clapperboard size={13} className="text-amber-400" />
-                    <span className="text-amber-400 font-bold text-sm">{availableSeconds}s</span>
+                  <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-gradient-to-r from-[#C9963F]/20 to-[#E8A830]/20 border border-[#C9963F]/40">
+                    <Clapperboard size={13} className="text-[#F2C94C]" />
+                    <span className="text-[#F2C94C] font-bold text-sm">{availableSeconds}s</span>
                   </div>
                 </div>
 
@@ -297,9 +297,9 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
                 </div>
 
                 {/* Right: image credits */}
-                <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/30">
-                  <ImageIcon size={13} className="text-amber-400" />
-                  <span className="text-amber-400 font-bold text-sm">{imageCredits}</span>
+                <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-gradient-to-r from-[#C9963F]/20 to-[#E8A830]/20 border border-[#C9963F]/40">
+                  <ImageIcon size={13} className="text-[#F2C94C]" />
+                  <span className="text-[#F2C94C] font-bold text-sm">{imageCredits}</span>
                 </div>
               </div>
             </div>
@@ -432,8 +432,8 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
                     <div className="grid grid-cols-2 gap-3">
                       <div className="p-3 rounded-xl bg-white/5 border border-white/5 text-center">
                         <div className="flex items-center justify-center gap-1.5 mb-1">
-                          <Clapperboard size={13} className="text-amber-400" />
-                          <span className="text-xl font-bold text-amber-400">{availableSeconds}s</span>
+                          <Clapperboard size={13} className="text-[#F2C94C]" />
+                          <span className="text-xl font-bold text-[#F2C94C]">{availableSeconds}s</span>
                         </div>
                         <p className="text-gray-500 text-[10px]">Segundos disponibles</p>
                       </div>
@@ -450,16 +450,16 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
                     <motion.button
                       whileTap={{ scale: 0.98 }}
                       onClick={() => setRechargeOpen(true)}
-                      className="w-full p-3.5 rounded-2xl bg-gradient-to-r from-amber-500/15 to-orange-500/15 border border-amber-500/30 flex items-center gap-3 hover:border-amber-500/50 transition-all"
+                      className="w-full p-3.5 rounded-2xl bg-gradient-to-r from-[#C9963F]/15 to-[#E8A830]/15 border border-[#C9963F]/40 flex items-center gap-3 hover:border-[#C9963F]/60 transition-all"
                     >
-                      <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center flex-shrink-0">
+                      <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#C9963F] to-[#E8A830] flex items-center justify-center flex-shrink-0">
                         <Zap size={20} className="text-white" />
                       </div>
                       <div className="flex-1 text-left">
                         <span className="text-white font-semibold text-sm">Recargar créditos</span>
                         <p className="text-gray-500 text-[10px]">Compra más videos e imágenes IA</p>
                       </div>
-                      <ChevronRight size={18} className="text-amber-400" />
+                      <ChevronRight size={18} className="text-[#F2C94C]" />
                     </motion.button>
                   </motion.div>
                 )}
@@ -754,13 +754,13 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
                    
 
                           {/* Costo */}
-                          <div className={`flex items-center justify-between p-3 rounded-xl border ${hasEnoughCredits ? 'bg-amber-500/10 border-amber-500/20' : 'bg-red-500/10 border-red-500/30'}`}>
+                          <div className={`flex items-center justify-between p-3 rounded-xl border ${hasEnoughCredits ? 'bg-[#C9963F]/10 border-[#C9963F]/30' : 'bg-red-500/10 border-red-500/30'}`}>
                             <div className="flex items-center gap-2">
-                              <Zap size={16} className={hasEnoughCredits ? 'text-amber-400' : 'text-red-400'} />
+                              <Zap size={16} className={hasEnoughCredits ? 'text-[#F2C94C]' : 'text-red-400'} />
                               <span className="text-white text-sm">Costo de generacion</span>
                             </div>
                             <div className="text-right">
-                              <span className={`font-bold text-sm ${hasEnoughCredits ? 'text-amber-400' : 'text-red-400'}`}>
+                              <span className={`font-bold text-sm ${hasEnoughCredits ? 'text-[#F2C94C]' : 'text-red-400'}`}>
                                 {duration}s
                               </span>
                               {!hasEnoughCredits && (
@@ -896,7 +896,7 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
                               initial={{ scale: 0 }}
                               animate={{ scale: 1 }}
                               transition={{ type: 'spring', delay: 0.1 }}
-                              className="w-12 h-12 rounded-full bg-gradient-to-br from-amber-400 to-yellow-500 flex items-center justify-center mx-auto mb-3 shadow-lg shadow-amber-500/30"
+                              className="w-12 h-12 rounded-full bg-gradient-to-br from-[#C9963F] to-[#F2C94C] flex items-center justify-center mx-auto mb-3 shadow-lg shadow-[#C9963F]/30"
                             >
                               <Sparkles size={22} className="text-white" />
                             </motion.div>
@@ -920,7 +920,7 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
                                 <Download size={16} />
                               </a>
                             )}
-                            <button onClick={handlePublish} disabled={publishLoading} className="flex-1 py-3 rounded-xl bg-gradient-to-r from-amber-400 to-yellow-500 text-white text-sm font-semibold flex items-center justify-center gap-1.5 disabled:opacity-60 shadow-lg shadow-amber-500/30">
+                            <button onClick={handlePublish} disabled={publishLoading} className="flex-1 py-3 rounded-xl bg-gradient-to-r from-[#C9963F] to-[#F2C94C] text-white text-sm font-semibold flex items-center justify-center gap-1.5 disabled:opacity-60 shadow-lg shadow-[#C9963F]/30">
                               <Play size={14} />
                               {publishLoading ? 'Publicando...' : 'Publicar'}
                             </button>
@@ -1123,7 +1123,7 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
                             <motion.div
                               animate={{ rotate: 360 }}
                               transition={{ duration: 8, repeat: Infinity, ease: "linear" }}
-                              className="absolute inset-4 rounded-full bg-gradient-to-br from-pink-500 via-orange-500 to-yellow-500"
+                              className="absolute inset-4 rounded-full bg-gradient-to-br from-pink-500 via-[#C9963F] to-[#F2C94C]"
                             />
                             <div className="absolute inset-0 flex items-center justify-center">
                               <motion.div animate={{ scale: [1, 1.1, 1] }} transition={{ duration: 1.5, repeat: Infinity }}>
@@ -1172,7 +1172,7 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
                               initial={{ scale: 0 }}
                               animate={{ scale: 1 }}
                               transition={{ type: 'spring', delay: 0.1 }}
-                              className="w-12 h-12 rounded-full bg-gradient-to-br from-amber-400 to-yellow-500 flex items-center justify-center mx-auto mb-3 shadow-lg shadow-amber-500/30"
+                              className="w-12 h-12 rounded-full bg-gradient-to-br from-[#C9963F] to-[#F2C94C] flex items-center justify-center mx-auto mb-3 shadow-lg shadow-[#C9963F]/30"
                             >
                               <Sparkles size={22} className="text-white" />
                             </motion.div>
@@ -1192,7 +1192,7 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
                                 <Download size={16} />
                               </a>
                             )}
-                            <button onClick={handlePublish} disabled={publishLoading} className="flex-1 py-3 rounded-xl bg-gradient-to-r from-amber-400 to-yellow-500 text-white text-sm font-semibold flex items-center justify-center gap-1.5 disabled:opacity-60 shadow-lg shadow-amber-500/30">
+                            <button onClick={handlePublish} disabled={publishLoading} className="flex-1 py-3 rounded-xl bg-gradient-to-r from-[#C9963F] to-[#F2C94C] text-white text-sm font-semibold flex items-center justify-center gap-1.5 disabled:opacity-60 shadow-lg shadow-[#C9963F]/30">
                               <Play size={14} />
                               {publishLoading ? 'Publicando...' : 'Publicar'}
                             </button>
@@ -1362,7 +1362,7 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
             <div className="flex flex-col flex-1 p-5 gap-3 min-h-0">
               <div className="flex-1 min-h-0 space-y-1 overflow-hidden">
                 {selectedHistoryItem.style_name && (
-                  <span className="text-xs text-amber-400 font-semibold uppercase tracking-wide block">
+                  <span className="text-xs text-[#F2C94C] font-semibold uppercase tracking-wide block">
                     {selectedHistoryItem.style_name}
                   </span>
                 )}
@@ -1400,7 +1400,7 @@ const ImaginaAIModal: React.FC<ImaginaAIModalProps> = ({ isOpen, onClose }) => {
                       setHistoryPublishLoading(false)
                     }
                   }}
-                  className="flex-1 py-3 rounded-xl bg-gradient-to-r from-amber-400 to-yellow-500 text-white text-sm font-semibold flex items-center justify-center gap-1.5 disabled:opacity-60 shadow-lg shadow-amber-500/30"
+                  className="flex-1 py-3 rounded-xl bg-gradient-to-r from-[#C9963F] to-[#F2C94C] text-white text-sm font-semibold flex items-center justify-center gap-1.5 disabled:opacity-60 shadow-lg shadow-[#C9963F]/30"
                 >
                   <Play size={14} />
                   {historyPublishLoading ? 'Publicando...' : 'Publicar'}

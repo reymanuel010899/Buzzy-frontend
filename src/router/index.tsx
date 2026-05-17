@@ -6,11 +6,7 @@ import {
 } from "react-router-dom";
 import Main from "../pages/main";
 import SignUp from "../pages/auth/signup";
-import LivePage from "../pages/main/LivePage";
-import Marketplace from "../pages/main/Marker";
 import Wallet from "../pages/main/wallet";
-import Store from "../pages/main/store";
-import Game from "../pages/main/game";
 import Profile from "../pages/profille/profile";
 import SubscriptionSuccess from "../pages/main/SubscriptionSuccess";
 import SubscriptionCancel from "../pages/main/SubscriptionCancel";
@@ -39,38 +35,7 @@ export const router = createBrowserRouter(
           </ProtectedRoute>
         }
       />
-      <Route
-        path="/lives"
-        element={
-          <ProtectedRoute>
-            <LivePage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/marker"
-        element={
-          <ProtectedRoute>
-            <Marketplace />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/game"
-        element={
-          <ProtectedRoute>
-            <Game />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/store"
-        element={
-          <ProtectedRoute>
-            <Store />
-          </ProtectedRoute>
-        }
-      />
+
       <Route
         path="/wallet"
         element={

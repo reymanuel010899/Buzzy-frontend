@@ -12,11 +12,14 @@ type WalletProps = {
     user: IUser | null;
     pass_code: string;
     wallet_type: string;
+    tokens: number;
+    token_value_usd: number;
+    gift_fee_pct: number;
     createDepositSession: (amount: number) => any;
     withdrawFunds: (amount: number) => any;
 };
 
-const Wallet = ({ getWallet, balance, user, pass_code, wallet_type, createDepositSession, withdrawFunds }: WalletProps) => {
+const Wallet = ({ getWallet, balance, user, pass_code, wallet_type, tokens, token_value_usd, gift_fee_pct, createDepositSession, withdrawFunds }: WalletProps) => {
     const count = useRef(0);
 
     useEffect(() => {
@@ -35,6 +38,9 @@ const Wallet = ({ getWallet, balance, user, pass_code, wallet_type, createDeposi
                 getWallet={getWallet}
                 pass_code={pass_code}
                 wallet_type={wallet_type}
+                tokens={tokens}
+                token_value_usd={token_value_usd}
+                gift_fee_pct={gift_fee_pct}
                 createDepositSession={createDepositSession}
                 withdrawFunds={withdrawFunds}
             />
@@ -43,15 +49,15 @@ const Wallet = ({ getWallet, balance, user, pass_code, wallet_type, createDeposi
 };
 import { GetWalletState } from "../../redux/reducers/getWallet";
 const mapStateToProps = (state: RootState) => {
-
     const walletState = state.getWalletReducer as GetWalletState;
-
     return ({
-        // Usamos el operador || para proporcionar valores por defecto
         balance: walletState.balance || 0,
         user: walletState.user || null,
         pass_code: walletState.pass_code || "",
         wallet_type: walletState.wallet_type || "default",
+        tokens: walletState.tokens || 0,
+        token_value_usd: walletState.token_value_usd || 0.015,
+        gift_fee_pct: walletState.gift_fee_pct || 30,
     });
 };
 

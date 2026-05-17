@@ -41,7 +41,6 @@ const BankAccountModal: React.FC<BankAccountModalProps> = ({ isOpen, onClose }) 
 
         const response = await dispatch(addBankAccount(formData) as any);
         setActionLoading(false);
-        console.log(response, "**")
         if (response) {
             if (response.data?.stripe_onboarding_url) {
                  window.location.href = response.data.stripe_onboarding_url;
@@ -74,7 +73,6 @@ const BankAccountModal: React.FC<BankAccountModalProps> = ({ isOpen, onClose }) 
             setTimeout(() => setLocalError(null), 3000);
         }
     };
-    console.log(formData, "***")
     return (
         <AnimatePresence>
             {isOpen && (

@@ -89,6 +89,7 @@ const SignUp: React.FC = () => {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const [successMsg, setSuccessMsg] = useState("");
 
   const [formData, setFormData] = useState<IDataSignUp>({
     name: "",
@@ -137,7 +138,6 @@ const SignUp: React.FC = () => {
         const sendCode = formData.country_code || detectedCountry.code;
         const sendName = formData.country || detectedCountry.name;
 
-        // @ts-ignore
         await googleRegister(token, photoUrl, sendCode, sendName)(dispatch);
         navigate('/');
       }
@@ -151,6 +151,9 @@ const SignUp: React.FC = () => {
       setLoading(false);
     }
   };
+  const isUsernameValid = /^[a-zA-Z0-9._-]+$/.test(username);
+  const isUsernameLengthValid = username.length >= 3;
+
   const isLengthValid = password.length >= 8;
   const isUppercaseValid = /[A-Z]/.test(password);
   const isSpecialValid = /[!@#$&*.,_+\-]/.test(password);
@@ -165,6 +168,10 @@ const SignUp: React.FC = () => {
       setErrorMsg("Las contraseñas no coinciden");
       return;
     }
+    if (!isUsernameLengthValid || !isUsernameValid) {
+      setErrorMsg("El username debe tener mínimo 3 caracteres y solo puede contener letras, números, puntos, guiones y guiones bajos.");
+      return;
+    }
     if (!formData.country_code) {
       setErrorMsg("Selecciona tu país");
       return;
@@ -176,16 +183,15 @@ const SignUp: React.FC = () => {
 
     setLoading(true);
     try {
-      // @ts-ignore
       await register(formData)(dispatch);
 
-      // Limpiar datos por si el reducer hace login y forzar la redirección a sign-in
       localStorage.removeItem('refreshToken');
       localStorage.removeItem('accessToken');
       localStorage.removeItem('isAuthenticated');
       localStorage.removeItem('user');
 
-      navigate('/sign-in');
+      setSuccessMsg("¡Cuenta creada con éxito! Revisa tu correo para verificarla.");
+      setTimeout(() => navigate('/sign-in'), 2500);
     } catch (err: any) {
       console.error(err);
       const backError = err?.response?.data?.error;
@@ -211,6 +217,11 @@ const SignUp: React.FC = () => {
           <p className="text-sm text-gray-400 mt-2 font-medium">Únete y descubre todo el contenido.</p>
         </div>
 
+        {successMsg && (
+          <div className="mb-6 bg-green-500/10 border border-green-500/20 text-green-400 p-4 rounded-xl text-sm text-center font-bold">
+            {successMsg}
+          </div>
+        )}
         {errorMsg && (
           <div className="mb-6 bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-xl text-sm text-center font-bold">
             {errorMsg}
@@ -255,6 +266,27 @@ const SignUp: React.FC = () => {
               className="w-full pl-12 pr-4 py-3.5 bg-[#0b0f19] border border-white/10 rounded-xl focus:outline-none focus:border-cyan-500 focus:ring-4 focus:ring-cyan-500/10 text-white font-medium transition-all"
             />
           </div>
+
+          {username.length > 0 && (
+            <div className="grid grid-cols-2 gap-2 px-1">
+              {[
+                { valid: isUsernameLengthValid, label: "Mín. 3 chars" },
+                { valid: isUsernameValid, label: "Sin espacios ni @" },
+              ].map(({ valid, label }) => (
+                <div
+                  key={label}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[11px] font-bold transition-all duration-200 ${
+                    valid
+                      ? "bg-green-500/10 border-green-500/30 text-green-400"
+                      : "bg-white/[0.03] border-white/10 text-gray-600"
+                  }`}
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 transition-colors ${valid ? "bg-green-400" : "bg-gray-700"}`} />
+                  {label}
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Email */}
           <div className="relative group">

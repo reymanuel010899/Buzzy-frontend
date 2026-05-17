@@ -61,9 +61,9 @@ const getMedia = (
         case FAILED_MEDIA:
             return {
                 ...state,
-                // Usamos action.payload directamente, que contiene el error
                 error: action.payload,
-                media: null, // Resetear media en caso de error
+                // Conservar los videos existentes — no borrar el feed del usuario por un error de red
+                media: state.media,
             };
         default:
             return { ...state };

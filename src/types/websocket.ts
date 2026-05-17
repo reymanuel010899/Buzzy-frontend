@@ -220,7 +220,11 @@ export interface WsUserOffline {
 export type WsOutgoingEvent =
   | { type: "REGISTER"; device_token: string | null }
   | { type: "typing"; is_typing: boolean; receiver_id: number; chat_uuid?: string }
-  | { type: "pong" };
+  | { type: "pong" }
+  | { type: "message_deleted"; uuid: string; for_all: boolean; chat_uuid: string; receiver_id: number }
+  | { type: "message_edited"; uuid: string; content: string; chat_uuid: string; receiver_id: number }
+  | { type: "reaction"; message_uuid: string; emoji: string }
+  | { type: "messages_read"; chat_uuid: string; receiver_id: number; reader: string };
 
 // ─── Estado de la conexión ────────────────────────────────────────────────────
 

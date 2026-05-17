@@ -8,12 +8,14 @@ import { useSelector } from "react-redux"
 import ProfileIconC from "./ProfileIcon";
 import CreateActionModal from "../CreateVideo/components/create-action-modal";
 import { useChat } from "../../context/ChatContext";
+import { useUnreadMessages } from "../../context/UnreadAcount";
 
 const BottomNavbar: React.FC = () => {
   const location = useLocation()
   const [isModalOpen, setIsModalOpen] = useState(false)
   const { setShowMessages } = useChat()
   const currentUser = useSelector((state: { LoginReducer: { user?: { username?: string } } }) => state.LoginReducer?.user);
+  const totalUnread = useUnreadMessages(state => state.getTotalUnread());
   const profilePath = `/profile/${currentUser?.username || 'user'}`;
 
   const isActive = (path: string | null) => {
@@ -52,11 +54,27 @@ const BottomNavbar: React.FC = () => {
           <motion.button
             whileTap={{ scale: 0.85 }}
             onClick={() => setShowMessages(true)}
-            className="flex flex-col items-center gap-0.5 group"
+            className="relative flex flex-col items-center gap-0.5 group"
           >
-            <svg fill="currentColor" className="h-5 w-5 text-white/40 group-hover:text-white/70 transition-colors duration-200" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
-              <path d="M45.73 7A2 2 0 0 0 44 6H4a2 2 0 0 0-1.48 3.35l10.44 11.47a2 2 0 0 0 2.2.52l14.49-5.5c.17-.07.25-.04.28-.03.06.02.14.08.2.2.07.1.08.2.08.27 0 .04-.02.12-.16.23l-11.9 10.1a2 2 0 0 0-.62 2.12l4.56 14.51a2 2 0 0 0 3.64.4L45.73 9a2 2 0 0 0 0-2Z" />
-            </svg>
+            <div className="relative">
+              <svg fill="currentColor" className="h-5 w-5 text-white/40 group-hover:text-white/70 transition-colors duration-200" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+                <path d="M45.73 7A2 2 0 0 0 44 6H4a2 2 0 0 0-1.48 3.35l10.44 11.47a2 2 0 0 0 2.2.52l14.49-5.5c.17-.07.25-.04.28-.03.06.02.14.08.2.2.07.1.08.2.08.27 0 .04-.02.12-.16.23l-11.9 10.1a2 2 0 0 0-.62 2.12l4.56 14.51a2 2 0 0 0 3.64.4L45.73 9a2 2 0 0 0 0-2Z" />
+              </svg>
+              {totalUnread > 0 && (
+                <motion.span
+                  initial={{ scale: 0, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ scale: 0, opacity: 0 }}
+                  className="absolute -top-2 -right-2.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full text-[10px] font-black text-white"
+                  style={{
+                    background: 'linear-gradient(135deg, #a855f7, #7000ff)',
+                    boxShadow: '0 0 10px rgba(168,85,247,0.7), 0 0 20px rgba(112,0,255,0.4), inset 0 1px 0 rgba(255,255,255,0.2)',
+                  }}
+                >
+                  {totalUnread > 99 ? '99+' : totalUnread}
+                </motion.span>
+              )}
+            </div>
             <span className="text-[9px] font-medium text-white/30 group-hover:text-white/50 transition-colors duration-200">Messages</span>
           </motion.button>
 

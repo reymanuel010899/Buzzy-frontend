@@ -14,7 +14,7 @@ export const BASE_URL = getBaseUrl();
  * new format ("/media/profile_pics/avatar.webp") without doubling /media/.
  */
 export const getMediaUrl = (path: string | null | undefined): string => {
-  if (!path) return ""
+  if (!path || typeof path !== 'string') return ""
   if (path.startsWith("http")) return path
   const base = getBaseUrl().replace(/\/+$/, "") // remove trailing slashes
   // normalize: remove leading slashes then re-add one

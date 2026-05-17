@@ -31,9 +31,10 @@ import { getRecivedGiftByUser } from "../../redux/actions/gift/getGiftsByUser"
 import { GiftI } from "../../interfaces/gift"
 import { ShowComments } from "../comments/modalComents"
 import { useChat } from "../../context/ChatContext"
-import { getBaseUrl, getMediaUrl } from "../../redux/client/api-client";
+import { apiClient, getBaseUrl, getMediaUrl } from "../../redux/client/api-client";
 import { useTypingUsers } from "../../context/useTyping";
 import { useNotificationsStore } from "../../context/NotificationsStore";
+import { isNotifEnabled } from "../../utils/notifPrefs";
 import HorizontalCarousel from "./HorizontalCarousel";
 import StoryFilterCanvas from "./StoryFilterCanvas";
 import { useUserVideos } from "../../hooks/useUserVideos";
@@ -192,7 +193,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [showViewersModal, setShowViewersModal] = useState(false);
   const [realViewers, setRealViewers] = useState<any[]>([]);
   const [giftRecived, setGiftRecived] = useState<any[]>([]);
-  const [viewerGiftOverlay, setViewerGiftOverlay] = useState<{ gift_video: string; gift_type: string; sender: string } | null>(null);
+  const [viewerGiftOverlay, setViewerGiftOverlay] = useState<{ gift_video: string; gift_type: string; sender: string; uuid?: string } | null>(null);
   const [viewerGiftBlackout, setViewerGiftBlackout] = useState(false);
   // --- Fixed State for Viewed Items per Media UUID ---
   const [viewedItems, setViewedItems] = useState<Record<string, boolean>>({});
@@ -869,6 +870,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     const giftEntry = {
       type: data.gift_type, giftId: data.gift_uuid, storyUuid: data.story_uuid,
       sender: data.sender, amount: data.amount || 1, gift: data.gift_video,
+      uuid: data.gift_uuid,
     };
     const normalizeGiftList = (value: any) => (Array.isArray(value) ? value : []);
     if (user.id == data.from_user) {
@@ -882,17 +884,19 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         const current = normalizeGiftList(prev);
         return current.some(g => g.uuid === data.gift_uuid) ? current : [...current, giftEntry];
       });
-      useNotificationsStore.getState().pushRealtime({
-        id: Date.now(),
-        notification_type: "gift",
-        message: `${data.sender?.username ?? data.sender} te mandó un regalo 🎁`,
-        is_read: false,
-        read_at: null,
-        created_at: new Date().toISOString(),
-        actor: { id: data.from_user, username: data.sender?.username ?? data.sender, profile_picture: data.sender?.profile_picture ?? null },
-        video_thumbnail: null,
-        video_uuid: null,
-      });
+      if (isNotifEnabled('notif_gifts')) {
+        useNotificationsStore.getState().pushRealtime({
+          id: Date.now(),
+          notification_type: "gift",
+          message: `${data.sender?.username ?? data.sender} te mandó un regalo 🎁`,
+          is_read: false,
+          read_at: null,
+          created_at: new Date().toISOString(),
+          actor: { id: data.from_user, username: data.sender?.username ?? data.sender, profile_picture: data.sender?.profile_picture ?? null },
+          video_thumbnail: null,
+          video_uuid: null,
+        });
+      }
     }
     // Usar ref para evitar TDZ — currentStoryUuid se declara más abajo en el módulo
     if (currentStoryUuidRef.current === data.story_uuid) {
@@ -910,7 +914,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         sender: data.sender, amount: data.amount || 1, gift: data.gift_video,
         color_premiun: data.color_premiun,
       });
-    } else {
+    } else if (isNotifEnabled('notif_gifts')) {
       useNotificationsStore.getState().pushRealtime({
         id: Date.now(),
         notification_type: "gift",
@@ -1065,6 +1069,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       })
       .catch((error: any) => {
         console.error("Error publicando comentario:", error);
+        setFeedbackModal({ show: true, success: false, message: "No se pudo publicar el comentario. Inténtalo de nuevo." });
       });
   };
 
@@ -1143,6 +1148,12 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       })
       .catch((err: any) => {
         console.error("❌ Error al crear el seguidor:", err);
+        // Revertir estado optimista en caso de error
+        setFollowingState((prev) => ({
+          ...prev,
+          [userIdAsString]: actions == "delete" ? true : false,
+        }));
+        setFeedbackModal({ show: true, success: false, message: "No se pudo completar la acción. Inténtalo de nuevo." });
       });
   };
   useEffect(() => {
@@ -1282,7 +1293,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     const file = event.target.files?.[0];
     if (!file) return;
     if (file.size > 50 * 1024 * 1024) {
-      alert("El archivo es demasiado grande (Max 50MB)");
+      setFeedbackModal({ show: true, success: false, message: "El archivo es demasiado grande. El máximo permitido es 50MB." });
       return;
     }
     // Open editor instead of uploading directly
@@ -1320,7 +1331,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       setStoryEditorFile(null);
     } catch (error) {
       console.error("Error creando la historia:", error);
-      alert("Error al subir la historia. Inténtalo de nuevo.");
+      setFeedbackModal({ show: true, success: false, message: "Error al subir la historia. Inténtalo de nuevo." });
     } finally {
       setIsUploadingStory(false);
     }
@@ -1585,8 +1596,18 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
           setRealViewers(Array.isArray(res) ? res : []);
         });
 
-        getRecivedGift(currentStoryUuid)(dispatch).then((res) => {
-          setGiftRecived(Array.isArray(res) ? res : []);
+        getRecivedGift(currentMediaUuid)(dispatch).then((res: any) => {
+          if (Array.isArray(res)) {
+            const mapped = res.map((g: any) => ({
+              type: g.gift_type || g.type,
+              gift: g.gift_video_url || g.gift,
+              uuid: g.uuid,
+              sender: g.sender_username || g.sender,
+              amount: g.quantity || 1,
+              giftId: g.uuid,
+            }));
+            setGiftRecived(mapped);
+          }
         })
 
       }
@@ -1952,35 +1973,36 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   }, [])
   const giftsSentByThisViewer = useCallback((viewer: any) => {
     return giftRecived?.filter((gift: any) =>
-      gift.sender === viewer.user_id
+      gift.sender === viewer.username || gift.sender === viewer.user_id
     ) || [];
   }, [giftRecived]);
 
 
-  const showGiftRecived = (viewer: any) => {
-    const gifts = giftRecived?.filter((gift: any) => {
-      if (gift.sender === viewer.user_id) {
-        return gift;
-      }
+  const claimAndShowGift = (g: any, senderUsername: string) => {
+    // Quitar inmediatamente del state para que el badge desaparezca
+    setGiftRecived(prev => (prev || []).filter((gift: any) => gift.uuid !== g.uuid));
+    setIsGift(prev => (prev || []).filter((gift: any) => gift.uuid !== g.uuid));
+    setViewerGiftOverlay({
+      gift_video: g.gift,
+      gift_type: g.type,
+      sender: senderUsername,
+      uuid: g.uuid,
+    });
+    if (g.uuid) {
+      apiClient.post('/api/stories/gifts/mark-seen/', { uuid: g.uuid })
+        .then(() => apiClient.get('/api/get-wallet/'))
+        .then(res => dispatch({ type: 'SUCCEES_GET_WALLET', payload: res.data }))
+        .catch(() => {});
     }
+  };
+
+  const showGiftRecived = (viewer: any) => {
+    const gifts = giftRecived?.filter((gift: any) =>
+      gift.sender === viewer.username || gift.sender === viewer.user_id
     ) || [];
-    // Asegúrate de que haya al menos un regalo
 
-    if (gifts && gifts.length > 0) {
-      const firstGiftId = gifts[0].id;
-      // Usar Redux si ya tenemos el gift, sino hacer la llamada
-      if (oneActiveGift && oneActiveGift.length > 0) {
-        // Ya tenemos el gift en Redux
-
-        // gifts.splice(0, 1);
-      } else {
-        getOneActiveGift(firstGiftId, currentStoryUuid)(dispatch).then(() => {
-          //   setGifts((gift)=>{
-          //   return [...gift, res]
-          // })
-        });
-      }
-    } else {
+    if (gifts.length > 0) {
+      claimAndShowGift(gifts[0], viewer.username);
     }
   }
 
@@ -2117,6 +2139,21 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
             className="flex h-full flex-col overflow-y-auto overscroll-y-contain scroll-smooth snap-y snap-mandatory"
             onScroll={handleFeedScroll}
           >
+            {/* ── Empty feed state ── */}
+            {mediaVideo !== null && mediaVideo.length === 0 && (
+              <div className="relative h-full w-full snap-start snap-always flex-shrink-0 flex flex-col items-center justify-center gap-4 px-6 text-center">
+                <div className="text-5xl">🎬</div>
+                <h3 className="text-white font-black text-lg">No hay videos disponibles</h3>
+                <p className="text-gray-500 text-sm max-w-xs">Pronto habrá más contenido. Vuelve a intentarlo en un momento.</p>
+                <button
+                  onClick={() => window.location.reload()}
+                  className="mt-2 px-5 py-2.5 rounded-xl bg-cyan-500/20 border border-cyan-500/40 text-cyan-400 text-sm font-bold hover:bg-cyan-500/30 transition-all"
+                >
+                  Recargar
+                </button>
+              </div>
+            )}
+
             {/* ── Loading skeleton ── */}
             {mediaVideo === null && (
               <div className="relative h-full w-full snap-start snap-always flex-shrink-0 flex items-end pb-20 px-3">
@@ -2940,7 +2977,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.9 }}
             transition={{ duration: 0.2 }}
-            className={`fixed inset-0 z-50 bg-[#050718] flex flex-col ${(storyPremiumStates[currentStoryUuid || ""] || storyPremiumStatesSee[currentStoryUuid || ""]) ? 'story-premium' : ''}`} // Premium class
+            className="fixed inset-0 z-50 bg-[#050718] flex flex-col"
           >
             {/* Dynamic Story Content Background (Blurred) - Can use first frame of video or image */}
             {/* <div className="absolute inset-0 z-0 opacity-30 blur-3xl">
@@ -2957,36 +2994,8 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                     />
                  )}
             </div> */}
-            {/* Premium Tag if active - Dynamic color (slightly stronger) */}
-            {(storyPremiumStates[currentStoryUuid || ''] || storyPremiumStatesSee[currentStoryUuid || '']) && (() => {
-              const premiumColor = currentStoryUuid ? (storyPremiumColors[currentStoryUuid] || undefined) : undefined;
-              const colorValue = getColorValue(premiumColor);
-              // Crear un color un poco más oscuro para el gradiente
-              const hex = colorValue.hex.replace('#', '');
-              const r = parseInt(hex.substring(0, 2), 16);
-              const g = parseInt(hex.substring(2, 4), 16);
-              const b = parseInt(hex.substring(4, 6), 16);
-              const darkerR = Math.max(0, r - 40);
-              const darkerG = Math.max(0, g - 40);
-              const darkerB = Math.max(0, b - 40);
-              const darkerColor = `rgb(${darkerR}, ${darkerG}, ${darkerB})`;
-
-              return (
-                <motion.div
-                  initial={{ opacity: 0, y: -50 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  style={{
-                    background: `linear-gradient(to right, ${colorValue.hex}, ${darkerColor})`,
-                    boxShadow: `0 0 25px ${colorValue.rgba(0.7)}`
-                  }}
-                  className="absolute top-4 left-4 z-30 text-white px-3 py-1 rounded-full text-xs font-bold shadow-lg"
-                >
-                  Story Premium ✨
-                </motion.div>
-              );
-            })()}
             {/* Story Header & Progress Bars */}
-            <div className={`relative z-20 px-2 bg-gradient-to-b from-black/80 to-transparent pb-8 ${storyPremiumStates[currentStoryUuid || ''] ? 'premium-header' : ''}`}>
+            <div className="relative z-20 px-2 bg-gradient-to-b from-black/80 to-transparent pb-8">
               {/* Progress Bars Container - Divided per story item */}
               <div className="flex gap-1 mb-3">
                 {groupedStories[viewingStoryUserIndex].media.map((_: any, idx: number) => (
@@ -3052,7 +3061,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
             </div>
             {/* Story Main Content - With slide animation during user switch */}
             <motion.div
-              className={`flex-1 relative z-10 flex items-center justify-center bg-transparent ${storyPremiumStates[currentStoryUuid || ''] ? 'premium-content' : ''}`}
+              className="flex-1 relative z-10 flex items-center justify-center bg-transparent"
               animate={{
                 x: isSwitchingUser ? (transitionDirection === 'next' ? -30 : 30) : 0,
                 opacity: isSwitchingUser ? 0.7 : 1
@@ -3083,7 +3092,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                       ref={storyVideoRef}
                       key={`${viewingStoryUserIndex}-${currentStoryItemIndex}`}
                       src={storyMediaSrc}
-                      className={`absolute inset-0 w-full h-full object-contain ${storyPremiumStates[currentStoryUuid || ''] ? 'premium-media' : ''}`}
+                      className="absolute inset-0 w-full h-full object-contain"
                       autoPlay={!isStoryPaused}
                       playsInline
                       muted={hasCustomAudio}
@@ -3143,7 +3152,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       src={storyMediaSrc}
-                      className={`absolute inset-0 w-full h-full object-contain ${storyPremiumStates[currentStoryUuid || ''] ? 'premium-media' : ''}`}
+                      className="absolute inset-0 w-full h-full object-contain"
                       alt="Story Content"
                       style={{ opacity: hasStoryFilter ? 0 : 1 }}
                     />
@@ -3570,8 +3579,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                                       e.stopPropagation();
                                       const gifts = giftsSentByThisViewer(viewer);
                                       if (gifts && gifts.length > 0) {
-                                        const g = gifts[0];
-                                        setViewerGiftOverlay({ gift_video: g.gift, gift_type: g.type, sender: viewer.username });
+                                        claimAndShowGift(gifts[0], viewer.username);
                                       }
                                     }}
                                   >
@@ -4004,7 +4012,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
           >
             <motion.video
               key={viewerGiftOverlay.gift_video}
-              src={getMediaUrl(viewerGiftOverlay.gift_video)}
+              src={viewerGiftOverlay.gift_video ? getMediaUrl(viewerGiftOverlay.gift_video) : undefined}
               autoPlay
               playsInline
               muted={false}
@@ -4123,50 +4131,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         )}
       </AnimatePresence>
 
-      {/* CSS for premium effects - Dynamic styles based on color_premiun */}
       <style>{`
-        ${(() => {
-          // Obtener el color premium del story actual
-          const currentColor = currentStoryUuid ? (storyPremiumColors[currentStoryUuid] || undefined) : undefined;
-          const colorValue = getColorValue(currentColor);
-
-          return `
-        .story-premium {
-          /* New background, frame, effects - Dynamic color visible but not full screen */
-          background: linear-gradient(135deg, #0f0f3c, #1a1a4a);
-          border: 3px solid ${colorValue.hex};
-          box-shadow: 
-            0 0 20px ${colorValue.rgba(0.4)},
-            0 0 40px ${colorValue.rgba(0.3)},
-            inset 0 0 20px ${colorValue.rgba(0.1)};
-          animation: premiumGlow 2s ease-in-out infinite alternate;
-        }
-        @keyframes premiumGlow {
-          0% {
-            box-shadow: 
-              0 0 20px ${colorValue.rgba(0.4)},
-              0 0 40px ${colorValue.rgba(0.3)},
-              inset 0 0 20px ${colorValue.rgba(0.1)};
-          }
-          100% {
-            box-shadow: 
-              0 0 30px ${colorValue.rgba(0.5)},
-              0 0 60px ${colorValue.rgba(0.4)},
-              inset 0 0 30px ${colorValue.rgba(0.15)};
-          }
-        }
-        .premium-header {
-          background: linear-gradient(to bottom, ${colorValue.rgba(0.2)}, transparent);
-        }
-        .premium-content {
-          filter: brightness(1.05) contrast(1.05);
-        }
-        .premium-media {
-          box-shadow: 0 0 25px ${colorValue.rgba(0.3)};
-          border-radius: 20px;
-        }
-          `;
-        })()}
         @keyframes scan {
           50% { transform: translateX(-100%); }
           100% { transform: translateX(100%); }

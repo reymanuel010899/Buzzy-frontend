@@ -1,8 +1,9 @@
 import { IDataSignUp } from '../../components/auth/auth.interface';
 import { SUCCEES_REGISTER, FAILED_REGISTER } from '../type'
 import { apiClient } from '../client/api-client';
+import type { AppDispatch } from '../../store';
 
-export const register = (formData: IDataSignUp) => async (dispatch: any) => {
+export const register = (formData: IDataSignUp) => async (dispatch: AppDispatch) => {
 
   try {
     const response = await apiClient.post('/api/register/', formData);

@@ -7,6 +7,8 @@ import BottomNavbar from "../Layout/ButtonNavar"
 import WalletModal from "./WalletModal"
 import WithdrawSuccessModal from "./WithdrawSuccessModal"
 import { useDispatch, useSelector } from 'react-redux'
+import { apiClient } from '../../redux/client/api-client'
+import { SUCCEES_GET_WALLET } from '../../redux/type'
 import { RootState } from "../../store"
 import { getBankAccounts } from "../../redux/actions/bankActions"
 import BankAccountModal from "../profle/BankAccountModal"
@@ -25,6 +27,9 @@ type WalletComponentProps = {
   getWallet: () => void
   pass_code?: string
   wallet_type?: string
+  tokens?: number
+  token_value_usd?: number
+  gift_fee_pct?: number
   createDepositSession: (amount: number) => Promise<{ url?: string }>
   withdrawFunds: (amount: number, bankAccountId?: string | number) => Promise<{ active?: boolean; balance?: number; message?: string }>
 }
@@ -34,14 +39,15 @@ function formatDate(iso: string): string {
   return d.toLocaleDateString('es-ES', { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
-const TRANSACTIONS_PER_PAGE = 5
+const TRANSACTIONS_PER_PAGE = 4
 const PAGINATION_WINDOW = 5
 
 const WalletComponent = ({
   balances,
   getWallet,
   pass_code,
-  wallet_type,
+  tokens = 0,
+  token_value_usd = 0.015,
   createDepositSession,
   withdrawFunds,
 }: WalletComponentProps) => {
@@ -58,6 +64,26 @@ const WalletComponent = ({
   const [isPinModalOpen, setIsPinModalOpen] = useState(false)
   const [isPrivacyModalOpen, setIsPrivacyModalOpen] = useState(false)
   const [activeFilter, setActiveFilter] = useState<TxFilter>("all")
+  const [converting, setConverting] = useState(false)
+  const [convertedTokens, setConvertedTokens] = useState(tokens)
+
+  useEffect(() => { setConvertedTokens(tokens) }, [tokens])
+
+  const handleConvertTokens = async () => {
+    if (convertedTokens <= 0 || converting) return
+    setConverting(true)
+    try {
+      const res = await apiClient.post('/api/wallet/convert-tokens/')
+      dispatch({ type: SUCCEES_GET_WALLET, payload: res.data.wallet })
+      setBalance(parseFloat(res.data.wallet.balance))
+      setConvertedTokens(0)
+      getWallet()
+    } catch {
+      // silently ignore
+    } finally {
+      setConverting(false)
+    }
+  }
 
   const { accounts: bankAccounts } = useSelector((state: RootState) => state.bankReducer)
   const { transactions, loading: txLoading, count, page: currentPage } = useSelector(
@@ -163,8 +189,6 @@ const WalletComponent = ({
           <div className="relative bg-black p-5 rounded-3xl border border-[#2a2f5e] overflow-hidden">
             <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-[#7000ff]/20 to-[#00f0ff]/20 rounded-full blur-xl -translate-y-1/2 translate-x-1/2" />
             <div className="absolute bottom-0 left-0 w-16 h-16 bg-gradient-to-tr from-[#7000ff]/20 to-[#00f0ff]/20 rounded-full blur-xl translate-y-1/2 -translate-x-1/2" />
-            <span className="wallet-badge">{wallet_type?.toUpperCase()}</span>
-
             <div className="flex flex-col items-center relative z-10">
               <motion.div
                 initial={{ scale: 0.8, opacity: 0 }}
@@ -188,6 +212,22 @@ const WalletComponent = ({
               <p className="text-4xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-white to-[#00f0ff] my-3">
                 ${balance.toFixed(2)}
               </p>
+
+              {/* Tokens → USD */}
+              <button
+                onClick={handleConvertTokens}
+                disabled={convertedTokens <= 0 || converting}
+                className="flex items-center gap-2 mb-3 px-4 py-2 rounded-2xl bg-white/5 border border-white/10 w-full justify-between hover:bg-white/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <span className="text-yellow-400 font-bold text-sm">🪙 {convertedTokens} tokens</span>
+                {converting
+                  ? <span className="text-white/40 text-xs animate-pulse">...</span>
+                  : <ArrowUp size={14} className="text-[#00f0ff]" />
+                }
+                <span className="text-[#00f0ff] font-bold text-sm">
+                  ${(convertedTokens * token_value_usd).toFixed(2)} USD
+                </span>
+              </button>
 
               <div className="flex flex-col gap-2 mt-2 w-full">
                 <motion.button
@@ -262,7 +302,7 @@ const WalletComponent = ({
 
           {/* Loading skeleton */}
           {txLoading && transactions.length === 0 && (
-            <div className="space-y-3">
+            <div className="space-y-2">
               {[1, 2, 3].map((i) => (
                 <div key={i} className="bg-[#0c1033]/60 rounded-xl h-16 animate-pulse" />
               ))}
@@ -287,7 +327,7 @@ const WalletComponent = ({
 
           {/* Transaction list */}
           <AnimatePresence mode="popLayout">
-            <ul className="space-y-3">
+            <ul className="space-y-1">
               {transactions.map((tx, index) => (
                 <motion.li
                   key={tx.id}
@@ -302,7 +342,7 @@ const WalletComponent = ({
                       ? "bg-gradient-to-r from-green-500 to-[#00f0ff]"
                       : "bg-gradient-to-r from-red-500 to-[#ff00aa]"
                   }`} />
-                  <div className="relative flex justify-between items-center bg-black p-4 rounded-xl border border-[#2a2f5e] group-hover:border-transparent transition-colors">
+                  <div className="relative flex justify-between items-center bg-black p-3 rounded-xl border border-[#2a2f5e] group-hover:border-transparent transition-colors">
                     <div className="flex items-center gap-3">
                       <div className={`flex h-10 w-10 items-center justify-center rounded-full ${
                         tx.direction === 'income' ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
@@ -335,41 +375,51 @@ const WalletComponent = ({
 
           {/* Pagination */}
           {totalPages > 1 && (
-            <div className="mt-4 space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <button
-                  onClick={() => handlePageChange(currentPage - 1)}
-                  disabled={currentPage <= 1}
-                  className="flex-1 rounded-full border border-[#2a2f5e] px-4 py-2 text-xs uppercase tracking-[0.3em] text-[#a2b0ff] transition-colors disabled:cursor-not-allowed disabled:text-[#2c3160] disabled:border-[#1f2143] hover:text-white"
-                >
-                  {t('history.pagination.prev')}
-                </button>
-                <div className="flex flex-1 items-center justify-center gap-2 overflow-hidden">
-                  {visiblePageNumbers.map((pageNumber) => (
-                    <button
+            <div className="mt-6 flex items-center justify-between px-1">
+              <motion.button
+                whileTap={{ scale: 0.85 }}
+                onClick={() => handlePageChange(currentPage - 1)}
+                disabled={currentPage <= 1}
+                className="relative flex h-9 w-9 items-center justify-center disabled:opacity-20 disabled:cursor-not-allowed"
+              >
+                <span className="absolute inset-0 rounded-full bg-white/5 border border-white/10" />
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path d="M9 2L4 7L9 12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="text-[#a2b0ff]" />
+                </svg>
+              </motion.button>
+
+              <div className="flex items-center gap-[7px]">
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNumber) => {
+                  const isActive = pageNumber === currentPage
+                  const isAdjacent = Math.abs(pageNumber - currentPage) === 1
+                  return (
+                    <motion.button
                       key={pageNumber}
                       onClick={() => handlePageChange(pageNumber)}
-                      className={`min-w-[32px] rounded-full border px-3 py-1 text-[11px] font-bold uppercase tracking-[0.2em] transition-colors ${
-                        pageNumber === currentPage
-                          ? 'border-white text-white'
-                          : 'border-transparent text-[#a2b0ff] hover:border-[#7000ff] hover:text-white'
+                      animate={{
+                        width: isActive ? 28 : isAdjacent ? 8 : 5,
+                        opacity: isActive ? 1 : isAdjacent ? 0.55 : 0.25,
+                      }}
+                      transition={{ type: "spring", stiffness: 400, damping: 28 }}
+                      className={`h-[5px] rounded-full ${
+                        isActive ? "bg-gradient-to-r from-[#7000ff] to-[#00f0ff]" : "bg-white"
                       }`}
-                    >
-                      {pageNumber}
-                    </button>
-                  ))}
-                </div>
-                <button
-                  onClick={() => handlePageChange(currentPage + 1)}
-                  disabled={currentPage >= totalPages}
-                  className="flex-1 rounded-full border border-[#2a2f5e] px-4 py-2 text-xs uppercase tracking-[0.3em] text-[#a2b0ff] transition-colors disabled:cursor-not-allowed disabled:text-[#2c3160] disabled:border-[#1f2143] hover:text-white"
-                >
-                  {t('history.pagination.next')}
-                </button>
+                    />
+                  )
+                })}
               </div>
-              <p className="text-[10px] text-center text-[#a2b0ff]">
-                {t('history.pagination.pageInfo', { current: currentPage, total: totalPages })}
-              </p>
+
+              <motion.button
+                whileTap={{ scale: 0.85 }}
+                onClick={() => handlePageChange(currentPage + 1)}
+                disabled={currentPage >= totalPages}
+                className="relative flex h-9 w-9 items-center justify-center disabled:opacity-20 disabled:cursor-not-allowed"
+              >
+                <span className="absolute inset-0 rounded-full bg-white/5 border border-white/10" />
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path d="M5 2L10 7L5 12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="text-[#a2b0ff]" />
+                </svg>
+              </motion.button>
             </div>
           )}
         </motion.div>

@@ -114,7 +114,7 @@ const SpaceBackground: React.FC = () => (
 );
 
 const Header: React.FC<{ onClose: () => void; title: string }> = ({ onClose, title }) => (
-    <div className="absolute top-10 left-3 right-12 flex justify-between items-center z-10 w-full max-w-7xl px-4 md:px-8">
+    <div className="absolute top-4 left-0 right-0 flex justify-between items-center z-10 px-4">
         <div className="flex items-center gap-3">
             <div className="p-2 bg-gradient-to-br from-purple-400 to-blue-500 rounded-lg shadow-[0_0_15px_rgba(147,51,234,0.4)]">
                 <Star size={20} className="text-white fill-white" />
@@ -239,10 +239,16 @@ const GiftPanel: React.FC<{
                 <span className="text-[9px] font-black uppercase tracking-[0.3em] text-gray-500 mb-2">Mensaje VIP Personalizado...</span>
                 <textarea
                     value={message}
-                    onChange={(e) => setMessage(e.target.value)}
+                    onChange={(e) => {
+                        const words = e.target.value.trim() === '' ? [] : e.target.value.trim().split(/\s+/);
+                        if (words.length <= 50) setMessage(e.target.value);
+                    }}
                     placeholder="ESCRIBE AQUÍ TU DEDICATORIA DE PODER"
                     className={`w-full bg-transparent text-white font-bold placeholder:text-gray-600 focus:outline-none transition-all resize-none h-16 text-xs md:text-sm tracking-widest uppercase italic`}
                 />
+                <span className={`text-[9px] self-end mt-1 ${(message.trim() === '' ? 0 : message.trim().split(/\s+/).length) >= 50 ? 'text-red-400' : 'text-gray-600'}`}>
+                    {message.trim() === '' ? 0 : message.trim().split(/\s+/).length}/50 palabras
+                </span>
             </div>
 
             <div className="flex gap-4">
@@ -393,6 +399,7 @@ const VipGiftExperience: React.FC<VipGiftExperienceProps> = ({ onClose, onSendGi
     const [isPressing, setIsPressing] = useState(false);
     const [progress, setProgress] = useState(0);
     const [isSent, setIsSent] = useState(false);
+    const sentRef = React.useRef(false);
     const [selectedIndex, setSelectedIndex] = useState(2);
     const [message, setMessage] = useState("");
     const { t } = useTranslation('videos');
@@ -425,10 +432,11 @@ const VipGiftExperience: React.FC<VipGiftExperienceProps> = ({ onClose, onSendGi
     }, [isPressing, progress]);
 
     const handleComplete = () => {
+        if (sentRef.current) return;
+        sentRef.current = true;
         setIsSent(true);
-        onSendGift(selectedGift);
+        onSendGift({ ...selectedGift, vip_message: message });
         setIsPressing(false);
-        // Automatically close the modal so animations can render
         setTimeout(onClose, 100);
     };
 

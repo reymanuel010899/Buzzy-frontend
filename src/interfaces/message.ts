@@ -26,7 +26,7 @@ export interface ChatRoom {
   unread_count: number;            // Mensajes no leídos por TI
   updated_at: string;              // ISO string de la última actividad
   other_user_online: OtherUserOnline;
-  folder_type?: 'standard' | 'request' | 'hidden';
+  folder_type?: 'standard' | 'known' | 'request' | 'hidden';
 }
 
 // Respuesta completa de la API /chats/

@@ -3,13 +3,13 @@ import { getAuth } from "firebase/auth";
 import { getMessaging } from "firebase/messaging";
 
 const firebaseConfig = {
-    apiKey: "AIzaSyAAjsYq2ElCTwm--VJyK9q5h4oF6VxRFdg", // Copiada de tu captura
-    authDomain: "buzzy-app-8086f.firebaseapp.com",
-    projectId: "buzzy-app-8086f",
-    storageBucket: "buzzy-app-8086f.firebasestorage.app",
-    messagingSenderId: "993295175092",
-    appId: "1:993295175092:web:84a695e81329401dedb6e1",
-    measurementId: "G-W1NH6JYNZH"
+    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+    appId: import.meta.env.VITE_FIREBASE_APP_ID,
+    measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
 };
 
 const app = initializeApp(firebaseConfig);

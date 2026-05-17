@@ -30,6 +30,7 @@ import {
   Phone,
   LogOut,
   Gift,
+  Crown,
 } from "lucide-react"
 import { Button } from "../ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs"
@@ -68,13 +69,17 @@ import InsufficientFundsModal from "../giftModal/InsufficientFundsModal"
 import TokenPurchaseSuccessModal from "../giftModal/TokenPurchaseSuccessModal"
 import { getActiveGift } from "../../redux/actions/gift/listGiftActive"
 import { getVideoGiftsReceived, markVideoGiftsSeen } from "../../redux/actions/gift/getVideoGiftsReceived"
+import { getUserGiftsReceived, markUserGiftsSeen } from "../../redux/actions/gift/getUserGiftsReceived"
 import { sendVideoGift } from "../../redux/actions/gift/sendVideoGift"
+import { sendUserGift } from "../../redux/actions/gift/sendUserGift"
 import { getWallet } from "../../redux/actions/getWallet"
 import type { GiftI } from "../../interfaces/gift"
 import { useCallStore } from "../../store/callStore"
 import { useTranslation } from "react-i18next"
 import { useVideoMetrics } from "../../hooks/useVideoMetrics"
 import axios from "axios"
+import { registerFCMToken } from "../../utils/fcm"
+import { isNotifEnabled } from "../../utils/notifPrefs"
 
 // --- Interfaces ---
 interface UserInterface {
@@ -274,8 +279,47 @@ function ProfileSeccion({
 
   // Wallet
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showNotificationsModal, setShowNotificationsModal] = useState(false);
+  const [notifPush, setNotifPush] = useState(() => localStorage.getItem('notif_push') !== 'false');
+  const [notifMessages, setNotifMessages] = useState(() => localStorage.getItem('notif_messages') !== 'false');
+  const [notifGifts, setNotifGifts] = useState(() => localStorage.getItem('notif_gifts') !== 'false');
+  const [notifFollowers, setNotifFollowers] = useState(() => localStorage.getItem('notif_followers') !== 'false');
+  const handleSaveNotifications = async () => {
+    const prevPush = isNotifEnabled('notif_push');
+    localStorage.setItem('notif_push', String(notifPush));
+    localStorage.setItem('notif_messages', String(notifMessages));
+    localStorage.setItem('notif_gifts', String(notifGifts));
+    localStorage.setItem('notif_followers', String(notifFollowers));
+
+    // Push: activar → registrar FCM token; desactivar → borrar token del dispositivo
+    if (notifPush && !prevPush) {
+      try {
+        await registerFCMToken();
+      } catch {
+        showProfileToast('No se pudo activar las notificaciones push.', true);
+        localStorage.setItem('notif_push', 'false');
+        setNotifPush(false);
+        return;
+      }
+    } else if (!notifPush && prevPush) {
+      localStorage.removeItem('device_token');
+      try {
+        await apiClient.post(`${getBaseUrl()}api/v1/users/update-device-token/`, { device_token: null });
+      } catch { /* silent — el token ya no existe en el dispositivo */ }
+    }
+
+    setShowNotificationsModal(false);
+    showProfileToast('Preferencias de notificaciones guardadas.');
+  };
   const [showPremiumModal, setShowPremiumModal] = useState(false);
   const [premiumLoading, setPremiumLoading] = useState(false);
+  const [profileToast, setProfileToast] = useState<{ message: string; error?: boolean } | null>(null);
+  const profileToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showProfileToast = useCallback((message: string, error = false) => {
+    if (profileToastTimerRef.current) clearTimeout(profileToastTimerRef.current);
+    setProfileToast({ message, error });
+    profileToastTimerRef.current = setTimeout(() => setProfileToast(null), 3500);
+  }, []);
 
   const handlePremiumCheckout = async () => {
     setPremiumLoading(true)
@@ -286,7 +330,7 @@ function ProfileSeccion({
       })
       if (res.data.checkout_url) window.location.href = res.data.checkout_url
     } catch (e: any) {
-      alert(e?.response?.data?.error || 'Error al iniciar el pago.')
+      showProfileToast(e?.response?.data?.error || 'Error al iniciar el pago.', true)
     } finally {
       setPremiumLoading(false)
     }
@@ -321,8 +365,12 @@ function ProfileSeccion({
   const [showEditProfileModal, setShowEditProfileModal] = useState(false);
   const [showReceivedGiftsModal, setShowReceivedGiftsModal] = useState(false);
   const [receivedVideoGifts, setReceivedVideoGifts] = useState<any[]>([]);
+  const [receivedUserGifts, setReceivedUserGifts] = useState<any[]>([]);
   const [unseenGiftsCount, setUnseenGiftsCount] = useState(0);
   const [playingGiftUuid, setPlayingGiftUuid] = useState<string | null>(null);
+  const [showUserGiftModal, setShowUserGiftModal] = useState(false);
+  const [giftsTab, setGiftsTab] = useState<'video' | 'user'>('video');
+  const [sentGiftPreview, setSentGiftPreview] = useState<GiftI | null>(null);
   const [giftBlackout, setGiftBlackout] = useState(false);
   const [showBankAccountModal, setShowBankAccountModal] = useState(false);
   const [showChatPrivacyModal, setShowChatPrivacyModal] = useState(false);
@@ -430,11 +478,15 @@ function ProfileSeccion({
 
   useEffect(() => {
     if (!isOwnProfile) return;
-    getVideoGiftsReceived()(dispatch).then((res: any) => {
-      if (res?.gifts) {
-        setReceivedVideoGifts(res.gifts);
-        setUnseenGiftsCount(res.unseen_count ?? 0);
-      }
+    Promise.all([
+      getVideoGiftsReceived()(dispatch),
+      getUserGiftsReceived()(dispatch),
+    ]).then(([videoRes, userRes]: any[]) => {
+      if (videoRes?.gifts) setReceivedVideoGifts(videoRes.gifts);
+      if (userRes?.gifts) setReceivedUserGifts(userRes.gifts);
+      const unseenVideo = videoRes?.unseen_count ?? 0;
+      const unseenUser = userRes?.gifts?.filter((g: any) => !g.is_seen).length ?? 0;
+      setUnseenGiftsCount(unseenVideo + unseenUser);
     });
   }, [isOwnProfile, dispatch]);
 
@@ -628,9 +680,14 @@ function ProfileSeccion({
       return { ...video, liked: nextLiked, likes_count: nextCount };
     }));
 
-    createLike({ video_id: videoId })(dispatch).then(() => {
-      ;
-    }).catch((error) => console.error("Error like:", error));
+    createLike({ video_id: videoId })(dispatch).catch(() => {
+      showProfileToast('No se pudo registrar el like.', true);
+      setLocalMedia(prev => prev.map((video) => {
+        if (video.id?.toString() !== videoId) return video;
+        const revert = !video.liked;
+        return { ...video, liked: revert, likes_count: Math.max(0, (video.likes_count || 0) + (revert ? 1 : -1)) };
+      }));
+    });
 
     setShowLikeAnimation((prev) => ({ ...prev, [videoId]: true }));
     setTimeout(() => {
@@ -676,6 +733,7 @@ function ProfileSeccion({
       ? giftTypeOrGift
       : (giftTypeOrGift.emoji || giftTypeOrGift.slug || giftTypeOrGift.name);
     const cost = amount || (typeof giftTypeOrGift !== 'string' ? giftTypeOrGift.token_price : 0);
+    const giftObj = typeof giftTypeOrGift !== 'string' ? giftTypeOrGift : null;
 
     if (walletTokens < cost) {
       setShowTokenShopModal(true);
@@ -685,10 +743,36 @@ function ProfileSeccion({
     if (!selectedVideoForGift) return;
 
     try {
-      await sendVideoGift({ video_id: Number(selectedVideoForGift), gift_type: type })(dispatch);
+      const vip_message = typeof giftTypeOrGift !== 'string' ? ((giftTypeOrGift as GiftI & { vip_message?: string }).vip_message || "") : "";
+      await sendVideoGift({ video_id: Number(selectedVideoForGift), gift_type: type, vip_message })(dispatch);
       setShowVideoGiftModal(false);
-    } catch (error) {
-      console.error("Error dispatching video gift:", error);
+      if (giftObj?.video) setSentGiftPreview(giftObj);
+    } catch {
+      showProfileToast('No se pudo enviar el regalo. Inténtalo de nuevo.', true);
+    }
+  };
+
+  const handleSendUserGift = async (giftTypeOrGift: string | GiftI, amount?: number) => {
+    let type = typeof giftTypeOrGift === 'string'
+      ? giftTypeOrGift
+      : (giftTypeOrGift.emoji || giftTypeOrGift.slug || giftTypeOrGift.name);
+    const cost = amount || (typeof giftTypeOrGift !== 'string' ? giftTypeOrGift.token_price : 0);
+    const giftObj = typeof giftTypeOrGift !== 'string' ? giftTypeOrGift : null;
+
+    if (walletTokens < cost) {
+      setShowTokenShopModal(true);
+      return;
+    }
+
+    if (!user?.username) return;
+
+    try {
+      const vip_message = typeof giftTypeOrGift !== 'string' ? ((giftTypeOrGift as GiftI & { vip_message?: string }).vip_message || "") : "";
+      await sendUserGift({ recipient_username: user.username, gift_type: type, vip_message })(dispatch);
+      setShowUserGiftModal(false);
+      if (giftObj?.video) setSentGiftPreview(giftObj);
+    } catch {
+      showProfileToast('No se pudo enviar el regalo. Inténtalo de nuevo.', true);
     }
   };
 
@@ -873,8 +957,14 @@ function ProfileSeccion({
       setShowEditProfileModal(true);
     } else if (option === "Privacidad de chats") {
       setShowChatPrivacyModal(true);
-    } else {
-      alert(`✏️ Opción seleccionada: ${option} (listo para conectar con tu backend)`);
+    } else if (option === "Notificaciones") {
+      setShowSettingsModal(false);
+      // Resetear al valor guardado en caso de que haya cambios sin guardar
+      setNotifPush(localStorage.getItem('notif_push') !== 'false');
+      setNotifMessages(localStorage.getItem('notif_messages') !== 'false');
+      setNotifGifts(localStorage.getItem('notif_gifts') !== 'false');
+      setNotifFollowers(localStorage.getItem('notif_followers') !== 'false');
+      setShowNotificationsModal(true);
     }
   };
 
@@ -909,12 +999,9 @@ function ProfileSeccion({
         setShowMessages(true);
         setSelectedChat(res?.data.chat_uuid ?? null);
         navigate("/");
-      }).catch(err => {
-        console.error("Error following:", err);
+      }).catch(() => {
+        showProfileToast('No se pudo seguir al usuario.', true);
         setShowFollowPrompt(false);
-        setPendingFolder("request");
-        setShowMessages(true);
-        navigate("/");
       });
     }
   };
@@ -1300,25 +1387,31 @@ function ProfileSeccion({
               transition={{ delay: 0.4 }}
               className="flex items-center gap-3 pt-2 w-full max-w-xs justify-center"
             >
-              {isOwnProfile ? null : (
-                <Button
-                  onClick={handleOpenSubscriptionModal}
-                  className="flex-1 bg-white text-black hover:bg-gray-200 font-semibold rounded-xl h-10 transition-transform active:scale-95"
-                >
-                  {t('profile:actions.subscribe')}
-                </Button>
-              )}
-              {!isOwnProfile && (
-              <Button
-                variant="outline"
-                onClick={handleMessageClick}
-                className="flex-1 bg-white/5 border-white/10 hover:bg-white/10 hover:border-[#00f0ff]/50 text-white rounded-xl h-10 backdrop-blur-md transition-all duration-300"
-              >
-                {t('profile:actions.message')}
-              </Button>
+              {(!currentUser || !user) ? null : !isOwnProfile && (
+                <div className="flex gap-2">
+                  {/* Subscribe */}
+                  <Button
+                    onClick={handleOpenSubscriptionModal}
+                    variant="ghost"
+                    size="icon"
+                    className="rounded-xl h-10 w-10 flex-shrink-0 border bg-yellow-500/20 hover:bg-yellow-500/40 text-yellow-400 border-yellow-500/30"
+                  >
+                    <Crown size={18} />
+                  </Button>
+
+                  {/* Message */}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleMessageClick}
+                    className="rounded-xl h-10 w-10 flex-shrink-0 border bg-white/5 hover:bg-white/10 text-white/70 border-white/10"
+                  >
+                    <MessageCircle size={18} />
+                  </Button>
+                </div>
               )}
 
-              {!isOwnProfile && (
+              {(!currentUser || !user) ? null : !isOwnProfile && (
                 <div className="flex gap-2">
                   {/* Icono de Llamada de Voz */}
                   <div className="relative">
@@ -1363,6 +1456,16 @@ function ProfileSeccion({
                       </span>
                     )}
                   </div>
+
+                  {/* Botón de regalo a usuario */}
+                  <Button
+                    onClick={() => setShowUserGiftModal(true)}
+                    variant="ghost"
+                    size="icon"
+                    className="rounded-xl h-10 w-10 flex-shrink-0 border bg-pink-600/20 hover:bg-pink-600/40 text-pink-400 border-pink-500/30"
+                  >
+                    <Gift size={18} />
+                  </Button>
                 </div>
               )}
 
@@ -1541,7 +1644,8 @@ function ProfileSeccion({
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
               transition={{ type: "spring", damping: 28, stiffness: 300 }}
-              className="w-full max-w-lg bg-[#0e0e1a] rounded-t-3xl overflow-hidden border-t border-white/10 shadow-2xl"
+              className="w-full max-w-lg bg-[#0e0e1a] rounded-t-3xl overflow-hidden border-t border-white/10 shadow-2xl flex flex-col"
+              style={{ height: '55vh' }}
               onClick={(e) => e.stopPropagation()}
             >
               {/* Header */}
@@ -1563,9 +1667,83 @@ function ProfileSeccion({
                 </button>
               </div>
 
+              {/* Tabs */}
+              <div className="flex gap-1 px-5 pb-3">
+                <button
+                  onClick={() => setGiftsTab('video')}
+                  className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors ${giftsTab === 'video' ? 'bg-pink-500/30 text-pink-300' : 'bg-white/5 text-white/40 hover:bg-white/10'}`}
+                >
+                  Videos ({receivedVideoGifts.length})
+                </button>
+                <button
+                  onClick={() => setGiftsTab('user')}
+                  className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors ${giftsTab === 'user' ? 'bg-pink-500/30 text-pink-300' : 'bg-white/5 text-white/40 hover:bg-white/10'}`}
+                >
+                  Perfil ({receivedUserGifts.length})
+                </button>
+              </div>
+
               {/* Lista de regalos */}
-              <div className="overflow-y-auto max-h-[70vh] px-4 pb-8 space-y-3">
-                {receivedVideoGifts.length === 0 ? (
+              <div className="overflow-y-auto flex-1 px-4 pb-8 space-y-3" style={{ minHeight: 0 }}>
+                {giftsTab === 'user' ? (
+                  receivedUserGifts.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-16 gap-3 text-white/30">
+                      <Gift size={48} />
+                      <p className="text-sm">Aún no tienes regalos de perfil</p>
+                    </div>
+                  ) : (
+                    receivedUserGifts.map((gift, i: number) => {
+                      const isNew = !gift.is_seen;
+                      const isPlaying = playingGiftUuid === gift.uuid;
+                      return (
+                        <motion.div
+                          key={gift.uuid}
+                          initial={{ opacity: 0, y: 16 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: i * 0.04 }}
+                          className={`flex items-center gap-3 rounded-2xl p-3 border transition-all cursor-pointer ${isNew ? 'bg-pink-500/10 border-pink-500/30' : 'bg-white/5 border-white/5'}`}
+                          onClick={() => {
+                            if (!isPlaying) {
+                              markUserGiftsSeen(gift.uuid)(dispatch);
+                              if (isNew) setUnseenGiftsCount(prev => Math.max(0, prev - 1));
+                              setPlayingGiftUuid(gift.uuid);
+                            }
+                          }}
+                        >
+                          <div className="relative flex-shrink-0 w-14 h-14 rounded-xl overflow-hidden bg-black/40">
+                            {gift.gift_video_url ? (
+                              <video src={gift.gift_video_url} autoPlay={isPlaying} loop muted={!isPlaying} playsInline className="w-full h-full object-cover" />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-2xl">{gift.gift_emoji || "🎁"}</div>
+                            )}
+                            {isNew && (
+                              <motion.div animate={{ scale: [1, 1.2, 1] }} transition={{ repeat: Infinity, duration: 1.2 }}
+                                className="absolute top-0.5 right-0.5 w-2.5 h-2.5 rounded-full bg-pink-500 shadow-lg shadow-pink-500/60" />
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              {gift.sender_avatar ? (
+                                <img src={gift.sender_avatar.startsWith('http') ? gift.sender_avatar : getMediaUrl(gift.sender_avatar)} className="w-5 h-5 rounded-full object-cover" alt="" />
+                              ) : (
+                                <div className="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center"><User size={10} className="text-white/50" /></div>
+                              )}
+                              <span className="text-white/80 text-xs font-semibold truncate">@{gift.sender_username}</span>
+                            </div>
+                            <p className="text-white font-bold text-sm mt-0.5 truncate">{gift.gift_emoji} {gift.gift_name}</p>
+                            {(gift as any).vip_message && (
+                              <p className="text-pink-300/80 text-[10px] mt-0.5 italic truncate">"{(gift as any).vip_message}"</p>
+                            )}
+                            <p className="text-white/40 text-[10px] mt-0.5">{isPlaying ? "▶ Reproduciendo..." : "Toca para ver"}</p>
+                          </div>
+                          <span className="text-white/30 text-[10px] flex-shrink-0">
+                            {new Date(gift.created_at).toLocaleDateString("es-DO", { day: "numeric", month: "short" })}
+                          </span>
+                        </motion.div>
+                      );
+                    })
+                  )
+                ) : receivedVideoGifts.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-16 gap-3 text-white/30">
                     <Gift size={48} />
                     <p className="text-sm">Aún no tienes regalos recibidos</p>
@@ -1606,12 +1784,6 @@ function ProfileSeccion({
                               {gift.gift_emoji || "🎁"}
                             </div>
                           )}
-                          {/* Overlay play hint */}
-                          {!isPlaying && gift.gift_video_url && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                              <Play size={16} className="text-white/80" fill="white" />
-                            </div>
-                          )}
                           {isNew && (
                             <motion.div
                               animate={{ scale: [1, 1.2, 1] }}
@@ -1640,6 +1812,9 @@ function ProfileSeccion({
                           <p className="text-white font-bold text-sm mt-0.5 truncate">
                             {gift.gift_emoji} {gift.gift_name}
                           </p>
+                          {(gift as any).vip_message && (
+                            <p className="text-pink-300/80 text-[10px] mt-0.5 italic truncate">"{(gift as any).vip_message}"</p>
+                          )}
                           <p className="text-white/40 text-[10px] mt-0.5">
                             {isPlaying ? "▶ Reproduciendo..." : "Toca para ver"}
                           </p>
@@ -1669,6 +1844,7 @@ function ProfileSeccion({
         )}
       </AnimatePresence>
 
+
       {/* Blackout de regalo (Space/agujero negro) */}
       <AnimatePresence>
         {giftBlackout && (
@@ -1685,7 +1861,8 @@ function ProfileSeccion({
       {/* Overlay de reproducción del regalo — emerge de la pantalla */}
       <AnimatePresence>
         {playingGiftUuid && (() => {
-          const giftItem = receivedVideoGifts.find(g => g.uuid === playingGiftUuid);
+          const giftItem = receivedVideoGifts.find(g => g.uuid === playingGiftUuid)
+            ?? receivedUserGifts.find(g => g.uuid === playingGiftUuid);
           if (!giftItem?.gift_video_url) return null;
           return (
             <motion.div
@@ -1695,7 +1872,6 @@ function ProfileSeccion({
               exit={{ opacity: 0 }}
               transition={{ duration: 0.35 }}
               className="fixed inset-0 z-[300] pointer-events-auto"
-              onClick={() => setPlayingGiftUuid(null)}
             >
               {/* Video a pantalla completa con máscara que disuelve todos los bordes */}
               <motion.video
@@ -1726,6 +1902,7 @@ function ProfileSeccion({
                 onEnded={() => {
                   setGiftBlackout(false);
                   setReceivedVideoGifts(prev => prev.filter(g => g.uuid !== playingGiftUuid));
+                  setReceivedUserGifts(prev => prev.filter(g => g.uuid !== playingGiftUuid));
                   setPlayingGiftUuid(null);
                 }}
               />
@@ -1742,10 +1919,59 @@ function ProfileSeccion({
                 <p className="text-white/70 text-sm drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]">
                   de @{giftItem.sender_username}
                 </p>
+                {(giftItem as any).vip_message && (
+                  <p className="text-pink-300 text-sm italic drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)] max-w-xs text-center px-4">
+                    "{(giftItem as any).vip_message}"
+                  </p>
+                )}
               </motion.div>
             </motion.div>
           );
         })()}
+      </AnimatePresence>
+
+      {/* Overlay de preview para el SENDER tras enviar regalo */}
+      <AnimatePresence>
+        {sentGiftPreview && (
+          <motion.div
+            key="sent-gift-preview"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.35 }}
+            className="fixed inset-0 z-[300] pointer-events-auto"
+          >
+            <motion.video
+              key={sentGiftPreview.slug}
+              src={sentGiftPreview.video ?? undefined}
+              autoPlay
+              playsInline
+              initial={{ scale: 0.6, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.6, opacity: 0 }}
+              transition={{ type: "spring", damping: 22, stiffness: 200 }}
+              className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+              style={{
+                maskImage: `radial-gradient(ellipse 70% 65% at 50% 45%, black 30%, transparent 75%)`,
+                WebkitMaskImage: `radial-gradient(ellipse 70% 65% at 50% 45%, black 30%, transparent 75%)`,
+              }}
+              onEnded={() => setSentGiftPreview(null)}
+            />
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3 }}
+              className="absolute bottom-24 left-0 right-0 flex flex-col items-center gap-1 pointer-events-none"
+            >
+              <p className="text-white font-black text-2xl drop-shadow-[0_2px_12px_rgba(0,0,0,0.9)]">
+                {sentGiftPreview.emoji} {sentGiftPreview.name}
+              </p>
+              <p className="text-white/70 text-sm drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]">
+                para @{user?.username}
+              </p>
+            </motion.div>
+          </motion.div>
+        )}
       </AnimatePresence>
 
       {showEditProfileModal && (user || currentUser) && (
@@ -2017,20 +2243,8 @@ function ProfileSeccion({
                   </div>
                 </div>
 
-                {/* Nueva opción: Horario de disponibilidad para llamadas */}
+                {/* Horario de disponibilidad para llamadas */}
                 <div
-                  onClick={() => {
-                    // const horario = prompt(
-                    //   "Ingresa tus horarios disponibles para recibir llamadas de tus suscriptores.\nEjemplo: Lun 10:00-12:00; Mie 16:00-18:00"
-                    // );
-                    // if (horario === null) return; // usuario canceló
-                    // if (!horario.trim()) {
-                    //   alert("No se guardó: el horario está vacío.");
-                    //   return;
-                    // }
-                    // // Aquí puedes reemplazar el alert por una llamada al backend/Redux
-                    // alert("Horario guardado: " + horario);
-                  }}
                   className="group flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-white/5 cursor-pointer transition-all active:scale-[0.985]"
                 >
                   <div className="w-9 h-9 bg-violet-500/10 text-violet-400 rounded-xl flex items-center justify-center shrink-0">
@@ -3165,6 +3379,18 @@ function ProfileSeccion({
         )}
       </AnimatePresence>
 
+      <AnimatePresence>
+        {showUserGiftModal && (
+          <VipGiftExperience
+            onClose={() => setShowUserGiftModal(false)}
+            onSendGift={handleSendUserGift}
+            gifts={Array.isArray(_fullGifts) ? _fullGifts : []}
+            walletTokens={walletTokens}
+            subscriptionStatus={(user as { subscription_status?: string })?.subscription_status}
+          />
+        )}
+      </AnimatePresence>
+
       {/* Follow Before Message Prompt */}
       <AnimatePresence>
         {showFollowPrompt && (
@@ -3236,6 +3462,86 @@ function ProfileSeccion({
         onSelectPlan={handleSelectPlan}
       />
 
+      {/* Toast de feedback */}
+      <AnimatePresence>
+        {profileToast && (
+          <motion.div
+            initial={{ opacity: 0, y: 20, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.97 }}
+            className={`fixed bottom-24 left-1/2 -translate-x-1/2 z-[200] rounded-2xl px-5 py-3 text-sm text-white shadow-2xl backdrop-blur-xl border ${profileToast.error ? 'bg-red-900/90 border-red-500/30' : 'bg-[#08101f]/95 border-[#00f0ff]/20'}`}
+          >
+            {profileToast.message}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Modal de Notificaciones */}
+      <AnimatePresence>
+        {showNotificationsModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[150] flex items-end justify-center bg-black/60 backdrop-blur-sm"
+            onClick={() => {
+              setNotifPush(localStorage.getItem('notif_push') !== 'false');
+              setNotifMessages(localStorage.getItem('notif_messages') !== 'false');
+              setNotifGifts(localStorage.getItem('notif_gifts') !== 'false');
+              setNotifFollowers(localStorage.getItem('notif_followers') !== 'false');
+              setShowNotificationsModal(false);
+            }}
+          >
+            <motion.div
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'tween', duration: 0.22, ease: 'easeInOut' }}
+              onClick={e => e.stopPropagation()}
+              className="w-full max-w-md bg-[#0d0d1a] border-t border-white/10 rounded-t-3xl p-6 pb-10"
+            >
+              <div className="w-10 h-1 bg-white/20 rounded-full mx-auto mb-6" />
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-10 h-10 bg-sky-500/10 text-sky-400 rounded-xl flex items-center justify-center">
+                  <Bell size={20} />
+                </div>
+                <div>
+                  <h3 className="text-white font-bold text-base">Notificaciones</h3>
+                  <p className="text-gray-500 text-xs">Elige qué quieres recibir</p>
+                </div>
+              </div>
+              <div className="flex flex-col gap-3">
+                {[
+                  { label: 'Notificaciones push', sub: 'Alertas en tu dispositivo', state: notifPush, set: setNotifPush },
+                  { label: 'Mensajes', sub: 'Nuevos chats y mensajes', state: notifMessages, set: setNotifMessages },
+                  { label: 'Regalos', sub: 'Cuando alguien te envíe un regalo', state: notifGifts, set: setNotifGifts },
+                  { label: 'Seguidores', sub: 'Nuevos seguidores', state: notifFollowers, set: setNotifFollowers },
+                ].map(({ label, sub, state, set }) => (
+                  <div key={label} className="flex items-center justify-between px-4 py-3 rounded-2xl bg-white/5">
+                    <div>
+                      <p className="text-sm text-white font-semibold">{label}</p>
+                      <p className="text-xs text-gray-500">{sub}</p>
+                    </div>
+                    <button
+                      onClick={() => set(v => !v)}
+                      className={`w-12 h-6 rounded-full transition-colors relative ${state ? 'bg-sky-500' : 'bg-white/10'}`}
+                    >
+                      <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${state ? 'left-6' : 'left-0.5'}`} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={handleSaveNotifications}
+                className="w-full mt-6 py-3 rounded-2xl bg-sky-500 hover:bg-sky-400 text-white font-bold text-sm transition-colors"
+              >
+                Guardar preferencias
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
     </>
   )
 }
@@ -3246,13 +3552,13 @@ const mapStateToProps = (state: RootState): any => ({
   notFoundUsername: (state.getUserDetail as { notFoundUsername: string | null }).notFoundUsername,
   subscriptionPlans: state.subscriptionReducer.plans,
   // Availability
-  availabilitySaving: (state as any).availabilityReducer?.saving ?? false,
-  availabilitySaved: (state as any).availabilityReducer?.saved ?? false,
-  availabilityError: (state as any).availabilityReducer?.error ?? null,
-  availabilityData: (state as any).availabilityReducer?.availability ?? null,
+  availabilitySaving: state.availabilityReducer.saving,
+  availabilitySaved: state.availabilityReducer.saved,
+  availabilityError: state.availabilityReducer.error,
+  availabilityData: state.availabilityReducer.availability,
   // Social accounts
-  socialAccounts: (state as any).socialAccountsReducer?.accounts ?? [],
-  socialLoading: (state as any).socialAccountsReducer?.loading ?? false,
+  socialAccounts: state.socialAccountsReducer.accounts,
+  socialLoading: state.socialAccountsReducer.loading,
 })
 
 export default connect(mapStateToProps, {
