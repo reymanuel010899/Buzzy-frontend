@@ -1,0 +1,25 @@
+{
+  "generic": "Algo salió mal. Por favor intenta de nuevo.",
+  "network": "Error de conexión. Verifica tu internet y vuelve a intentarlo.",
+  "unauthorized": "Por favor inicia sesión para continuar.",
+  "forbidden": "No tienes permiso para hacer esto.",
+  "notFound": "Esta página no existe.",
+  "serverError": "Error del servidor. Estamos trabajando en ello.",
+  "timeout": "La solicitud expiró. Por favor intenta de nuevo.",
+  "validation": "Por favor verifica tu información e intenta de nuevo.",
+  "fileTooLarge": "El archivo es demasiado grande. El tamaño máximo es {{maxSize}}MB.",
+  "fileType": "Tipo de archivo no compatible. Usa {{types}}.",
+  "uploadFailed": "Error al subir. Por favor intenta de nuevo.",
+  "sessionExpired": "Tu sesión expiró. Por favor inicia sesión de nuevo.",
+  "rateLimited": "Demasiadas solicitudes. Por favor espera un momento.",
+  "insufficientFunds": "Saldo insuficiente.",
+  "form": {
+    "required": "Este campo es requerido.",
+    "invalidEmail": "Ingresa un correo electrónico válido.",
+    "minLength": "Debe tener al menos {{min}} caracteres.",
+    "maxLength": "Debe tener como máximo {{max}} caracteres.",
+    "passwordMismatch": "Las contraseñas no coinciden.",
+    "invalidUrl": "Ingresa una URL válida.",
+    "invalidPhone": "Ingresa un número de teléfono válido."
+  }
+}

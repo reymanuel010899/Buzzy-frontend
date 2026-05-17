@@ -1,87 +1,148 @@
 import Login from "../pages/auth/Signin";
 import {
-    createBrowserRouter,
-    createRoutesFromElements,
-    Route,
-  } from "react-router-dom";
+  createBrowserRouter,
+  createRoutesFromElements,
+  Route,
+} from "react-router-dom";
 import Main from "../pages/main";
 import SignUp from "../pages/auth/signup";
-import LivePage from "../pages/main/LivePage";
-import Marketplace from "../pages/main/Marker";
 import Wallet from "../pages/main/wallet";
-import Store from "../pages/main/store";
-import Game from "../pages/main/game";
 import Profile from "../pages/profille/profile";
-import PrivateRoute from "../PrivateRoute";
-import ARScene from "../components/ra/poof";
-// import { MapScreen } from "../components/index";
-// import { MapScreen } from "../components/index";
+import SubscriptionSuccess from "../pages/main/SubscriptionSuccess";
+import SubscriptionCancel from "../pages/main/SubscriptionCancel";
+import WalletSuccess from "../pages/main/WalletSuccess";
+import WalletCancel from "../pages/main/WalletCancel";
+import SocialAuthCallback from "../pages/SocialAuthCallback";
+import ProtectedRoute from "../PrivateRoute";
+import AccountSuccess from "../pages/main/successAcount";
+import AccountCancel from "../pages/main/CancelAccount";
+import SupportForm from "../pages/main/Support";
+import AdsPage from "../pages/main/AdsPage";
+import PremiumSuccess from "../pages/main/PremiumSuccess";
+import NotFound from "../pages/NotFound";
 
+export const router = createBrowserRouter(
+  createRoutesFromElements(
+    <>
+      <Route path="/sign-in" element={<Login />} />
+      <Route path="/sign-up" element={<SignUp />} />
 
-  
-  export const router = createBrowserRouter(
-    createRoutesFromElements(
-      <>
-            <Route
-              path="/sign-in"
-              element={
-                  <Login/>
-              }
-            />
-            <Route
-              path="/sign-up"
-              element={
-                  <SignUp/>
-              }
-            />
-        <Route element={<PrivateRoute />}>
-            <Route
-              path="/"
-              element={
-                  <Main/>
-              }
-            />
-             <Route
-              path="/lives"
-              element={
-                  <LivePage/>
-              }
-            />
+      <Route
+        path="/"
+        element={
+          <ProtectedRoute>
+            <Main />
+          </ProtectedRoute>
+        }
+      />
 
-            <Route
-              path="/marker"
-              element={
-                  <Marketplace/>
-                }  />
-
-             <Route
-              path="/game"
-              element={
-                  <Game/>
-              }
-            />
-             <Route
-              path="/store"
-              element={
-                  <Store/>
-              }
-            />
-             <Route
-              path="/wallet"
-              element={
-                  <Wallet/>
-
-              }
-            />
-             <Route
-              path="/profile/:username"
-              element={
-                  <Profile/>
-              }
-            />
-            <Route path="/map" element={<ARScene/>} />
-          </Route>
-
-      </>
-    )
-  );
+      <Route
+        path="/wallet"
+        element={
+          <ProtectedRoute>
+            <Wallet />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/profile/:username"
+        element={
+          <ProtectedRoute>
+            <Profile />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/subscription-success"
+        element={
+          <ProtectedRoute>
+            <SubscriptionSuccess />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/subscription-cancel"
+        element={
+          <ProtectedRoute>
+            <SubscriptionCancel />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/wallet-success"
+        element={
+          <ProtectedRoute>
+            <WalletSuccess />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/wallet-cancel"
+        element={
+          <ProtectedRoute>
+            <WalletCancel />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/success"
+        element={
+          <ProtectedRoute>
+            <AccountSuccess />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/reconnect"
+        element={
+          <ProtectedRoute>
+            <AccountCancel />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/support"
+        element={
+          <ProtectedRoute>
+            <SupportForm />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/ads"
+        element={
+          <ProtectedRoute>
+            <AdsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/premium/success"
+        element={
+          <ProtectedRoute>
+            <PremiumSuccess />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/social/callback/:platform"
+        element={
+          <ProtectedRoute>
+            <SocialAuthCallback />
+          </ProtectedRoute>
+        }
+      />
+      {/* Video deep-link: redirect to home (video opens via feed) */}
+      <Route
+        path="/video/:uuid"
+        element={
+          <ProtectedRoute>
+            <NotFound />
+          </ProtectedRoute>
+        }
+      />
+      {/* Catch-all: 404 */}
+      <Route path="*" element={<NotFound />} />
+    </>
+  )
+);

@@ -1,0 +1,133 @@
+{
+  "placeholders": {
+    "user": "User",
+    "anonymous": "anonymous"
+  },
+  "bio": {
+    "default": "Digital creator sharing unique moments."
+  },
+  "header": {
+    "followers": "Followers",
+    "following": "Following",
+    "likes": "Likes",
+    "videos": "Videos"
+  },
+  "stats": {
+    "subscribers": "Subscribers"
+  },
+  "actions": {
+    "follow": "Follow",
+    "unfollow": "Unfollow",
+    "message": "Message",
+    "editProfile": "Edit profile",
+    "shareProfile": "Share profile",
+    "block": "Block user",
+    "report": "Report user",
+    "subscribe": "Subscribe",
+    "followAndMessage": "Follow and chat"
+  },
+  "prompts": {
+    "followToMessage": {
+      "title": "Follow to send a message",
+      "description": "You must follow @{{username}} before sending them a direct message."
+    }
+  },
+  "edit": {
+    "title": "Edit profile",
+    "firstName": "First name",
+    "lastName": "Last name",
+    "username": "Username",
+    "bio": "Bio",
+    "bioPlaceholder": "Tell the world about yourself...",
+    "bioLimit": "{{count}}/150",
+    "website": "Website",
+    "profilePicture": "Profile picture",
+    "changePicture": "Change photo",
+    "saveChanges": "Save changes",
+    "success": "Profile updated"
+  },
+  "tabs": {
+    "videos": "Videos",
+    "liked": "Liked",
+    "saved": "Saved",
+    "reposts": "Reposts"
+  },
+  "orderTabs": {
+    "latest": "Latest",
+    "popular": "Popular",
+    "oldest": "Oldest"
+  },
+  "empty": {
+    "videos": "No videos yet",
+    "liked": "No liked videos",
+    "saved": "No saved videos"
+  },
+  "subscription": {
+    "title": "Subscription",
+    "current": "Current plan",
+    "upgrade": "Upgrade plan",
+    "manage": "Manage subscription",
+    "free": "Free",
+    "pro": "Pro",
+    "premium": "Premium",
+    "upgradeMessage": "Upgrade the plan or wait until next month"
+  },
+  "settings": {
+    "title": "Settings",
+    "editProfile": "Edit profile",
+    "account": "Account",
+    "bankAccount": "Bank account",
+    "privacy": "Privacy",
+    "notifications": "Notifications",
+    "security": "Security",
+    "language": "Language & Region",
+    "help": "Help & Support",
+    "about": "About",
+    "logout": "Sign out",
+    "deleteAccount": "Delete account",
+    "bankSubtitle": "Where you'll receive payouts from your wallet",
+    "add": "Add",
+    "edit": "Edit",
+    "availability": "Availability",
+    "availabilitySubtitle": "Define when subscribers can schedule calls",
+    "languageSubtitle": "Choose your preferred language",
+    "connectSocial": "Connect social networks",
+    "version": "Version {{version}}",
+    "walletSupport": "Active wallet support",
+    "logoutButton": "Log out"
+  },
+  "availability": {
+    "title": "Availability",
+    "startLabel": "Start time",
+    "endLabel": "End time",
+    "mode": "MODE",
+    "repeat": "Repeat these days",
+    "updated": "Schedule updated!",
+    "saveSettings": "Save settings",
+    "days": {
+      "Mon": "Mon",
+      "Tue": "Tue",
+      "Wed": "Wed",
+      "Thu": "Thu",
+      "Fri": "Fri",
+      "Sat": "Sat",
+      "Sun": "Sun"
+    }
+  },
+  "connectSocial": {
+    "title": "Connect social networks",
+    "connect": "Connect",
+    "connected": "Connected",
+    "disconnect": "Disconnect",
+    "notConnected": "Not connected",
+    "note": "Your total reach includes your Buzzy followers and external networks."
+  },
+  "wallet": {
+    "title": "Wallet",
+    "balance": "Balance",
+    "deposit": "Add funds",
+    "withdraw": "Withdraw",
+    "history": "Transaction history",
+    "tokens": "Tokens"
+  }
+}

@@ -7,7 +7,7 @@ import rootReducer from "./redux/index"; // Tu raíz de reducers
 const persistConfig = {
   key: "root",
   storage,
-  whitelist: ["LoginReducer", "getMedia"],
+  whitelist: ["LoginReducer", "getMedia", "uploadProgress"],
 };
 
 const persistedReducer = persistReducer(persistConfig, rootReducer);
@@ -25,7 +25,8 @@ const store = configureStore({
 // Crea el persistor
 export const persistor = persistStore(store);
 
-export type RootState = ReturnType<typeof store.getState>;
+export type RootState = ReturnType<typeof rootReducer>;
 export type AppDispatch = typeof store.dispatch;
+
 
 export default store;

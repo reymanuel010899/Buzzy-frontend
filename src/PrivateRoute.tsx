@@ -1,9 +1,30 @@
-import { Navigate, Outlet } from "react-router-dom";
+import React, { lazy, Suspense, useContext } from 'react';
+import { Navigate } from 'react-router-dom';
+import { ReactNode } from 'react';
+import { AuthContext } from './context/ AuthContext';
+import ChatModal from './components/Chat/ChatModal';
 
-const PrivateRoute: React.FC = () => {
-  const token = localStorage.getItem("accessToken");
+const GlobalCallWrapper = lazy(() =>
+  import('./components/calls/GlobalCallWrapper').then(m => ({ default: m.GlobalCallWrapper }))
+);
 
-  return token ? <Outlet /> : <Navigate to="/sign-in" />;
+const ProtectedRoute: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const { user } = useContext(AuthContext);
+  const token = localStorage.getItem('accessToken');
+
+  if (!token) {
+    return <Navigate to="/sign-in" replace />;
+  }
+
+  return (
+    <>
+      <Suspense fallback={null}>
+        <GlobalCallWrapper />
+      </Suspense>
+      <ChatModal />
+      {children}
+    </>
+  );
 };
 
-export default PrivateRoute;
+export default ProtectedRoute;

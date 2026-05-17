@@ -1,16 +1,20 @@
+import { useTranslation } from "react-i18next";
+
 const Categories = () => {
+  const { t } = useTranslation('videos');
+
   const categories = [
-    "Acción",
-    "Drama",
-    "Comedia",
-    "Ciencia Ficción",
-    "Terror",
-    "Aventura",
-    "Romántica",
-    "Animación",
-    "Documental",
-    "Fantasía",
-  ]
+    t('feed.catAction'),
+    t('feed.catDrama'),
+    t('feed.catComedy'),
+    t('feed.catSciFi'),
+    t('feed.catHorror'),
+    t('feed.catAdventure'),
+    t('feed.catRomance'),
+    t('feed.catAnimation'),
+    t('feed.catDocumentary'),
+    t('feed.catFantasy'),
+  ];
 
   return (
     <div className="relative mb-6">
@@ -28,8 +32,7 @@ const Categories = () => {
       </div>
       <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-black to-transparent pointer-events-none"></div>
     </div>
-  )
-}
+  );
+};
 
-export default Categories
-
+export default Categories;

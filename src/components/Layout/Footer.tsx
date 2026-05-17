@@ -1,11 +1,12 @@
 import React, { useState } from "react";
 import { Menu, Search, Video, Bell, UserCircle } from "lucide-react";
+import "../../footer.css"
 
 const Footer: React.FC = () => {
   const [search, setSearch] = useState("");
 
   return (
-    <nav className="bg-white shadow-md fixed w-full top-0 z-50 px-4 md:px-6">
+    <nav className="bg-black shadow-md fixed w-full top-0 z-50 px-4 md:px-6">
       <div className="flex justify-between items-center max-w-7xl mx-auto py-3">
         
         {/* Menú y Logo */}

@@ -1,4 +1,4 @@
-import { SUCCEES_LOGIN, FAILED_LOGIN } from "../type";
+import { SUCCEES_LOGIN, FAILED_LOGIN, LOGOUT_USER } from "../type";
 
 const inicializerState = {
     user: null,
@@ -7,21 +7,25 @@ const inicializerState = {
     error: null,
 }
 
-const LoginReducer = (state = inicializerState, action: {type: string, payload: {user: object, access: string, refresh: string}}) => { 
+const LoginReducer = (state = inicializerState, action: { type: string, payload: { user: object, access: string, refresh: string } }) => {
     const { type, payload } = action;
     switch (type) {
         case SUCCEES_LOGIN:
             return {
                 ...state,
-                user: payload.user, 
+                user: payload.user,
                 access_token: payload.access,
-                refresh_token: payload.refresh, 
-                error: null,     
+                refresh_token: payload.refresh,
+                error: null,
             };
         case FAILED_LOGIN:
             return {
                 ...state,
                 error: payload,
+            };
+        case LOGOUT_USER:
+            return {
+                ...inicializerState
             };
         default:
             return state;

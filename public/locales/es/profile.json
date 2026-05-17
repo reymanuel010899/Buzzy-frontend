@@ -1,0 +1,133 @@
+{
+  "placeholders": {
+    "user": "Usuario",
+    "anonymous": "anónimo"
+  },
+  "bio": {
+    "default": "Creador digital compartiendo momentos únicos."
+  },
+  "header": {
+    "followers": "Seguidores",
+    "following": "Siguiendo",
+    "likes": "Me gusta",
+    "videos": "Vídeos"
+  },
+  "stats": {
+    "subscribers": "Suscriptores"
+  },
+  "actions": {
+    "follow": "Seguir",
+    "unfollow": "Dejar de seguir",
+    "message": "Mensaje",
+    "editProfile": "Editar perfil",
+    "shareProfile": "Compartir perfil",
+    "block": "Bloquear usuario",
+    "report": "Reportar usuario",
+    "subscribe": "Suscribirte",
+    "followAndMessage": "Seguir y chatear"
+  },
+  "prompts": {
+    "followToMessage": {
+      "title": "Seguir para enviar mensaje",
+      "description": "Debes seguir a @{{username}} antes de enviarle un mensaje directo."
+    }
+  },
+  "edit": {
+    "title": "Editar perfil",
+    "firstName": "Nombre",
+    "lastName": "Apellido",
+    "username": "Nombre de usuario",
+    "bio": "Biografía",
+    "bioPlaceholder": "Cuéntale al mundo sobre ti...",
+    "bioLimit": "Límite {{count}}/150 caracteres",
+    "website": "Sitio web",
+    "profilePicture": "Foto de perfil",
+    "changePicture": "Cambiar foto",
+    "saveChanges": "Guardar cambios",
+    "success": "Perfil actualizado"
+  },
+  "tabs": {
+    "videos": "Vídeos",
+    "liked": "Me gusta",
+    "saved": "Guardados",
+    "reposts": "Compartidos"
+  },
+  "orderTabs": {
+    "latest": "Más recientes",
+    "popular": "Populares",
+    "oldest": "Más antiguos"
+  },
+  "empty": {
+    "videos": "Sin videos aún",
+    "liked": "Sin videos con me gusta",
+    "saved": "Sin videos guardados"
+  },
+  "subscription": {
+    "title": "Suscripción",
+    "current": "Plan actual",
+    "upgrade": "Mejorar plan",
+    "manage": "Gestionar suscripción",
+    "free": "Gratuito",
+    "pro": "Plan Pro",
+    "premium": "Plan Premium",
+    "upgradeMessage": "Mejora tu plan o espera al próximo mes"
+  },
+  "settings": {
+    "title": "Configuración",
+    "editProfile": "Editar perfil",
+    "account": "Cuenta",
+    "bankAccount": "Cuenta bancaria",
+    "privacy": "Privacidad",
+    "notifications": "Notificaciones",
+    "security": "Seguridad",
+    "language": "Idioma y región",
+    "help": "Ayuda y soporte",
+    "about": "Acerca de",
+    "logout": "Cerrar sesión",
+    "deleteAccount": "Eliminar cuenta",
+    "bankSubtitle": "Donde recibirás los pagos de tu wallet",
+    "add": "Agregar",
+    "edit": "Editar",
+    "availability": "Disponibilidad",
+    "availabilitySubtitle": "Define cuándo tus suscriptores pueden agendar llamadas",
+    "languageSubtitle": "Elige tu idioma preferido",
+    "connectSocial": "Conectar redes sociales",
+    "version": "Versión {{version}}",
+    "walletSupport": "Soporte activo de wallet",
+    "logoutButton": "Cerrar sesión"
+  },
+  "availability": {
+    "title": "Disponibilidad",
+    "startLabel": "Hora de inicio",
+    "endLabel": "Hora de fin",
+    "mode": "MODO",
+    "repeat": "Repetir estos días",
+    "updated": "¡Horario actualizado!",
+    "saveSettings": "Guardar configuración",
+    "days": {
+      "Mon": "Lun",
+      "Tue": "Mar",
+      "Wed": "Mié",
+      "Thu": "Jue",
+      "Fri": "Vie",
+      "Sat": "Sáb",
+      "Sun": "Dom"
+    }
+  },
+  "connectSocial": {
+    "title": "Conectar redes sociales",
+    "connect": "Conectar",
+    "connected": "Conectado",
+    "disconnect": "Desconectar",
+    "notConnected": "Sin conectar",
+    "note": "Tu alcance total suma tus seguidores de Buzzy y redes externas."
+  },
+  "wallet": {
+    "title": "Billetera",
+    "balance": "Saldo",
+    "deposit": "Agregar fondos",
+    "withdraw": "Retirar",
+    "history": "Historial de transacciones",
+    "tokens": "Fichas"
+  }
+}

@@ -1,20 +1,34 @@
-import { SUCCEES_GET_USER, FAILED_GET_USER } from "../type";
+import { SUCCEES_GET_USER, FAILED_GET_USER, USER_NOT_FOUND } from "../type";
 
-const inicializerState = {
-    user: null ,
-    error: null,
+interface GetUserState {
+    user: object | null;
+    error: string | null;
+    notFoundUsername: string | null;
 }
 
-const getUserDetail = (state = inicializerState, action: {type: string, payload: {type: string, user: object}}) => { 
+const inicializerState: GetUserState = {
+    user: null,
+    error: null,
+    notFoundUsername: null,
+}
+
+interface GetUserAction {
+    type: string;
+    payload: { user: object; searchedUsername?: string; type?: string }
+}
+
+const getUserDetail = (
+    state: GetUserState = inicializerState,
+    action: GetUserAction
+): GetUserState => {
     const { type, payload } = action;
     switch (type) {
         case SUCCEES_GET_USER:
-            return {...state, user: payload.user, error: null};
+            return { ...state, user: payload?.user || null, error: null, notFoundUsername: null };
+        case USER_NOT_FOUND:
+            return { ...state, user: payload?.user || null, error: null, notFoundUsername: payload?.searchedUsername || null };
         case FAILED_GET_USER:
-            return {
-                ...state,
-                error: payload,
-            };
+            return { ...state, user: null, error: '', notFoundUsername: null };
         default:
             return state;
     }

@@ -1,72 +1,122 @@
+"use client"
 
 import type React from "react"
-import { useState } from "react"
-import { Search, Video, Bell, MessageCircleMoreIcon } from "lucide-react"
-import { Link } from "react-router-dom"
+import { useState, useEffect } from "react"
+import { useTranslation } from "react-i18next"
+import { Search, Bell, Megaphone } from "lucide-react"
+import { motion, AnimatePresence } from "framer-motion"
+import { useNavigate } from "react-router-dom"
+import FluidSearch from "./fluid-search"
+import NotificationPanel from "../notifications/NotificationPanel"
+import { useNotificationsStore } from "../../context/NotificationsStore"
+import { useCallStore } from "../../store/callStore"
 
 const Navbar: React.FC = () => {
+  const { t } = useTranslation(['common'])
+  void t;
   const [search, setSearch] = useState("")
-  const user = JSON.parse(localStorage.getItem("user") || "{}")
+  const [showSearch, setShowSearch] = useState(false)
+  const [showNotifications, setShowNotifications] = useState(false)
+  const [scrollPosition, setScrollPosition] = useState(0)
+  const navigate = useNavigate()
+
+  const notifUnreadCount = useNotificationsStore((state) => state.unreadCount);
+  const { activeOutgoingCall, activeIncomingCall } = useCallStore();
+  const [isCallMinimized] = useState(false);
+  const [activeCallTime] = useState(0);
+
+  useEffect(() => {
+    const handleScroll = () => setScrollPosition(window.scrollY)
+    window.addEventListener("scroll", handleScroll)
+    return () => window.removeEventListener("scroll", handleScroll)
+  }, [])
 
   return (
-    <nav className="bg-gray-900 shadow-lg fixed w-full top-0 z-50 px-4 md:px-6">
-      <div className="flex justify-between items-center max-w-7xl mx-auto py-3">
-        <div className="flex items-center space-x-30">
-          <MessageCircleMoreIcon className="text-purple-400 w-8 h-8" />
-          <Link to="/" className="text-2xl text-center font-bold text-white hover:text-purple-400 transition-colors space-x-23">
-            Buzzy
-          </Link>
-        </div>
-
-        <div className="hidden md:flex flex-grow max-w-lg items-center bg-gray-800 border border-gray-700 rounded-full px-4 py-2 mx-4">
-          <input
-            type="text"
-            placeholder="Buscar"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-transparent outline-none text-white placeholder-gray-400"
-          />
-          <button className="text-gray-400 hover:text-purple-400 transition-colors">
-            <Search size={20} />
-          </button>
-        </div>
-
-        <div className="flex items-center space-x-6">
-          <button className="hidden md:flex text-gray-400 hover:text-purple-400 transition-colors">
-            <Video className="text-purple-400 w-8 h-8" size={24} />
-          </button>
-          <button className="hidden md:flex text-gray-400 hover:text-purple-400 transition-colors">
-            <Bell className="text-purple-400 w-8 h-8" size={24} />
-          </button>
-          <Link to={`/profile/${user.username}/`} className="relative group">
-            <img
-              className="w-10 h-10 rounded-full object-cover border-2 border-transparent group-hover:border-purple-400 transition-all duration-300"
-              src={`http://localhost:8000${user.profile_picture ? user.profile_picture : '/profile_pics/avatar.webp'}`}
-              alt="Profile"
+    <>
+      <nav
+        className={`fixed w-full top-0 z-50 px-2 sm:px-6 transition-all duration-300 ${scrollPosition > 20 ? "bg-black backdrop-blur-lg" : "bg-black/80 backdrop-blur-2xl"}`}
+      >
+        <AnimatePresence>
+          {isCallMinimized && (activeOutgoingCall || (activeIncomingCall && activeIncomingCall.status === 'active')) && (
+            <motion.div
+              initial={{ scaleX: 0 }}
+              animate={{ scaleX: 1 }}
+              exit={{ scaleX: 0 }}
+              className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-green-400 via-cyan-500 to-purple-600 origin-left z-50"
             />
-            <div className="absolute inset-0 rounded-full bg-purple-400 opacity-0 group-hover:opacity-25 transition-opacity duration-300"></div>
-          </Link>
-        </div>
-      </div>
+          )}
+        </AnimatePresence>
+        <div className="flex justify-between items-center mx-auto py-1">
+          <div className="flex items-center justify-center gap-5 sm:gap-6">
 
-      {/* Barra de Búsqueda en móviles */}
-      <div className="md:hidden px-4 pb-4">
-        <div className="flex items-center bg-gray-800 border border-gray-700 rounded-full px-4 py-2">
-          <input
-            type="text"
-            placeholder="Buscar"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-transparent outline-none text-white placeholder-gray-400"
-          />
-          <button className="text-gray-400 hover:text-purple-400 transition-colors">
-            <Search size={20} />
-          </button>
+            <motion.button
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+              className="relative text-gray-300 hover:text-cyan-400 transition-colors"
+              onClick={() => navigate("/ads")}
+            >
+              <Megaphone className="h-7 w-7" />
+            </motion.button>
+
+          </div>
+
+          <div className="hidden md:flex flex-grow max-w-lg items-center bg-gray-800/60 backdrop-blur-md border border-gray-700/50 rounded-full px-4 py-2 mx-8 cursor-pointer hover:bg-gray-700/50 transition-all"
+            onClick={() => setShowSearch(true)}>
+            <span className="text-gray-400">{search || "Buscar en Buzzy..."}</span>
+            <motion.div whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
+              <Search className="w-5 h-5 text-gray-400 ml-auto" />
+            </motion.div>
+          </div>
+
+          <div className="flex items-center gap-4 sm:gap-6">
+
+            {isCallMinimized && (activeOutgoingCall || (activeIncomingCall && activeIncomingCall.status === 'active')) && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="flex items-center gap-1.5 px-3 py-1 bg-white/10 hover:bg-white/20 rounded-full cursor-pointer transition-colors border border-white/5"
+              >
+                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                <span className="font-mono font-bold text-sm text-white">
+                  {Math.floor(activeCallTime / 60)}:{(activeCallTime % 60).toString().padStart(2, '0')}
+                </span>
+              </motion.div>
+            )}
+
+            <motion.button
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+              className="relative text-gray-300 hover:text-purple-400 transition-colors"
+              onClick={() => setShowNotifications(v => !v)}
+            >
+              <Bell className="w-10 h-7" />
+              {notifUnreadCount > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-red-500 rounded-full text-[10px] font-bold text-white flex items-center justify-center px-1">
+                  {notifUnreadCount > 9 ? "9+" : notifUnreadCount}
+                </span>
+              )}
+            </motion.button>
+          </div>
         </div>
-      </div>
-    </nav>
+
+        <div className="md:hidden pt-1">
+          <div className="flex items-center bg-gray-800/60 backdrop-blur-md border border-gray-700/50 rounded-full px-2 py-1 cursor-pointer hover:bg-gray-700/50 transition-all"
+            onClick={() => setShowSearch(true)}>
+            <span className="text-gray-400 px-2">{search || "Buscar en Buzzy..."}</span>
+            <Search className="w-5 h-5 text-gray-400 ml-auto mr-2" />
+          </div>
+        </div>
+      </nav>
+
+      <AnimatePresence>
+        {showSearch && (
+          <FluidSearch onClose={() => setShowSearch(false)} searchTerm={search} setSearchTerm={setSearch} />
+        )}
+      </AnimatePresence>
+
+      <NotificationPanel open={showNotifications} onClose={() => setShowNotifications(false)} />
+    </>
   )
 }
 
 export default Navbar
-
