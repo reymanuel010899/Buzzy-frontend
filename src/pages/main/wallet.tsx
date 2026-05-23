@@ -30,6 +30,12 @@ const Wallet = ({ getWallet, balance, user, pass_code, wallet_type, tokens, toke
         }
     }, [user, getWallet]);
 
+    useEffect(() => {
+        const handleRefresh = () => getWallet();
+        window.addEventListener("buzzy:refresh", handleRefresh);
+        return () => window.removeEventListener("buzzy:refresh", handleRefresh);
+    }, [getWallet]);
+
     return (
         <>
             <WalletComponent

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { X, Upload, Sparkles, Video, Image as ImageIcon, AlertCircle, Loader2, CheckCircle2, SlidersHorizontal, ChevronDown, HelpCircle, ImagePlus, Paintbrush, Cuboid, Tv2, Music, Mic, AudioLines, Type, Wand2, Instagram, Facebook, Play, Pause, Volume2, VolumeX, Smartphone } from "lucide-react"
+import { X, Upload, Sparkles, Video, Image as ImageIcon, AlertCircle, Loader2, CheckCircle2, SlidersHorizontal, ChevronDown, HelpCircle, ImagePlus, Paintbrush, Cuboid, Tv2, Music, Mic, AudioLines, Type, Wand2, Instagram, Facebook, Play, VolumeX, Smartphone } from "lucide-react"
 import { getBaseUrl } from "../../redux/client/api-client"
 import { useDispatch } from "react-redux"
 import { startUpload } from "../../redux/reducers/uploadProgressReducer"
@@ -67,10 +67,9 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose, 
     const [uploadDescription, setUploadDescription] = useState('#BuzzyCreator #ProStudio\n')
     const [syncInstagram, setSyncInstagram] = useState(true)
     const [syncTikTok1, setSyncTikTok1] = useState(false)
-    const [syncTikTok2, setSyncTikTok2] = useState(false)
     const [uploadStatus, setUploadStatus] = useState<'idle' | 'pending' | 'processing' | 'ready' | 'blocked' | 'error'>('idle')
-    const [uploadJobId, setUploadJobId] = useState<number | null>(null)
-    const [safetyLabel, setSafetyLabel] = useState('')
+    const [, setUploadJobId] = useState<number | null>(null)
+    const [safetyLabel, _setSafetyLabel] = useState('')
 
     // Cleanup preview URL on unmount or file change
     useEffect(() => {

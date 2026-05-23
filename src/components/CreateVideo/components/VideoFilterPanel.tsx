@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useRef, useEffect, useMemo } from "react"
+import React, { useRef, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Check } from "lucide-react"
 

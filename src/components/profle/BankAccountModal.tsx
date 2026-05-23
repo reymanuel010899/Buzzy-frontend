@@ -1,10 +1,17 @@
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, CreditCard, Plus, Trash2, Check, Loader2, AlertCircle } from 'lucide-react';
+import { X, CreditCard, Plus, Trash2, Loader2, AlertCircle } from 'lucide-react';
 import { Button } from '../ui/button';
 import { useDispatch, useSelector } from 'react-redux';
 import { getBankAccounts, addBankAccount, deleteBankAccount } from '../../redux/actions/bankActions';
-import { RootState } from '../../store';
+import { RootState, AppDispatch } from '../../store';
+
+interface BankAccount {
+    id: number;
+    bank_name: string;
+    masked_number: string;
+    is_primary: boolean;
+}
 
 interface BankAccountModalProps {
     isOpen: boolean;
@@ -12,8 +19,8 @@ interface BankAccountModalProps {
 }
 
 const BankAccountModal: React.FC<BankAccountModalProps> = ({ isOpen, onClose }) => {
-    const dispatch = useDispatch();
-    const { accounts, loading, error } = useSelector((state: RootState) => state.bankReducer);
+    const dispatch = useDispatch<AppDispatch>();
+    const { accounts, loading } = useSelector((state: RootState) => state.bankReducer);
     const [showAddForm, setShowAddForm] = useState(false);
     const [formData, setFormData] = useState({
         bank_name: '',
@@ -26,7 +33,7 @@ const BankAccountModal: React.FC<BankAccountModalProps> = ({ isOpen, onClose }) 
 
     useEffect(() => {
         if (isOpen) {
-            dispatch(getBankAccounts() as any);
+            dispatch(getBankAccounts() as Parameters<typeof dispatch>[0]);
         }
     }, [isOpen, dispatch]);
 
@@ -39,25 +46,16 @@ const BankAccountModal: React.FC<BankAccountModalProps> = ({ isOpen, onClose }) 
         setActionLoading(true);
         setLocalError(null);
 
-        const response = await dispatch(addBankAccount(formData) as any);
+        const response = await dispatch(addBankAccount(formData) as Parameters<typeof dispatch>[0]);
         setActionLoading(false);
         if (response) {
-            if (response.data?.stripe_onboarding_url) {
-                 window.location.href = response.data.stripe_onboarding_url;
-                return;
+            const res = response as { data?: { stripe_onboarding_url?: string } };
+            if (res.data?.stripe_onboarding_url) {
+                window.location.href = res.data.stripe_onboarding_url;
             }
-
-        // getBankAccounts()(dispatch);
-        // setShowAddForm(false);
-        // setFormData({
-        //     bank_name: '',
-        //     account_holder_name: '',
-        //     account_number: '',
-        //     routing_number: ''
-        // });
         } else {
-                setLocalError("Error al agregar la cuenta. Verifica los datos.");
-            }
+            setLocalError("Error al agregar la cuenta. Verifica los datos.");
+        }
     };
 
     const handleDeleteAccount = async (id: number) => {
@@ -65,7 +63,7 @@ const BankAccountModal: React.FC<BankAccountModalProps> = ({ isOpen, onClose }) 
 
         setActionLoading(true);
         setLocalError(null);
-        const success = await dispatch(deleteBankAccount(id) as any);
+        const success = await dispatch(deleteBankAccount(id) as Parameters<typeof dispatch>[0]);
         setActionLoading(false);
 
         if (!success) {
@@ -73,6 +71,7 @@ const BankAccountModal: React.FC<BankAccountModalProps> = ({ isOpen, onClose }) 
             setTimeout(() => setLocalError(null), 3000);
         }
     };
+
     return (
         <AnimatePresence>
             {isOpen && (
@@ -169,7 +168,7 @@ const BankAccountModal: React.FC<BankAccountModalProps> = ({ isOpen, onClose }) 
                                                 <p className="text-gray-500">No tienes cuentas agregadas</p>
                                             </div>
                                         )}
-                                        {accounts.map((acc: any) => (
+                                        {(accounts as BankAccount[]).map((acc) => (
                                             <div key={acc.id} className="group relative bg-white/5 border border-white/10 rounded-2xl p-4 flex items-center justify-between hover:bg-white/[0.07] transition-all">
                                                 <div className="flex items-center gap-4">
                                                     <div className="w-10 h-10 rounded-xl bg-[#00f0ff]/10 flex items-center justify-center text-[#00f0ff]">

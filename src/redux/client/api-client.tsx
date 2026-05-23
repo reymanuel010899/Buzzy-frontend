@@ -1,23 +1,18 @@
 import axios from "axios";
 import i18n from "@/i18n/config";
+import { router } from "../../router/index";
 
 export const getBaseUrl = (): string => {
   const url = import.meta.env.VITE_DOMAIN_SERVER || "http://127.0.0.1:8000";
-  return url.endsWith("/") ? url : `${url}/`;
+  return url.endsWith("/") ? url.slice(0, -1) : url;
 };
 
 export const BASE_URL = getBaseUrl();
 
-/**
- * Converts a media path from the backend into a full URL.
- * Handles both old format ("profile_pics/avatar.webp") and
- * new format ("/media/profile_pics/avatar.webp") without doubling /media/.
- */
 export const getMediaUrl = (path: string | null | undefined): string => {
   if (!path || typeof path !== 'string') return ""
   if (path.startsWith("http")) return path
-  const base = getBaseUrl().replace(/\/+$/, "") // remove trailing slashes
-  // normalize: remove leading slashes then re-add one
+  const base = getBaseUrl().replace(/\/+$/, "")
   const clean = path.replace(/^\/+/, "")
   if (clean.startsWith("media/")) {
     return `${base}/${clean}`
@@ -25,7 +20,6 @@ export const getMediaUrl = (path: string | null | undefined): string => {
   return `${base}/media/${clean}`
 }
 
-// 1. Exportación nombrada para apiClient
 export const apiClient = axios.create({
   baseURL: getBaseUrl(),
   headers: {
@@ -42,9 +36,6 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
-// 2. Exportación nombrada para apiClientStory
-// NOTA: Leer el localStorage aquí solo funcionará la primera vez que se cargue el archivo.
-// Es mejor usar un interceptor para que el token siempre esté actualizado.
 export const apiClientStory = axios.create({
   baseURL: getBaseUrl(),
   headers: {
@@ -52,7 +43,6 @@ export const apiClientStory = axios.create({
   },
 });
 
-// Interceptor para apiClientStory (Para que el token sea dinámico y no falle si cambia)
 apiClientStory.interceptors.request.use((config) => {
   const token = localStorage.getItem("accessToken");
   if (token) {
@@ -97,7 +87,7 @@ const responseInterceptor = async (error: any) => {
 
     if (refreshToken) {
       try {
-        const { data } = await axios.post(`${getBaseUrl()}api/token/refresh/`, {
+        const { data } = await axios.post(`${getBaseUrl()}/api/token/refresh/`, {
           refresh: refreshToken,
         });
 
@@ -113,9 +103,7 @@ const responseInterceptor = async (error: any) => {
         localStorage.removeItem("refreshToken");
         localStorage.removeItem("isAuthenticated");
         localStorage.removeItem("user");
-        if (typeof window !== "undefined") {
-          window.location.href = "/sign-in";
-        }
+        router.navigate("/sign-in", { replace: true });
         return Promise.reject(err);
       } finally {
         isRefreshing = false;
@@ -125,9 +113,7 @@ const responseInterceptor = async (error: any) => {
       localStorage.removeItem("refreshToken");
       localStorage.removeItem("isAuthenticated");
       localStorage.removeItem("user");
-      if (typeof window !== "undefined") {
-        window.location.href = "/sign-in";
-      }
+      router.navigate("/sign-in", { replace: true });
       return Promise.reject(error);
     }
   }
@@ -135,6 +121,5 @@ const responseInterceptor = async (error: any) => {
   return Promise.reject(error);
 };
 
-// Interceptor de respuesta para apiClient
 apiClient.interceptors.response.use((response) => response, responseInterceptor);
 apiClientStory.interceptors.response.use((response) => response, responseInterceptor);

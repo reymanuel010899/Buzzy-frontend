@@ -13,13 +13,12 @@ export const GlobalCallWrapper: React.FC = () => {
     const {
         activeIncomingCall,
         activeOutgoingCall,
-        agoraDataRef,
         setActiveIncomingCall,
         setActiveOutgoingCall,
         setAgoraData
     } = useCallStore();
 
-    const { join: joinAgora, leave: leaveAgora, isJoined, isMicMuted, isCameraOn, isSpeakerMuted, toggleMic, toggleCamera, toggleSpeaker, localVideoTrack, remoteUsers } = useAgora();
+    const { join: joinAgora, leave: leaveAgora, isMicMuted, isCameraOn, isSpeakerMuted, toggleMic, toggleCamera, toggleSpeaker, localVideoTrack, remoteUsers } = useAgora();
 
     const getFile = useRingtoneStore(s => s.getFile);
     const ringAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -210,8 +209,8 @@ export const GlobalCallWrapper: React.FC = () => {
             {activeIncomingCall && activeIncomingCall.status !== 'active' && (
                 <IncomingCallScreen
                     call={activeIncomingCall}
-                    callerName={activeIncomingCall.caller_username || activeIncomingCall.caller?.username || "Usuario"}
-                    callerAvatar={activeIncomingCall.caller_avatar || activeIncomingCall.caller?.profile_picture}
+                    callerName={activeIncomingCall.caller?.username || "Usuario"}
+                    callerAvatar={activeIncomingCall.caller?.profile_picture}
                     activeTime={activeCallTime}
                     onAnswer={handleAnswerCall}
                     onReject={handleRejectCall}

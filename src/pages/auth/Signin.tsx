@@ -6,8 +6,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { FetchWithAuthProps } from "../../redux/actions/Login";
 import { login, googleLogin } from "../../redux/actions/Login";
 import { useDispatch } from 'react-redux';
-import { auth } from "../../firebase";
-import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+import { GoogleAuth } from "@codetrix-studio/capacitor-google-auth";
 import { ForgotPasswordModal } from "../../components/auth/ForgotPasswordModal";
 
 const SignIn: React.FC = () => {
@@ -30,32 +29,44 @@ const SignIn: React.FC = () => {
 
   const handleGoogleSignIn = async () => {
     try {
-      const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider);
+      setErrorMsg("");
+      setLoading(true);
+      await GoogleAuth.initialize({
+        clientId: '993295175092-6l5q4g5u401ieunl4pjp7lqj5psjpunj.apps.googleusercontent.com',
+        scopes: ['profile', 'email'],
+        grantOfflineAccess: true,
+      });
+      const googleUser = await GoogleAuth.signIn();
+      const token = googleUser.authentication.accessToken;
+      const idToken = googleUser.authentication.idToken;
 
-      const credential = GoogleAuthProvider.credentialFromResult(result);
-      const token = credential?.accessToken;
+      if (!token && !idToken) {
+        setErrorMsg("Google no retornó token. accessToken=" + token + " idToken=" + idToken);
+        return;
+      }
 
-      if (token) {
-        setLoading(true);
-        try {
-          await googleLogin(token)(dispatch);
-          navigate('/');
-        } catch (apiError: any) {
-          const status = apiError?.response?.status;
-          const code   = apiError?.response?.data?.error;
-          if (status === 409 && code === 'not_registered') {
-            setErrorMsg("No tienes una cuenta en Buzzy con ese correo de Google. Regístrate primero.");
-          } else {
-            setErrorMsg("Error al iniciar sesión con Google. Intenta de nuevo.");
-          }
-        } finally {
-          setLoading(false);
+      const useToken = token || idToken;
+      try {
+        await googleLogin(useToken)(dispatch);
+        navigate('/');
+      } catch (apiError: unknown) {
+        const e = apiError as { response?: { status?: number; data?: { error?: string; detail?: string } } };
+        const status = e?.response?.status;
+        const code = e?.response?.data?.error;
+        const detail = e?.response?.data?.detail;
+        if (status === 409 && code === 'not_registered') {
+          setErrorMsg("No tienes una cuenta en Buzzy con ese correo de Google. Regístrate primero.");
+        } else {
+          setErrorMsg(`Backend error ${status}: ${code || detail || "sin detalle"}`);
         }
       }
-    } catch (error) {
-      console.error("Google Sign-In Error", error);
-      setErrorMsg("Error al iniciar sesión con Google");
+    } catch (error: any) {
+      if (error?.error !== 'popup_closed_by_user') {
+        console.error("Google Sign-In Error", error);
+        const detail = error?.message || error?.error || JSON.stringify(error);
+        setErrorMsg("Google error: " + detail);
+      }
+    } finally {
       setLoading(false);
     }
   };
@@ -76,7 +87,6 @@ const SignIn: React.FC = () => {
 
   return (
     <div className="flex justify-center items-center min-h-screen bg-[#0b0f19] py-12 px-4 relative overflow-hidden">
-      {/* Background gradients */}
       <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-cyan-500/20 rounded-full blur-[120px] pointer-events-none" />
       <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-600/20 rounded-full blur-[120px] pointer-events-none" />
 
@@ -118,7 +128,6 @@ const SignIn: React.FC = () => {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Campo Email */}
             <div className="relative group">
               <Mail className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 group-focus-within:text-cyan-500 transition-colors w-5 h-5" />
               <input
@@ -132,7 +141,6 @@ const SignIn: React.FC = () => {
               />
             </div>
 
-            {/* Campo Contraseña */}
             <div className="relative group z-0">
               <Lock className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 group-focus-within:text-cyan-500 transition-colors w-5 h-5" />
               <input
@@ -163,7 +171,6 @@ const SignIn: React.FC = () => {
               </button>
             </div>
 
-            {/* Botón de Enviar */}
             <button
               type="submit"
               disabled={loading}
@@ -175,7 +182,6 @@ const SignIn: React.FC = () => {
           </form>
         </div>
 
-        {/* Enlaces Adicionales */}
         <div className="text-center mt-8 text-gray-400 font-medium">
           ¿No tienes cuenta?{" "}
           <Link to={'/sign-up'} className="text-cyan-500 hover:text-cyan-400 font-bold ml-1 transition-colors">

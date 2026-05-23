@@ -7,7 +7,7 @@ import rootReducer from "./redux/index"; // Tu raíz de reducers
 const persistConfig = {
   key: "root",
   storage,
-  whitelist: ["LoginReducer", "getMedia", "uploadProgress"],
+  whitelist: ["LoginReducer", "getMedia", "uploadProgress", "bannerReducer"],
 };
 
 const persistedReducer = persistReducer(persistConfig, rootReducer);
@@ -15,7 +15,7 @@ const persistedReducer = persistReducer(persistConfig, rootReducer);
 // Crea el store con el reducer persistente
 const store = configureStore({
   reducer: persistedReducer,
-  devTools: true, // Mantén las herramientas de desarrollo
+  devTools: import.meta.env.DEV,
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({
       serializableCheck: false, // Desactiva el chequeo de serialización para redux-persist

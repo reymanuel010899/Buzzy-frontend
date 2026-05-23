@@ -26,7 +26,7 @@ import { sendGift } from "../../redux/actions/gift/sendGift"
 import { getActiveGift } from "../../redux/actions/gift/listGiftActive"
 import { sendVideoGift } from "../../redux/actions/gift/sendVideoGift"
 import { getRecivedGift } from "../../redux/actions/gift/listGiftRecived"
-import { getOneActiveGift } from "../../redux/actions/gift/getGiftActive"
+// import { getOneActiveGift } from "../../redux/actions/gift/getGiftActive"
 import { getRecivedGiftByUser } from "../../redux/actions/gift/getGiftsByUser"
 import { GiftI } from "../../interfaces/gift"
 import { ShowComments } from "../comments/modalComents"
@@ -38,6 +38,7 @@ import { isNotifEnabled } from "../../utils/notifPrefs";
 import HorizontalCarousel from "./HorizontalCarousel";
 import StoryFilterCanvas from "./StoryFilterCanvas";
 import { useUserVideos } from "../../hooks/useUserVideos";
+import { pickMedia } from "../../hooks/useMediaPicker";
 import { useVideoMetrics } from "../../hooks/useVideoMetrics";
 import typingSound from "../../assets/sounds/whatsapp-typing.mp3";
 import VipGiftExperience from "../giftModal/modalGift";
@@ -55,8 +56,10 @@ import { getWallet } from "../../redux/actions/getWallet";
 import { useVideoEngagement } from "../../hooks/useVideoEngagement";
 import { deleteStory } from "../../redux/actions/history/deleteHistory";
 import { reportStory, ReportPayload } from "../../redux/actions/history/reportStory";
-import { getRecommendedFeed } from "../../redux/actions/getMedia";
+import { getRecommendedFeed, refreshFeed } from "../../redux/actions/getMedia";
 import { useCallStore } from "../../store/callStore";
+import { usePullToRefresh } from "../../hooks/usePullToRefresh";
+import { RootState } from "../../store";
 interface StreamingUIProps {
   media: videoI[] | null
   getComment?: ({ video_id }: { video_id: string }) => any
@@ -90,8 +93,8 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   // const receivedGifts = useSelector((state: any) => state.RecivedGiftReducer?.gift);
   const { setTypingUser, removeTypingUser } = useTypingUsers();
   // const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const { selectedChat } = useChat();
-  const oneActiveGift = useSelector((state: any) => state.GetOneactiveGiftReducer?.gift);
+  const { selectedChat, showMessages } = useChat();
+  // const oneActiveGift = useSelector((state: any) => state.GetOneactiveGiftReducer?.gift);
   const getWalletReducer = useSelector((state: any) => state.getWalletReducer);
   const walletTokens = getWalletReducer?.tokens || 0;
   const walletBalance = parseFloat(getWalletReducer?.balance || '0');
@@ -112,7 +115,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [stories, setStories] = useState<StoryList>([]);
   const audioUnlockedRef = useRef(false);
   const [isAudioUnlocked, setIsAudioUnlocked] = useState(false);
-  const LoginReducer = useSelector((state) => state?.LoginReducer);
+  const LoginReducer = useSelector((state: RootState) => (state as unknown as Record<string, { user?: Record<string, unknown> }>).LoginReducer);
 
   const [transientIconState, setTransientIconState] = useState<{
     videoId: string
@@ -123,31 +126,22 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const { prefetchBatch } = useUserVideos();
   const { onVideoPlay, onTimeUpdate: trackTimeUpdate, resetVideo } = useVideoMetrics();
   const [currentVideoId, setCurrentVideoId] = useState<string | null>(null);
+  const currentVideoIdRef = useRef<string | null>(null);
   const [viewedVideos, setViewedVideos] = useState<Set<string>>(new Set());
   // Stabilize user object to prevent unnecessary re-renders and WebSocket reconnections
   const user = useMemo(() => {
-    // 1. Valores por defecto si no hay nadie logueado
     const defaultUser = {
       username: 'BuzzyUser',
       profile_picture: '/avatar.webp',
-      id: null
+      id: null as string | null,
     };
-
-    // 2. Accedemos a la ruta exacta: LoginReducer -> user
-    // (Según tu imagen, los datos están en LoginReducer.user)
-    const userData = LoginReducer?.user;
-    // 3. Si no existe el objeto user, devolvemos el default
+    const userData = LoginReducer?.user as Record<string, string> | undefined;
     if (!userData) return defaultUser;
-
-    // 4. Retornamos el usuario combinado
     return {
       ...defaultUser,
       ...userData,
-      // Si profile_picture viene vacío o null en la DB, mantenemos el default
-      profile_picture: userData.profile_picture || defaultUser.profile_picture
+      profile_picture: (userData.profile_picture as string) || defaultUser.profile_picture,
     };
-
-    // IMPORTANTE: Cambiamos la dependencia a LoginReducer.user
   }, [LoginReducer?.user]);
   const [commentText, setCommentText] = useState("")
   const [comments, setComments] = useState<CommentData[] | null>(null)
@@ -172,7 +166,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   // New state for Story Upload
   const [isUploadingStory, setIsUploadingStory] = useState(false)
   const [storyEditorFile, setStoryEditorFile] = useState<File | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // --- New State for Story Viewer ---
   const [viewingStoryUserIndex, setViewingStoryUserIndex] = useState<number | null>(null);
   const [currentStoryItemIndex, setCurrentStoryItemIndex] = useState(0);
@@ -193,18 +187,19 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [showViewersModal, setShowViewersModal] = useState(false);
   const [realViewers, setRealViewers] = useState<any[]>([]);
   const [giftRecived, setGiftRecived] = useState<any[]>([]);
-  const [viewerGiftOverlay, setViewerGiftOverlay] = useState<{ gift_video: string; gift_type: string; sender: string; uuid?: string } | null>(null);
+  const [viewerGiftOverlay, setViewerGiftOverlay] = useState<{ gift_video: string; gift_type: string; sender: string; uuid?: string; blobUrl?: string } | null>(null);
   const [viewerGiftBlackout, setViewerGiftBlackout] = useState(false);
+  const [viewerGiftReady, setViewerGiftReady] = useState(false);
+  const viewerGiftBlobRef = useRef<string | null>(null);
   // --- Fixed State for Viewed Items per Media UUID ---
   const [viewedItems, setViewedItems] = useState<Record<string, boolean>>({});
   // --- New States for Gift System ---
   const [showGiftMenu, setShowGiftMenu] = useState(false);
   const [showFullGiftMenu, setShowFullGiftMenu] = useState(false);
   // const [giftAnimation, setGiftAnimation] = useState<{ type: string; sender: string; storyUuid: string; phase: 'initial' | 'crazy' | 'explode' | 'reward'; giftId: string } | null>(null);
-  const [storyPremiumStates, setStoryPremiumStates] = useState<Record<string, boolean>>({});
+  const [, setStoryPremiumStates] = useState<Record<string, boolean>>({});
   const sendAudioRef = useRef<HTMLAudioElement | null>(null);
-  const [storyPremiumStatesSee, setStoryPremiumStatesSee] = useState<Record<string, boolean>>({});
-  const [storyPremiumColors, setStoryPremiumColors] = useState<Record<string, string>>({}); // Guardar colores premium por story UUID
+  const [, setStoryPremiumColors] = useState<Record<string, string>>({});
   const isGiftsRef = useRef<GiftI[]>([]);
   const currentStoryUuidRef = useRef<string | null>(null);
   const chatSocketActiveRef = useRef(false);
@@ -218,7 +213,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const storyAudioRequestIdRef = useRef(0);
   const storyAudioFadeTimerRef = useRef<number | null>(null);
   const [_fullGifts, setFullGifts] = useState<GiftI[] | GiftI | []>([]);
-  const [giftsLoading, setGiftsLoading] = useState(true);
+  const [, setGiftsLoading] = useState(true);
   const [showVideoGiftModal, setShowVideoGiftModal] = useState(false);
   const [selectedVideoForGift, setSelectedVideoForGift] = useState<string | number | null>(null);
 
@@ -250,7 +245,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [shownAds, setShownAds] = useState<Set<string>>(new Set());
   const [lastAdTimestamp, setLastAdTimestamp] = useState<number>(0);
   const [adSequenceCount, setAdSequenceCount] = useState<number>(0);
-  const [videoLoopCount, setVideoLoopCount] = useState<Record<string, number>>({});
+  const [, setVideoLoopCount] = useState<Record<string, number>>({});
   const lastVideoTimeRef = useRef<Record<string, number>>({});
   const typingAudioRef = useRef<HTMLAudioElement | null>(null);
   const [showStoriesBar, setShowStoriesBar] = useState(true);
@@ -263,6 +258,17 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   // Infinite Scroll Trigger based on session interests
   const [isFetchingFeed, setIsFetchingFeed] = useState(false);
   const lastFetchedLengthRef = useRef<number>(0);
+
+  // Pull-to-refresh — usa el hook compartido
+  const { isPulling: isPullRefreshing, pullProgress, onTouchStart: handlePullTouchStart, onTouchMove: handlePullTouchMove, onTouchEnd: handlePullTouchEnd } = usePullToRefresh({
+    onRefresh: async () => {
+      setActiveVideo(0);
+      lastFetchedLengthRef.current = 0;
+      await refreshFeed()(dispatch);
+    },
+    // Feed vacío: siempre permitir. Feed con videos: solo desde el primer video en scroll 0
+    checkScrollTop: () => !mediaVideo?.length || (activeVideo === 0 && (feedScrollRef.current?.scrollTop ?? 0) === 0),
+  });
 
   useEffect(() => {
     // Threshold: Trigger when user reaches the 5th video from the end
@@ -599,6 +605,20 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     }
   }, [activeVideo])
 
+  // Pause feed video when chat modal opens, resume when it closes
+  useEffect(() => {
+    if (showMessages) {
+      videoRefs.current.forEach(v => { if (v && !v.paused) v.pause() })
+      musicAudioRef.current?.pause()
+    } else {
+      if (activeVideo !== null) {
+        const v = videoRefs.current[activeVideo]
+        if (v && v.paused) v.play().catch(() => { })
+        if (musicAudioRef.current?.paused) musicAudioRef.current?.play().catch(() => { })
+      }
+    }
+  }, [showMessages, activeVideo])
+
   useEffect(() => {
     sendAudioRef.current = new Audio(sendMessageSound);
     typingAudioRef.current = new Audio(typingSound);
@@ -788,69 +808,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     chatSocketActiveRef.current = !!selectedChat;
   }, [selectedChat]);
 
-  // Función para convertir nombres de colores a valores RGB/hex con colores MÁS INTENSOS
-  const getColorValue = (colorName: string | undefined): { hex: string; rgb: string; rgba: (opacity: number) => string } => {
-    if (!colorName) {
-      // Color por defecto (azul intenso)
-      return {
-        hex: '#00f0ff',
-        rgb: 'rgb(0, 240, 255)',
-        rgba: (opacity: number) => `rgba(0, 240, 255, ${opacity})`
-      };
-    }
-
-    // Colores originales con ligero aumento de intensidad
-    const colorMap: Record<string, { hex: string; rgb: string }> = {
-      red: { hex: '#ef4444', rgb: 'rgb(239, 68, 68)' },
-      blue: { hex: '#3b82f6', rgb: 'rgb(59, 130, 246)' },
-      green: { hex: '#10b981', rgb: 'rgb(16, 185, 129)' },
-      yellow: { hex: '#fbbf24', rgb: 'rgb(251, 191, 36)' }, // Un poco más brillante que el original
-      purple: { hex: '#a855f7', rgb: 'rgb(168, 85, 247)' },
-      pink: { hex: '#ec4899', rgb: 'rgb(236, 72, 153)' },
-      orange: { hex: '#f97316', rgb: 'rgb(249, 115, 22)' },
-      cyan: { hex: '#06b6d4', rgb: 'rgb(6, 182, 212)' },
-      indigo: { hex: '#6366f1', rgb: 'rgb(99, 102, 241)' },
-      gold: { hex: '#fbbf24', rgb: 'rgb(251, 191, 36)' },
-      multi: { hex: '#ff00ff', rgb: 'rgb(255, 0, 255)' },
-      rainbow: { hex: '#9333ea', rgb: 'rgb(147, 51, 234)' },
-    };
-
-    const color = colorMap[colorName.toLowerCase()];
-    if (color) {
-      // Extraer valores RGB del hex para crear rgba
-      const hex = color.hex.replace('#', '');
-      const r = parseInt(hex.substring(0, 2), 16);
-      const g = parseInt(hex.substring(2, 4), 16);
-      const b = parseInt(hex.substring(4, 6), 16);
-
-      return {
-        hex: color.hex,
-        rgb: color.rgb,
-        rgba: (opacity: number) => `rgba(${r}, ${g}, ${b}, ${opacity})`
-      };
-    }
-
-    // Si el color viene en formato hex, usarlo directamente
-    if (colorName.startsWith('#')) {
-      const hex = colorName.replace('#', '');
-      const r = parseInt(hex.substring(0, 2), 16);
-      const g = parseInt(hex.substring(2, 4), 16);
-      const b = parseInt(hex.substring(4, 6), 16);
-
-      return {
-        hex: colorName,
-        rgb: `rgb(${r}, ${g}, ${b})`,
-        rgba: (opacity: number) => `rgba(${r}, ${g}, ${b}, ${opacity})`
-      };
-    }
-
-    // Color por defecto si no se reconoce
-    return {
-      hex: '#00f0ff',
-      rgb: 'rgb(0, 240, 255)',
-      rgba: (opacity: number) => `rgba(0, 240, 255, ${opacity})`
-    };
-  };
 
   // ─── WebSocket events (via singleton context) ─────────────────────────────
 
@@ -938,10 +895,10 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
           : video
       ) : prev
     );
-    if (currentVideoId?.toString() === data.video_id?.toString()) {
+    if (currentVideoIdRef.current?.toString() === data.video_id?.toString()) {
       setComments(prev => upsertComment(prev, data));
     }
-  }, [currentVideoId, setMedia, upsertComment]));
+  }, [setMedia, upsertComment]));
 
   useWsEvent("new_view", useCallback((data: any) => {
     setMedia(prev =>
@@ -1032,10 +989,23 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     });
   }, [dispatch]); // Solo depende de dispatch que es estable
 
+  // Suscripción al evento global de refresh — refresca feed + stories
+  useEffect(() => {
+    const handleRefresh = () => {
+      refreshFeed()(dispatch);
+      getActiveStories()(dispatch).then((res: any) => {
+        setStories(Array.isArray(res) ? res : []);
+      });
+    };
+    window.addEventListener("buzzy:refresh", handleRefresh);
+    return () => window.removeEventListener("buzzy:refresh", handleRefresh);
+  }, [dispatch]);
+
   const handleCommentClick = (index: number) => {
     if (mediaVideo && mediaVideo[index]) {
       const videoId = mediaVideo[index].id.toString();
       setCurrentVideoId(videoId);
+      currentVideoIdRef.current = videoId;
       setComments(null); // Limpiar comentarios previos inmediatamente
       setShowCommentsModal(true);
       getComment({ video_id: mediaVideo?.[index]?.uuid?.toString() ?? "" })(dispatch).then((res: any) => {
@@ -1050,7 +1020,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     // Record interaction for recommendation system
     const videoItem = mediaVideo?.find(v => v.id.toString() === currentVideoId);
     if (videoItem) {
-      recordInteraction(videoItem.category?.id || videoItem.category || null);
+      recordInteraction(videoItem.category || null);
     }
 
     createComment({
@@ -1167,7 +1137,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
           if (entry.isIntersecting) {
             // Track intersection for recommendation system
             if (videoItem && videoItem.type === 'video') {
-              onIntersectionChange(videoItem.id, true, videoItem.category?.id || videoItem.category || null);
+              onIntersectionChange(videoItem.id, true, videoItem.category || null);
             }
 
             if (activeAdIndex !== index) {
@@ -1183,7 +1153,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
           } else {
             // Track leaving view
             if (videoItem && videoItem.type === 'video') {
-              onIntersectionChange(videoItem.id, false, videoItem.category?.id || videoItem.category || null);
+              onIntersectionChange(videoItem.id, false, videoItem.category || null);
             }
             video.pause()
           }
@@ -1229,10 +1199,10 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     // Record interaction for recommendation system
     const videoItem = mediaVideo?.[index];
     if (videoItem) {
-      recordInteraction(videoItem.category?.id || videoItem.category || null);
+      recordInteraction(videoItem.category || null);
     }
 
-    createLike({ video_id: videoId })(dispatch).then((res: any) => {
+    createLike({ video_id: videoId })(dispatch).then(() => {
     }).catch((error: any) => {
       console.error("Error dispatching like action for video ID:", videoId, error);
     });
@@ -1285,20 +1255,10 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   };
   const toggleMute = () => setIsMuted(!isMuted)
   // --- Logic for Create History ---
-  const handleAddHistory = () => {
-    // We click the hidden input element programmatically
-    fileInputRef.current?.click();
-  }
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    if (file.size > 50 * 1024 * 1024) {
-      setFeedbackModal({ show: true, success: false, message: "El archivo es demasiado grande. El máximo permitido es 50MB." });
-      return;
-    }
-    // Open editor instead of uploading directly
-    setStoryEditorFile(file);
-    if (fileInputRef.current) fileInputRef.current.value = "";
+  const handleAddHistory = async () => {
+    const picked = await pickMedia("any", 50);
+    if (!picked) return;
+    setStoryEditorFile(picked.file);
   }
 
   const handleStoryPublish = async (
@@ -1621,7 +1581,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [storyReplyText, setStoryReplyText] = useState("")
   const [storyReplySending, setStoryReplySending] = useState(false)
 
-  const [gifts, setGifts] = useState<GiftI[]>([]);
+  const [, setGifts] = useState<GiftI[]>([]);
 
   const handleLikeStory = useCallback(() => {
     if (viewingStoryUserIndex === null) return;
@@ -1775,7 +1735,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     }
 
     const currentStory = stories.find(s => s.uuid === currentStoryUuid);
-    const isMyStory = currentStory?.user?.id === user.id;
+    const isMyStory = String(currentStory?.user?.id) === String(user.id);
 
     // CASO 1: Es MI story → siempre permitimos cargar (pueden llegar regalos nuevos)
     if (isMyStory) {
@@ -1853,20 +1813,13 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   let countSendGift = useRef(false)
   const handleSendGift = async (giftTypeOrGift: string | GiftI, amount?: number) => {
     let type: string | null = null;
-    let giftId: string | null = null
-    let sound: string | null = null
     let cost: string | number | null = null
     if (typeof giftTypeOrGift === 'string') {
-      // Legacy for category gifts
-      giftId = giftTypeOrGift;
       type = giftTypeOrGift;
       cost = amount || 0;
     } else {
-      // For full gifts
-      giftId = giftTypeOrGift.slug;
       type = giftTypeOrGift.emoji;
       cost = giftTypeOrGift.token_price;
-      sound = giftTypeOrGift.video
     }
 
     if (cost !== null && cost !== undefined && walletTokens < Number(cost)) {
@@ -1979,21 +1932,41 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
 
   const claimAndShowGift = (g: any, senderUsername: string) => {
-    // Quitar inmediatamente del state para que el badge desaparezca
     setGiftRecived(prev => (prev || []).filter((gift: any) => gift.uuid !== g.uuid));
     setIsGift(prev => (prev || []).filter((gift: any) => gift.uuid !== g.uuid));
-    setViewerGiftOverlay({
-      gift_video: g.gift,
-      gift_type: g.type,
-      sender: senderUsername,
-      uuid: g.uuid,
-    });
+    setViewerGiftReady(false);
+
     if (g.uuid) {
       apiClient.post('/api/stories/gifts/mark-seen/', { uuid: g.uuid })
         .then(() => apiClient.get('/api/get-wallet/'))
         .then(res => dispatch({ type: 'SUCCEES_GET_WALLET', payload: res.data }))
         .catch(() => {});
     }
+
+    // Precargar video en memoria para reproducción instantánea sin freeze
+    const videoUrl = g.gift ? getMediaUrl(g.gift) : null;
+    if (!videoUrl) {
+      setViewerGiftOverlay({ gift_video: g.gift, gift_type: g.type, sender: senderUsername, uuid: g.uuid });
+      return;
+    }
+
+    // Liberar blob anterior si existe
+    if (viewerGiftBlobRef.current) {
+      URL.revokeObjectURL(viewerGiftBlobRef.current);
+      viewerGiftBlobRef.current = null;
+    }
+
+    fetch(videoUrl)
+      .then(r => r.blob())
+      .then(blob => {
+        const blobUrl = URL.createObjectURL(blob);
+        viewerGiftBlobRef.current = blobUrl;
+        setViewerGiftOverlay({ gift_video: g.gift, gift_type: g.type, sender: senderUsername, uuid: g.uuid, blobUrl });
+      })
+      .catch(() => {
+        // Si falla el precache, mostrar igual con URL directa
+        setViewerGiftOverlay({ gift_video: g.gift, gift_type: g.type, sender: senderUsername, uuid: g.uuid });
+      });
   };
 
   const showGiftRecived = (viewer: any) => {
@@ -2037,14 +2010,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         )}
       </AnimatePresence>
 
-      {/* Hidden Input for File Upload */}
-      <input
-        type="file"
-        ref={fileInputRef}
-        onChange={handleFileChange}
-        className="hidden"
-        accept="video/mp4,video/quicktime,image/jpeg,image/png,image/webp"
-      />
       <div className="fixed inset-0 z-0">
         <div className="absolute inset-0 bg-black  opacity-80"></div>
         <div className="absolute inset-0 bg-black opacity-[0.03]"></div>
@@ -2070,7 +2035,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 <div className="relative">
                   <div className={`relative h-[40px] w-[40px] rounded-full p-[2px] bg-[#0c1033] ${isUploadingStory ? 'animate-pulse' : ''}`}>
                     <img
-                      src={getMediaUrl(user.profile_picture)}
+                      src={getMediaUrl(user.profile_picture as string)}
                       className={`w-full h-full rounded-full object-cover filter ${isUploadingStory ? 'brightness-50' : 'brightness-90 group-hover:brightness-100'} transition-all`}
                       alt="Tu historia"
                       loading="lazy"
@@ -2138,7 +2103,27 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
             ref={feedScrollRef}
             className="flex h-full flex-col overflow-y-auto overscroll-y-contain scroll-smooth snap-y snap-mandatory"
             onScroll={handleFeedScroll}
+            onTouchStart={handlePullTouchStart}
+            onTouchMove={handlePullTouchMove}
+            onTouchEnd={handlePullTouchEnd}
           >
+            {/* ── Pull-to-refresh indicator ── */}
+            {(isPullRefreshing || pullProgress > 0) && (
+              <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[9100] flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 backdrop-blur-md border border-white/15"
+                style={{ opacity: isPullRefreshing ? 1 : pullProgress }}
+              >
+                <svg
+                  className={`w-4 h-4 text-cyan-400 ${isPullRefreshing ? 'animate-spin' : ''}`}
+                  style={{ transform: isPullRefreshing ? undefined : `rotate(${pullProgress * 360}deg)` }}
+                  viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+                >
+                  <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+                <span className="text-xs font-bold text-white/70">
+                  {isPullRefreshing ? "Actualizando..." : "Suelta para actualizar"}
+                </span>
+              </div>
+            )}
             {/* ── Empty feed state ── */}
             {mediaVideo !== null && mediaVideo.length === 0 && (
               <div className="relative h-full w-full snap-start snap-always flex-shrink-0 flex flex-col items-center justify-center gap-4 px-6 text-center">
@@ -2146,7 +2131,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 <h3 className="text-white font-black text-lg">No hay videos disponibles</h3>
                 <p className="text-gray-500 text-sm max-w-xs">Pronto habrá más contenido. Vuelve a intentarlo en un momento.</p>
                 <button
-                  onClick={() => window.location.reload()}
+                  onClick={() => window.dispatchEvent(new CustomEvent("buzzy:refresh"))}
                   className="mt-2 px-5 py-2.5 rounded-xl bg-cyan-500/20 border border-cyan-500/40 text-cyan-400 text-sm font-bold hover:bg-cyan-500/30 transition-all"
                 >
                   Recargar
@@ -2272,6 +2257,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                     onComment={(uuid, id) => {
                       setComments(null)
                       setCurrentVideoId(String(id))
+                      currentVideoIdRef.current = String(id)
                       setShowCommentsModal(true)
                       getComment({ video_id: uuid })(dispatch).then((res: any) => {
                         setComments(Array.isArray(res) ? res : [])
@@ -2285,7 +2271,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                       <div className="relative h-full w-full rounded-t-xl rounded-b-none overflow-hidden bg-black">
                         {data.media_type === 'image' ? (
                           <img
-                            src={data.video}
+                            src={data.video?.startsWith("http") ? data.video : getMediaUrl(data.video)}
                             className="h-full w-full object-cover border-[#00f0ff]/5"
                             alt="Feed Content"
                             onClick={() => handleVideoClick(index)}
@@ -2412,7 +2398,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                                 <motion.div
                                   className="flex h-12 w-12 items-center justify-center rounded-full bg-black/50 backdrop-blur-md"
                                 >
-                                  {transientIconState.icon === 'play' ? (
+                                  {transientIconState!.icon === 'play' ? (
                                     <Play className="h-6 w-6 text-white" fill="white" />
                                   ) : (
                                     <Pause className="h-6 w-6 text-white" fill="white" />
@@ -3848,7 +3834,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
           </React.Fragment>
         )}
       </AnimatePresence>
-      <ShowComments showCommentsModal={showCommentsModal} setShowCommentsModal={setShowCommentsModal} comments={comments} user={user} commentText={commentText} setCommentText={setCommentText} handlePostComment={handlePostComment} />
+      <ShowComments showCommentsModal={showCommentsModal} setShowCommentsModal={setShowCommentsModal} comments={comments as unknown as null} user={user} commentText={commentText} setCommentText={setCommentText} handlePostComment={handlePostComment} />
 
       {/* Feedback Modal */}
       <AnimatePresence>
@@ -4007,25 +3993,33 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.35 }}
-            style={{ position: 'fixed', inset: 0, zIndex: 9000, pointerEvents: 'auto' }}
+            style={{ position: 'fixed', inset: 0, zIndex: 9000, pointerEvents: 'auto', background: 'rgba(0,0,0,0.85)' }}
             onClick={() => { setViewerGiftOverlay(null); setViewerGiftBlackout(false); }}
           >
-            <motion.video
-              key={viewerGiftOverlay.gift_video}
-              src={viewerGiftOverlay.gift_video ? getMediaUrl(viewerGiftOverlay.gift_video) : undefined}
+            {/* Emoji placeholder visible mientras el video no está listo */}
+            <div style={{
+              position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 96, opacity: viewerGiftReady ? 0 : 1, transition: 'opacity 0.3s',
+              pointerEvents: 'none',
+            }}>
+              {viewerGiftOverlay.gift_type}
+            </div>
+
+            <video
+              key={viewerGiftOverlay.blobUrl || viewerGiftOverlay.gift_video}
+              src={viewerGiftOverlay.blobUrl || (viewerGiftOverlay.gift_video ? getMediaUrl(viewerGiftOverlay.gift_video) : undefined)}
               autoPlay
               playsInline
+              preload="auto"
               muted={false}
-              initial={{ scale: 0.6, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.6, opacity: 0 }}
-              transition={{ type: "spring", damping: 22, stiffness: 200 }}
               style={{
                 position: 'absolute', inset: 0, width: '100%', height: '100%',
                 objectFit: 'cover', pointerEvents: 'none',
+                opacity: viewerGiftReady ? 1 : 0, transition: 'opacity 0.3s',
                 maskImage: 'radial-gradient(ellipse 70% 65% at 50% 45%, black 30%, transparent 75%)',
                 WebkitMaskImage: 'radial-gradient(ellipse 70% 65% at 50% 45%, black 30%, transparent 75%)',
               }}
+              onCanPlayThrough={() => setViewerGiftReady(true)}
               onTimeUpdate={(e) => {
                 const v = e.currentTarget;
                 const type = viewerGiftOverlay.gift_type?.toLowerCase();
@@ -4037,12 +4031,19 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                   }
                 }
               }}
-              onEnded={() => { setViewerGiftOverlay(null); setViewerGiftBlackout(false); }}
+              onEnded={() => {
+                setViewerGiftOverlay(null);
+                setViewerGiftBlackout(false);
+                if (viewerGiftBlobRef.current) {
+                  URL.revokeObjectURL(viewerGiftBlobRef.current);
+                  viewerGiftBlobRef.current = null;
+                }
+              }}
             />
             <motion.div
               initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3 }}
+              animate={{ opacity: viewerGiftReady ? 1 : 0, y: viewerGiftReady ? 0 : 20 }}
+              transition={{ duration: 0.4 }}
               style={{ position: 'absolute', bottom: 96, left: 0, right: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, pointerEvents: 'none' }}
             >
               <p style={{ color: 'white', fontWeight: 900, fontSize: 24, textShadow: '0 2px 12px rgba(0,0,0,0.9)' }}>

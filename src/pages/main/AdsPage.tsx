@@ -59,6 +59,15 @@ const AdsPage: React.FC = () => {
         }
     }, []);
 
+    useEffect(() => {
+        const handleRefresh = () => {
+            fetchCampaigns();
+            fetchStats();
+        };
+        window.addEventListener("buzzy:refresh", handleRefresh);
+        return () => window.removeEventListener("buzzy:refresh", handleRefresh);
+    }, []);
+
     const handlePaymentSuccess = async (campaignId: string | null, sessionId: string | null) => {
         if (!campaignId || !sessionId) return;
 

@@ -1,4 +1,4 @@
-import { SUCCEES_LOGIN, FAILED_LOGIN, LOGOUT_USER } from "../type";
+import { SUCCEES_LOGIN, FAILED_LOGIN, LOGOUT_USER, UPDATE_USER } from "../type";
 
 const inicializerState = {
     user: null,
@@ -22,6 +22,11 @@ const LoginReducer = (state = inicializerState, action: { type: string, payload:
             return {
                 ...state,
                 error: payload,
+            };
+        case UPDATE_USER:
+            return {
+                ...state,
+                user: { ...(state.user as unknown as object), ...payload.user },
             };
         case LOGOUT_USER:
             return {

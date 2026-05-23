@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Sun, Contrast, Droplets, Zap, Focus, Thermometer, Check, RotateCcw } from "lucide-react"
+import { Sun, Contrast, Droplets, Zap, Focus, Thermometer, Check, RotateCcw, type LucideIcon } from "lucide-react"
 
 /* ─────────────────────────────────────────────────────────────────
    ADJUSTMENT DEFINITIONS
@@ -50,7 +50,7 @@ type AdjKey = keyof AdjustmentValues
 interface AdjItem {
   key: AdjKey
   label: string
-  icon: React.FC<{ size?: number; className?: string }>
+  icon: LucideIcon
   color: string        // tailwind gradient
   min: number
   max: number

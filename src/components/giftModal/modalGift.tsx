@@ -1,8 +1,37 @@
 import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { X, Crown, Zap, Star, ChevronLeft, ChevronRight } from 'lucide-react';
 import { GiftI } from '../../interfaces/gift';
 import { useTranslation } from 'react-i18next';
+import { getMediaUrl } from '../../redux/client/api-client';
+
+// Muestra el emoji inmediatamente y lo reemplaza con el video cuando ya cargó,
+// evitando el flash negro en Android WebView.
+const GiftVideo: React.FC<{ src: string; emoji: string }> = ({ src, emoji }) => {
+    const [ready, setReady] = useState(false);
+    return (
+        <div className="w-full h-full relative">
+            {/* Emoji visible hasta que el video esté listo */}
+            <span
+                className="absolute inset-0 flex items-center justify-center text-4xl md:text-6xl transition-opacity duration-200"
+                style={{ opacity: ready ? 0 : 1 }}
+            >
+                {emoji}
+            </span>
+            <video
+                src={src}
+                autoPlay
+                loop
+                muted
+                playsInline
+                preload="auto"
+                onCanPlayThrough={() => setReady(true)}
+                className="w-full h-full object-cover rounded-full transition-opacity duration-200"
+                style={{ opacity: ready ? 1 : 0 }}
+            />
+        </div>
+    );
+};
 
 // --- Types ---
 
@@ -18,22 +47,6 @@ interface VipGiftExperienceProps {
         } | string;
         plan_name?: string;
     } | null;
-}
-
-interface GiftPanelLabels {
-    giftPresential: string;
-    vipMessageLabel: string;
-    vipMessagePlaceholder: string;
-    giftCost: string;
-    available: string;
-    tokensLabel: string;
-}
-
-interface SuccessOverlayLabels {
-    title: string;
-    subtitle: string;
-    newBalance: string;
-    button: string;
 }
 
 // --- Sub-components ---
@@ -187,13 +200,7 @@ const GiftCarousel: React.FC<{
                             >
                                 <div className="w-20 h-20 md:w-28 md:h-28 flex items-center justify-center bg-black/40 rounded-full backdrop-blur-sm relative overflow-hidden">
                                     {gift.video ? (
-                                        <video
-                                            src={gift.video}
-                                            autoPlay
-                                            loop
-                                            muted
-                                            className="w-full h-full object-cover rounded-full"
-                                        />
+                                        <GiftVideo src={getMediaUrl(gift.video)} emoji={gift.emoji} />
                                     ) : (
                                         <span className="text-4xl md:text-6xl">{gift.emoji}</span>
                                     )}
@@ -357,55 +364,17 @@ const VipPowerButton: React.FC<{
     </div>
 );
 
-const SuccessOverlay: React.FC<{ onClose: () => void; theme: any }> = ({ onClose, theme }) => (
-    <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 z-[120] bg-black/95 backdrop-blur-sm flex items-center justify-center p-6"
-    >
-        <div className="text-center">
-            <div className="relative inline-block mb-6">
-                <motion.div
-                    animate={{ scale: [1, 1.4, 1], opacity: [0.4, 0.8, 0.4] }}
-                    transition={{ duration: 2, repeat: Infinity }}
-                    className="absolute inset-0 blur-2xl rounded-full"
-                    style={{ backgroundColor: theme.primaryColor.replace('text-', '') }}
-                />
-                <Zap size={100} className="text-white relative z-10 fill-current drop-shadow-[0_0_30px_rgba(255,255,255,0.5)]" />
-            </div>
-            <h2 className="text-4xl md:text-6xl font-black italic text-white tracking-tighter uppercase drop-shadow-xl">
-                ENVÍO COMPLETADO
-            </h2>
-            <p className={`${theme.primaryColor} text-lg font-black tracking-[0.5em] mt-4 uppercase drop-shadow-md`}>
-                Tu prestigio se eleva
-            </p>
-
-            <motion.button
-                whileTap={{ scale: 0.95 }}
-                onClick={onClose}
-                className={`mt-12 px-10 py-3.5 bg-gradient-to-r ${theme.bgGradient} rounded-full font-black text-white tracking-[0.2em] shadow-xl transition-all uppercase border-2 shadow-inner text-xs`}
-                style={{ borderColor: theme.primaryColor.replace('text-', '') }}
-            >
-                Volver al Nexo
-            </motion.button>
-        </div>
-    </motion.div>
-);
-
 // --- Main Component ---
 
 const VipGiftExperience: React.FC<VipGiftExperienceProps> = ({ onClose, onSendGift, gifts: parentGifts, walletTokens, subscriptionStatus }) => {
     const [isPressing, setIsPressing] = useState(false);
     const [progress, setProgress] = useState(0);
-    const [isSent, setIsSent] = useState(false);
     const sentRef = React.useRef(false);
     const [selectedIndex, setSelectedIndex] = useState(2);
     const [message, setMessage] = useState("");
     const { t } = useTranslation('videos');
 
     const theme = getPlanTheme(subscriptionStatus);
-    const powerLabel = t('videos:giftExperience.powerLabel', { plan: theme.name });
 
     const displayGifts = parentGifts && parentGifts.length > 0 ? parentGifts : [
         { id: '1', name: 'Tokens', token_price: 100, slug: '1', emoji: '🪙', video: null, is_active: true, created_at: '' },
@@ -434,7 +403,6 @@ const VipGiftExperience: React.FC<VipGiftExperienceProps> = ({ onClose, onSendGi
     const handleComplete = () => {
         if (sentRef.current) return;
         sentRef.current = true;
-        setIsSent(true);
         onSendGift({ ...selectedGift, vip_message: message });
         setIsPressing(false);
         setTimeout(onClose, 100);
@@ -443,7 +411,7 @@ const VipGiftExperience: React.FC<VipGiftExperienceProps> = ({ onClose, onSendGi
     return (
         <div className="fixed inset-0 z-[100] bg-[#020408] text-white font-sans overflow-hidden flex flex-col items-center justify-center p-4">
             <SpaceBackground />
-            <Header onClose={onClose} title={t('videos:giftExperience.specialGiftsTitle')} />
+            <Header onClose={onClose} title={t('videos:giftExperience.specialGiftsTitle' as any)} />
 
             <div className="flex flex-col items-center w-full max-w-2xl z-10 scale-[0.9] md:scale-100 transition-transform">
                 <GiftCarousel

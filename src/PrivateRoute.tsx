@@ -9,7 +9,7 @@ const GlobalCallWrapper = lazy(() =>
 );
 
 const ProtectedRoute: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const { user } = useContext(AuthContext);
+  useContext(AuthContext);
   const token = localStorage.getItem('accessToken');
 
   if (!token) {

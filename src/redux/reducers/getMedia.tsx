@@ -1,4 +1,4 @@
-import { SUCCEES_MEDIA, FAILED_MEDIA, APPEND_MEDIA } from "../type";
+import { SUCCEES_MEDIA, FAILED_MEDIA, APPEND_MEDIA, RESET_MEDIA } from "../type";
 // Importa el tipo Video que usaste antes (debe ser accesible aquí)
 import { Video } from "../../components/index/main.interface"; // Ejemplo de ruta
 
@@ -27,6 +27,10 @@ interface AppendAction {
     payload: Video[];
 }
 
+interface ResetAction {
+    type: typeof RESET_MEDIA;
+}
+
 // 4. **Tipar la Acción de Error**
 // La acción de fallo debe llevar la información del error.
 interface FailedAction {
@@ -35,7 +39,7 @@ interface FailedAction {
 }
 
 // 5. **Combinar los tipos de acción**
-type MediaAction = SuccessAction | FailedAction | AppendAction;
+type MediaAction = SuccessAction | FailedAction | AppendAction | ResetAction;
 
 
 // 6. **Tipar la Función Reducer**
@@ -56,6 +60,12 @@ const getMedia = (
             return {
                 ...state,
                 media: state.media ? [...state.media, ...(action.payload as Video[])] : (action.payload as Video[]),
+                error: null,
+            };
+        case RESET_MEDIA:
+            return {
+                ...state,
+                media: null,
                 error: null,
             };
         case FAILED_MEDIA:

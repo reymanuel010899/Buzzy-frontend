@@ -39,6 +39,7 @@ import { completeUpload } from "../../redux/reducers/uploadProgressReducer";
 import { useNotificationsStore } from "../../context/NotificationsStore";
 import HiddenChatPinModal from "./HiddenChatPinModal";
 import { getChatPrivacyStatus, verifyChatPin } from "../../redux/actions/chatPrivacy";
+import { pickMedia } from "../../hooks/useMediaPicker";
 
 enum ChatFolderFilter {
   Friends = "standard",
@@ -119,7 +120,6 @@ const ChatModal: React.FC = () => {
   }, []);
   const { connections } = useSelector((state: RootState) => state.socialReducer);
   const [messageText, setMessageText] = useState("")
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const attachmentOptions = [
     { icon: <ImageIcon className="text-blue-400" />, label: "Fotos y videos", type: "image/video" },
     { icon: <Camera className="text-pink-400" />, label: "Cámara", type: "camera" },
@@ -131,44 +131,43 @@ const ChatModal: React.FC = () => {
     { icon: <Users className="text-cyan-400" />, label: "Amigo", type: "move_standard" },
   ]
 
-  const handleFileSelect = (type: string) => {
-    const input = fileInputRef.current;
-    if (!input) return;
+  const handleFileSelect = async (type: string) => {
+    setShowAttachmentMenu(false);
+    let file: File | null = null;
 
     switch (type) {
       case "image/video":
-      case "camera":
-        input.accept = "image/*,video/*";
-        if (type === "camera") input.capture = "environment";
-        else input.removeAttribute("capture");
-        input.click();
+      case "camera": {
+        const picked = await pickMedia("any", 100);
+        file = picked?.file ?? null;
         break;
-      case "file":
-        input.accept = ".pdf,.doc,.docx,.txt,.zip";
-        input.removeAttribute("capture");
-        input.click();
+      }
+      case "audio": {
+        const picked = await pickMedia("any", 50);
+        file = picked?.file ?? null;
         break;
-      case "audio":
-        input.accept = "audio/*";
-        input.removeAttribute("capture");
-        input.click();
+      }
+      case "file": {
+        const picked = await pickMedia("any", 50);
+        file = picked?.file ?? null;
         break;
+      }
       case "contact":
         getSocialConnections()(dispatch);
         setShowContactModal(true);
-        break;
+        return;
       case "poll":
       case "event":
       case "sticker":
         handleSystemMessage(type);
-        break;
+        return;
       default:
-        input.accept = "*/*";
-        input.removeAttribute("capture");
-        input.click();
+        return;
     }
 
-    setShowAttachmentMenu(false);
+    if (file && backendMessages?.other_user?.id) {
+      await handleFileUploadDirect(file);
+    }
   };
 
   const handleSendContact = (contact: any) => {
@@ -234,10 +233,13 @@ const ChatModal: React.FC = () => {
     });
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !backendMessages?.other_user?.id) return;
+  const handleFileUploadDirect = async (file: File) => {
+    if (!backendMessages?.other_user?.id) return;
+    await handleFileUploadCore(file);
+  };
 
+  const handleFileUploadCore = async (file: File) => {
+    if (!backendMessages?.other_user?.id) return;
     const formData = new FormData();
     formData.append("recipient_id", backendMessages.other_user.id.toString());
     formData.append("file", file);
@@ -368,8 +370,9 @@ const ChatModal: React.FC = () => {
   const dispatch = useDispatch()
 
   const { chats: backendChats, loading } = useSelector((state: RootState) => state.listChatRoomsReducer)
-  const loginState = useSelector((state: RootState) => state.LoginReducer);
-  const user = loginState?.user || JSON.parse(localStorage.getItem("user") || "{}");
+  type ChatUser = { username: string; id?: string | number; profile_picture?: string; subscription_status?: { plan?: { name?: string } } };
+  const loginState = useSelector((state: RootState) => state.LoginReducer as unknown as { user: ChatUser });
+  const user: ChatUser = loginState?.user || JSON.parse(localStorage.getItem("user") || "{}");
   const [lastMessageMap, setLastMessageMap] = useState<Record<string, string>>({});
   const [chatFolderMap, setChatFolderMap] = useState<Record<string, ChatFolderFilter>>({});
 
@@ -916,6 +919,12 @@ const ChatModal: React.FC = () => {
       reader: user.username,
     });
   }, [backendMessages?.other_user?.id, selectedChat, showMessages, wsSend, user.username]);
+
+  // Scroll instantáneo al abrir un chat, suave al recibir mensajes nuevos
+  useEffect(() => {
+    if (!selectedChat) return;
+    messagesEndRef.current?.scrollIntoView({ behavior: "instant" })
+  }, [selectedChat])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -2054,7 +2063,7 @@ const ChatModal: React.FC = () => {
                             const isMoveKnown = option.type === "move_known";
                             const isMoveStandard = option.type === "move_standard";
                             const isHidden = isHideChat && currentBackendChat?.folder_type === ChatFolderFilter.Hidden;
-                            const isActiveKnown = isMoveKnown && currentBackendChat?.folder_type === ChatFolderFilter.Known;
+                            const isActiveKnown = isMoveKnown && (currentBackendChat?.folder_type as string) === ChatFolderFilter.Known;
                             const isActiveStandard = isMoveStandard && currentBackendChat?.folder_type === ChatFolderFilter.Friends;
                             const isDisabled = false;
                             return (
@@ -2106,13 +2115,6 @@ const ChatModal: React.FC = () => {
                       )}
                     </AnimatePresence>
 
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      className="hidden"
-                      onChange={handleFileUpload}
-                      accept="image/*,video/*"
-                    />
 
                     <div className="flex gap-2 items-center bg-[#181b27]/75 backdrop-blur-xl rounded-full px-2.5 py-1.5 border border-white/8 shadow-[0_4px_24px_rgba(0,0,0,0.5)]">
                       {!isRecording && (

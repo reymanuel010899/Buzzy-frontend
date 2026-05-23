@@ -5,6 +5,7 @@ import { useDispatch } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { updateProfile } from '../../redux/actions/updateProfile';
 import { getMediaUrl } from '../../redux/client/api-client';
+import { pickMedia } from '../../hooks/useMediaPicker';
 
 interface EditProfileModalProps {
     isOpen: boolean;
@@ -105,35 +106,33 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onClose, on
         setFormData({ ...formData, [name]: normalizedValue });
     };
 
-    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (e.target.files?.[0]) {
-            const file = e.target.files[0];
-            setProfilePicture(file);
-            setPreviewUrl(URL.createObjectURL(file));
-            setProfileVideo(null);
-            setVideoPreviewUrl(null);
-        }
+    const handleFileChange = async () => {
+        const picked = await pickMedia("image", 10);
+        if (!picked) return;
+        setProfilePicture(picked.file);
+        setPreviewUrl(picked.url);
+        setProfileVideo(null);
+        setVideoPreviewUrl(null);
     };
 
-    const handleVideoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (e.target.files?.[0]) {
-            const file = e.target.files[0];
-            const video = document.createElement('video');
-            video.preload = 'metadata';
-            video.onloadedmetadata = () => {
-                window.URL.revokeObjectURL(video.src);
-                if (video.duration > 3.5) {
-                    setError("El video de perfil no puede exceder los 3 segundos.");
-                    return;
-                }
-                setProfileVideo(file);
-                setVideoPreviewUrl(URL.createObjectURL(file));
-                setProfilePicture(null);
-                setPreviewUrl(null);
-                setError(null);
-            };
-            video.src = URL.createObjectURL(file);
-        }
+    const handleVideoChange = async () => {
+        const picked = await pickMedia("video", 50);
+        if (!picked) return;
+        const video = document.createElement('video');
+        video.preload = 'metadata';
+        video.onloadedmetadata = () => {
+            window.URL.revokeObjectURL(video.src);
+            if (video.duration > 3.5) {
+                setError("El video de perfil no puede exceder los 3 segundos.");
+                return;
+            }
+            setProfileVideo(picked.file);
+            setVideoPreviewUrl(picked.url);
+            setProfilePicture(null);
+            setPreviewUrl(null);
+            setError(null);
+        };
+        video.src = picked.url;
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -228,26 +227,24 @@ const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onClose, on
                                 </div>
 
                                 <div className="flex items-center gap-3 w-full">
-                                    <label className="flex-1 flex items-center gap-3 px-4 py-3 bg-white/5 border border-white/10 rounded-2xl hover:bg-white/10 cursor-pointer transition-colors">
+                                    <button type="button" onClick={handleFileChange} className="flex-1 flex items-center gap-3 px-4 py-3 bg-white/5 border border-white/10 rounded-2xl hover:bg-white/10 cursor-pointer transition-colors">
                                         <div className="w-9 h-9 rounded-xl bg-[#00f0ff]/10 flex items-center justify-center shrink-0">
                                             <Camera size={18} className="text-[#00f0ff]" />
                                         </div>
-                                        <div className="flex flex-col">
+                                        <div className="flex flex-col text-left">
                                             <span className="text-sm font-semibold text-white">Subir Foto</span>
                                             <span className="text-[11px] text-white/30">JPG, PNG</span>
                                         </div>
-                                        <input type="file" className="hidden" onChange={handleFileChange} accept="image/*" />
-                                    </label>
-                                    <label className="flex-1 flex items-center gap-3 px-4 py-3 bg-white/5 border border-white/10 rounded-2xl hover:bg-white/10 cursor-pointer transition-colors">
+                                    </button>
+                                    <button type="button" onClick={handleVideoChange} className="flex-1 flex items-center gap-3 px-4 py-3 bg-white/5 border border-white/10 rounded-2xl hover:bg-white/10 cursor-pointer transition-colors">
                                         <div className="w-9 h-9 rounded-xl bg-[#7000ff]/10 flex items-center justify-center shrink-0">
                                             <Video size={18} className="text-[#7000ff]" />
                                         </div>
-                                        <div className="flex flex-col">
+                                        <div className="flex flex-col text-left">
                                             <span className="text-sm font-semibold text-white">Subir Video</span>
                                             <span className="text-[11px] text-white/30">Máx. 3s</span>
                                         </div>
-                                        <input type="file" className="hidden" onChange={handleVideoChange} accept="video/*" />
-                                    </label>
+                                    </button>
                                 </div>
                             </div>
 

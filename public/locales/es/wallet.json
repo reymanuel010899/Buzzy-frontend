@@ -5,7 +5,7 @@
   "addFunds": "Agregar Fondos",
   "withdrawAction": "Retirar",
   "history": {
-    "title": "Historial de Transacciones",
+    "title": "Historial",
     "subtitle": "Mostrando las últimas {{limit}} transacciones",
     "empty": "No hay transacciones",
     "emptyHint": "Las transacciones aparecerán aquí cuando realices movimientos en tu wallet",

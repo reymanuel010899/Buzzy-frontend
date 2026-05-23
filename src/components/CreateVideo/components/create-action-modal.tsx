@@ -22,6 +22,7 @@ import MixerPanel from "./MixerPanel"
 import VolumePanel from "./VolumePanel"
 import VoiceRecorderPanel from "./VoiceRecorderPanel"
 import { apiClient } from "../../../redux/client/api-client"
+import { pickMedia } from "../../../hooks/useMediaPicker"
 import { processVideoWithText } from "../utils/processVideoWithText"
 import { useVideoAudio } from "../../../hooks/useVideoAudio"
 import { useAudioTracks } from "../../../hooks/useAudioTracks"
@@ -392,6 +393,9 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
       })
       handleClose()
     } catch (e: unknown) {
+      const status = (e as { response?: { status?: number } })?.response?.status
+      // 401 is handled by the interceptor (redirects to login) — don't show an error here
+      if (status === 401) return
       const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error
       setPublishError(msg || 'Error al publicar. Intenta de nuevo.')
     } finally {
@@ -888,18 +892,10 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
                   transition={{ delay: 0.1 }}
                   className="text-center w-full max-w-sm"
                 >
-                  <input
-                    type="file"
-                    id="video-upload"
-                    className="hidden"
-                    accept="video/*"
-                    onChange={(e) => {
-                      if (e.target.files && e.target.files[0]) {
-                        setUploadFile(e.target.files[0])
-                      }
-                    }}
-                  />
-                  <label htmlFor="video-upload" className="block cursor-pointer group">
+                  <button type="button" onClick={async () => {
+                    const picked = await pickMedia("video", 200);
+                    if (picked) setUploadFile(picked.file);
+                  }} className="block cursor-pointer group w-full text-center">
                     <div className="relative mx-auto w-32 h-32 mb-6">
                       <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-cyan-400 via-purple-500 to-pink-500 animate-spin-slow opacity-70 blur-sm"
                         style={{ animationDuration: '3s' }}
@@ -916,15 +912,19 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
                     <p className="text-gray-400 text-sm mb-6">
                       Comparte momentos únicos con Buzzy
                     </p>
-                  </label>
+                  </button>
 
-                  <label
-                    htmlFor="video-upload"
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const picked = await pickMedia("video", 200);
+                      if (picked) setUploadFile(picked.file);
+                    }}
                     className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-purple-600 text-white font-semibold cursor-pointer hover:shadow-lg hover:shadow-cyan-500/25 transition-all hover:scale-105 active:scale-95 text-sm"
                   >
                     <Upload size={18} />
                     Seleccionar Video
-                  </label>
+                  </button>
                 </motion.div>
               </div>
 

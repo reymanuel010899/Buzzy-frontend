@@ -146,7 +146,7 @@ function SwipeHint({ show }: { show: boolean }) {
   )
 }
 
-export default function HorizontalCarousel({ video, isActive, isMuted, isExpanded, onLike, onComment, onGift, onSlideChange, children }: Props) {
+export default function HorizontalCarousel({ video, isActive, isMuted, isExpanded: _isExpanded, onLike, onComment, onGift, onSlideChange, children }: Props) {
   const { getFromCache, expandInBackground } = useUserVideos()
 
   // Cargar desde cache inmediatamente — sin esperar fetch

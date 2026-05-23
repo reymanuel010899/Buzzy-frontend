@@ -6,7 +6,7 @@ import { X, Bell, Heart, MessageCircle, UserPlus, Eye, Star, Gift, AtSign, Check
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
 import { useNotificationsStore, BuzzyNotification } from "../../context/NotificationsStore"
-import { getBaseUrl, getMediaUrl } from "../../redux/client/api-client"
+import { getMediaUrl } from "../../redux/client/api-client"
 
 interface Props {
   open: boolean

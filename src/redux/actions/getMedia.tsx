@@ -1,4 +1,4 @@
-import { SUCCEES_MEDIA, FAILED_MEDIA, APPEND_MEDIA } from '../type'
+import { SUCCEES_MEDIA, FAILED_MEDIA, APPEND_MEDIA, RESET_MEDIA } from '../type'
 import { apiClient } from '../client/api-client';
 
 // list-home: top 20 videos populares para usuarios nuevos sin historial.
@@ -18,6 +18,12 @@ export const getMedia = () => async (dispatch: any) => {
       payload: ''
     });
   }
+};
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const refreshFeed = () => async (dispatch: any) => {
+  dispatch({ type: RESET_MEDIA });
+  return dispatch(getRecommendedFeed());
 };
 
 // feed: recomendaciones personalizadas. El backend devuelve { mode, results }.

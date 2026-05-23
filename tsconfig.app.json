@@ -26,5 +26,6 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src", "src/App.tsx"]
+  "include": ["src", "src/App.tsx"],
+  "exclude": ["src/components/CreateVideo/app"]
 }

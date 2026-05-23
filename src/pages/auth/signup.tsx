@@ -1,13 +1,12 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Link, useNavigate } from "react-router-dom";
-import { Mail, Lock, User, Eye, EyeOff, Loader2, Globe, Check, X } from "lucide-react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Mail, Lock, User, Eye, EyeOff, Loader2, Globe } from "lucide-react";
 import { FcGoogle } from "react-icons/fc";
 import { IDataSignUp } from "../../components/auth/auth.interface";
 import { register } from "../../redux/actions/register";
 import { useDispatch } from 'react-redux';
-import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
-import { auth } from "../../firebase";
+import { GoogleAuth } from "@codetrix-studio/capacitor-google-auth";
 import { googleRegister } from "../../redux/actions/Login";
 
 // ─── All countries with ISO-2 code ───────────────────────────────────────────
@@ -85,6 +84,7 @@ const COUNTRIES = [
 const SignUp: React.FC = () => {
   const navigate = useNavigate();
   const dispatch = useDispatch();
+  const [searchParams] = useSearchParams();
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -99,7 +99,16 @@ const SignUp: React.FC = () => {
     repeat_password: "",
     country: "",
     country_code: "",
+    referral_code: "",
   });
+
+  // Leer el código de referido de la URL (?code=TOKEN) y pre-cargarlo
+  useEffect(() => {
+    const code = searchParams.get('code');
+    if (code) {
+      setFormData(prev => ({ ...prev, referral_code: code }));
+    }
+  }, [searchParams]);
 
   const { name, username, email, password, repeat_password, country } = formData;
 
@@ -120,29 +129,28 @@ const SignUp: React.FC = () => {
     setLoading(true);
     setErrorMsg("");
     try {
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: 'select_account' });
-      const result = await signInWithPopup(auth, provider);
-      const credential = GoogleAuthProvider.credentialFromResult(result);
-      const token = credential?.accessToken;
-      // Extract the Google profile photo
-      const photoUrl = result.user.photoURL ?? undefined;
+      await GoogleAuth.initialize({
+        clientId: '993295175092-6l5q4g5u401ieunl4pjp7lqj5psjpunj.apps.googleusercontent.com',
+        scopes: ['profile', 'email'],
+        grantOfflineAccess: true,
+      });
+      const googleUser = await GoogleAuth.signIn();
+      const token = googleUser.authentication.accessToken;
+      const photoUrl = googleUser.imageUrl ?? undefined;
 
       if (token) {
-        // Obtenemos el país del locale del navegador (ej. 'es-DO' -> DO)
         const lang = navigator.language || "es-US";
         const detectedCode = lang.split('-')[1]?.toUpperCase() || "US";
         const detectedCountry = COUNTRIES.find(c => c.code === detectedCode) || { name: "United States", code: "US" };
 
-        // Si el usuario ya había seleccionado manual en el form, tomamos el del form, de lo contrario, el detectado
         const sendCode = formData.country_code || detectedCountry.code;
         const sendName = formData.country || detectedCountry.name;
 
-        await googleRegister(token, photoUrl, sendCode, sendName)(dispatch);
+        await googleRegister(token, photoUrl, sendCode, sendName, formData.referral_code || undefined)(dispatch);
         navigate('/');
       }
     } catch (error: any) {
-      if (error?.code !== 'auth/popup-closed-by-user' && error?.code !== 'auth/cancelled-popup-request') {
+      if (error?.error !== 'popup_closed_by_user') {
         console.error("Google Sign-Up Error", error);
         const backendError = error?.response?.data?.message || error?.response?.data?.error;
         setErrorMsg(backendError || "Error al crear la cuenta con Google. Intenta de nuevo.");
@@ -195,7 +203,7 @@ const SignUp: React.FC = () => {
     } catch (err: any) {
       console.error(err);
       const backError = err?.response?.data?.error;
-      setErrorMsg(backError || "Error al crear la cuenta. Intenta de nuevo.");
+      setErrorMsg(backError || "Error al crear la cuenta.");
     } finally {
       setLoading(false);
     }

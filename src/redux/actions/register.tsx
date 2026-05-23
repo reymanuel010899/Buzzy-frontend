@@ -21,4 +21,3 @@ export const register = (formData: IDataSignUp) => async (dispatch: AppDispatch)
     throw error;
   }
 };
-

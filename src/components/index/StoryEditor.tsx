@@ -104,7 +104,7 @@ export default function StoryEditor({ file, onPublish, onClose, isUploading }: S
   const { tracks: apiTracks } = useAudioTracks()
 
   const [showMusicModal, setShowMusicModal] = useState(false)
-  const [favorites, setFavorites] = useState<string[]>([])
+  const [favorites, _setFavorites] = useState<string[]>([])
   const [appliedMusic, setAppliedMusic] = useState<MusicSelectorResult | null>(null)
 
   const videoRef = useRef<HTMLVideoElement>(null)

@@ -7,6 +7,7 @@ import { allEmojis } from "./emojis"
 import { CommentData } from "../index"
 import { getMediaUrl } from "../../redux/client/api-client"
 import { useAudioRecorder } from "../../hooks/useAudioRecorder"
+import { pickMedia } from "../../hooks/useMediaPicker"
 
 // EXTENDER COMENTARIO
 type CommentWithReply = CommentData & {
@@ -127,7 +128,6 @@ export const ShowComments = ({
     const [audioPlaying, setAudioPlaying] = useState(false)
     const [audioProgress, setAudioProgress] = useState(0)
     const audioPlayerRef = useRef<HTMLAudioElement | null>(null)
-    const imageInputRef = useRef<HTMLInputElement>(null)
     const [imageFile, setImageFile] = useState<File | null>(null)
     const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null)
 
@@ -198,7 +198,7 @@ export const ShowComments = ({
 
         return roots;
     };
-    console.log(comments, "*-")
+
 
     // Ejecutar el árbol cuando lleguen los comentarios del backend
     useEffect(() => {
@@ -688,20 +688,13 @@ export const ShowComments = ({
 
                                                 <div className="flex items-center gap-1 pr-1">
                                                     {/* Galería */}
-                                                    <input
-                                                        ref={imageInputRef}
-                                                        type="file"
-                                                        accept="image/*"
-                                                        className="hidden"
-                                                        onChange={(e) => {
-                                                            const file = e.target.files?.[0] ?? null
-                                                            setImageFile(file)
-                                                            setImagePreviewUrl(file ? URL.createObjectURL(file) : null)
-                                                            e.target.value = ''
-                                                        }}
-                                                    />
                                                     <button
-                                                        onClick={() => imageInputRef.current?.click()}
+                                                        onClick={async () => {
+                                                            const picked = await pickMedia("image", 10);
+                                                            if (!picked) return;
+                                                            setImageFile(picked.file);
+                                                            setImagePreviewUrl(picked.url);
+                                                        }}
                                                         className="p-1.5 rounded-full hover:bg-white/5 text-white/40 hover:text-white/70 transition-colors"
                                                     >
                                                         <ImageIcon size={16} />

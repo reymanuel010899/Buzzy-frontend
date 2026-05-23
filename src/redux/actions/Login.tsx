@@ -75,7 +75,7 @@ export const googleLogin = (accessToken: string, photoUrl?: string, countryCode?
 };
 
 // Función de registro con Google
-export const googleRegister = (accessToken: string, photoUrl?: string, countryCode?: string, countryName?: string) => async (dispatch: AppDispatch) => {
+export const googleRegister = (accessToken: string, photoUrl?: string, countryCode?: string, countryName?: string, referralCode?: string) => async (dispatch: AppDispatch) => {
   try {
     const response = await apiClient.post(
       "/api/google/register/",
@@ -84,6 +84,7 @@ export const googleRegister = (accessToken: string, photoUrl?: string, countryCo
         photo_url: photoUrl || null,
         country_code: countryCode || "US",
         country_name: countryName || "United States",
+        ...(referralCode ? { referral_code: referralCode } : {}),
       },
       { headers: { "Content-Type": "application/json" } }
     );
@@ -113,6 +114,8 @@ const clearAuthData = () => {
   localStorage.removeItem("isAuthenticated");
   localStorage.removeItem("user");
   localStorage.removeItem("seen_initial");
+  // Clear app icon badge on logout
+  import("@capawesome/capacitor-badge").then(({ Badge }) => Badge.set({ count: 0 }).catch(() => {}));
 };
 
 const persistAuthData = (response: { refresh: string; access: string; user: unknown }) => {

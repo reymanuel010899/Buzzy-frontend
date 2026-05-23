@@ -1,9 +1,8 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from "react"
+import React, { useEffect, useRef, useState, useCallback, useMemo } from "react"
 import { useRingtoneStore, RINGTONE_OPTIONS } from "../../store/ringtoneStore"
 import { useParams, useNavigate } from "react-router-dom"
 import { motion, AnimatePresence } from "framer-motion"
 import {
-  Share,
   Settings,
   Play,
   X,
@@ -44,7 +43,7 @@ import { createLike } from "../../redux/actions/createLike"
 import { createView } from "../../redux/actions/createView"
 import { getComment } from "../../redux/actions/getComment"
 import { createComment } from "../../redux/actions/createComment"
-import { getBaseUrl, getMediaUrl } from "../../redux/client/api-client"
+import { apiClient, getBaseUrl, getMediaUrl } from "../../redux/client/api-client"
 import { createFollower } from "../../redux/actions/createFollower"
 import SubscriptionModal from "./SubscriptionModal"
 import { getSubscriptionPlans, createCheckoutSession, startCall } from "../../redux/actions/subscriptionActions"
@@ -64,6 +63,7 @@ import { LanguageSwitcher } from "../Layout/LanguageSwitcher"
 import type { StoryList } from "../index/main.interface"
 import VipGiftExperience from "../giftModal/modalGift"
 import BuzzyBannerSpace from "../banner/BuzzyBannerSpace"
+import { fetchActiveBanner } from "../../redux/actions/getBanner"
 import TokenShopModal from "../giftModal/TokenShopModal"
 import InsufficientFundsModal from "../giftModal/InsufficientFundsModal"
 import TokenPurchaseSuccessModal from "../giftModal/TokenPurchaseSuccessModal"
@@ -80,6 +80,21 @@ import { useVideoMetrics } from "../../hooks/useVideoMetrics"
 import axios from "axios"
 import { registerFCMToken } from "../../utils/fcm"
 import { isNotifEnabled } from "../../utils/notifPrefs"
+
+// Muestra el emoji de fallback hasta que el video esté listo — evita flash negro en Android
+const GiftVideoThumb: React.FC<{ src: string; emoji: string; playing: boolean }> = ({ src, emoji, playing }) => {
+  const [ready, setReady] = React.useState(false);
+  return (
+    <div className="w-full h-full relative">
+      <span className="absolute inset-0 flex items-center justify-center text-2xl transition-opacity duration-200" style={{ opacity: ready ? 0 : 1 }}>{emoji}</span>
+      <video src={src} autoPlay={playing} loop muted={!playing} playsInline preload="auto"
+        onCanPlayThrough={() => setReady(true)}
+        className="w-full h-full object-cover transition-opacity duration-200"
+        style={{ opacity: ready ? 1 : 0 }}
+      />
+    </div>
+  );
+};
 
 // --- Interfaces ---
 interface UserInterface {
@@ -336,6 +351,10 @@ function ProfileSeccion({
     }
   }
   const [showRingtonePanel, setShowRingtonePanel] = useState(false);
+  const [showReferralPanel, setShowReferralPanel] = useState(false);
+  const [referralLink, setReferralLink] = useState('');
+  const [referralLoading, setReferralLoading] = useState(false);
+  const [referralCopied, setReferralCopied] = useState(false);
   const { selectedId: ringtoneId, setRingtone } = useRingtoneStore();
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const stopRingtonePreview = useCallback(() => {
@@ -402,6 +421,12 @@ function ProfileSeccion({
   const { setActiveOutgoingCall, setAgoraData, activeIncomingCall, activeOutgoingCall } = useCallStore();
   const isCallActive = activeIncomingCall?.status === 'active' || activeOutgoingCall?.status === 'active';
 
+  // Fetch banner una sola vez al entrar al perfil
+  useEffect(() => {
+    dispatch(fetchActiveBanner() as any);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Duck video audio if a call is active
   useEffect(() => {
     videoRefs.current.forEach(video => {
@@ -412,7 +437,7 @@ function ProfileSeccion({
   }, [isCallActive, activeModalIndex, isGridVideoPlaying]);
 
 
-  const weekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  // const weekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
   // Formatear hora 24h → 12h con AM/PM (igual que la imagen)
   const formatTime12h = (time24: string) => {
@@ -602,12 +627,26 @@ function ProfileSeccion({
 
   // --- 2. Carga Inicial de Usuario ---
   useEffect(() => {
-    if (username) {
-      getUser(username)
-      getUserMedia(username)
-    } else {
-    }
-  }, [getUser, getUserMedia, username])
+    if (!username) return;
+    setLocalMedia([]);
+    getUser(username);
+    getUserMedia(username);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [username])
+
+  // Suscripción al evento global de refresh
+  useEffect(() => {
+    const handleRefresh = () => {
+      if (username) {
+        getUser(username);
+        getUserMedia(username);
+      }
+      dispatch(getWallet() as any);
+    };
+    window.addEventListener("buzzy:refresh", handleRefresh);
+    return () => window.removeEventListener("buzzy:refresh", handleRefresh);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [username, dispatch]);
 
   // Sincronizar localMedia cuando cambian los videos de Redux
   useEffect(() => {
@@ -893,7 +932,7 @@ function ProfileSeccion({
   };
 
   const toggleMute = () => setIsMuted(!isMuted);
-  const generateAudioLevels = () => Array.from({ length: 15 }, () => Math.random() * 100);
+  // const generateAudioLevels = () => Array.from({ length: 15 }, () => Math.random() * 100);
 
   useEffect(() => {
     if (!isModalOpen || !modalContainerRef.current) return;
@@ -1555,7 +1594,7 @@ function ProfileSeccion({
                                 data-[state=active]:bg-gradient-to-r data-[state=active]:from-[#1c1427] data-[state=active]:to-[#142122] data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-[#7000ff]/30 data-[state=active]:border data-[state=active]:border-white/8
                                 ${activeTab === tab ? "" : "bg-gradient-to-r from-[#1c1427] to-[#142122] border border-white/5 text-white/30 hover:text-white/60"}`}
                       >
-                        {t(`profile:orderTabs.${tab}`)}
+                        {(t as (k: string) => string)(`profile:orderTabs.${tab}`)}
                       </TabsTrigger>
                     ))}
                   </TabsList>
@@ -1712,7 +1751,7 @@ function ProfileSeccion({
                         >
                           <div className="relative flex-shrink-0 w-14 h-14 rounded-xl overflow-hidden bg-black/40">
                             {gift.gift_video_url ? (
-                              <video src={gift.gift_video_url} autoPlay={isPlaying} loop muted={!isPlaying} playsInline className="w-full h-full object-cover" />
+                              <GiftVideoThumb src={getMediaUrl(gift.gift_video_url)} emoji={gift.gift_emoji || "🎁"} playing={isPlaying} />
                             ) : (
                               <div className="w-full h-full flex items-center justify-center text-2xl">{gift.gift_emoji || "🎁"}</div>
                             )}
@@ -1772,7 +1811,7 @@ function ProfileSeccion({
                         <div className="relative flex-shrink-0 w-14 h-14 rounded-xl overflow-hidden bg-black/40">
                           {gift.gift_video_url ? (
                             <video
-                              src={gift.gift_video_url}
+                              src={getMediaUrl(gift.gift_video_url)}
                               autoPlay={isPlaying}
                               loop
                               muted={!isPlaying}
@@ -1824,7 +1863,7 @@ function ProfileSeccion({
                         <div className="flex-shrink-0 flex flex-col items-end gap-1">
                           {gift.video_thumbnail ? (
                             <img
-                              src={gift.video_thumbnail}
+                              src={getMediaUrl(gift.video_thumbnail)}
                               className="w-10 h-14 rounded-lg object-cover border border-white/10"
                               alt=""
                               onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
@@ -1876,7 +1915,7 @@ function ProfileSeccion({
               {/* Video a pantalla completa con máscara que disuelve todos los bordes */}
               <motion.video
                 key={giftItem.uuid}
-                src={giftItem.gift_video_url}
+                src={getMediaUrl(giftItem.gift_video_url)}
                 autoPlay
                 playsInline
                 initial={{ scale: 0.6, opacity: 0 }}
@@ -1943,7 +1982,7 @@ function ProfileSeccion({
           >
             <motion.video
               key={sentGiftPreview.slug}
-              src={sentGiftPreview.video ?? undefined}
+              src={getMediaUrl(sentGiftPreview.video) || undefined}
               autoPlay
               playsInline
               initial={{ scale: 0.6, opacity: 0 }}
@@ -1978,7 +2017,7 @@ function ProfileSeccion({
         <EditProfileModal
           isOpen={showEditProfileModal}
           onClose={() => setShowEditProfileModal(false)}
-          onSaveSuccess={() => getUser(username)}
+          onSaveSuccess={() => getUser(username!)}
           user={user || currentUser}
         />
       )}
@@ -2200,7 +2239,7 @@ function ProfileSeccion({
               </div>
 
               {/* Lista de opciones */}
-              <div className="p-2 overflow-y-auto flex-1">
+              <div className="p-4 overflow-y-auto flex-1">
                 {/* 1. Cuenta Bancaria (especial) */}
                 <div
                   onClick={handleSaveBankAccount}
@@ -2312,6 +2351,93 @@ function ProfileSeccion({
                               </div>
                             );
                           })}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+
+                {/* Invitar a un amigo */}
+                <div className="rounded-2xl overflow-hidden">
+                  <div
+                    onClick={() => setShowReferralPanel(p => !p)}
+                    className="group flex items-center gap-3 px-4 py-3 hover:bg-white/5 cursor-pointer transition-all active:scale-[0.985]"
+                  >
+                    <div className="w-9 h-9 bg-violet-500/10 text-violet-400 rounded-xl flex items-center justify-center shrink-0">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-sm text-white group-hover:text-violet-400 transition-colors">Invitar a un amigo</p>
+                      <p className="text-xs text-gray-400 truncate">Gana 100 tokens por cada 5 invitados</p>
+                    </div>
+                    <span className={`text-white/40 transition-transform duration-200 ${showReferralPanel ? 'rotate-180' : ''}`}>▾</span>
+                  </div>
+
+                  <AnimatePresence>
+                    {showReferralPanel && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.22 }}
+                        className="overflow-hidden"
+                      >
+                        <div className="px-4 pb-4 flex flex-col gap-3">
+                          {/* Botón generar */}
+                          <button
+                            onClick={async () => {
+                              setReferralLoading(true);
+                              try {
+                                const res = await apiClient.post('/api/referrals/generate/');
+                                const token: string = res.data.token;
+                                // El link apunta al backend Django que sirve la página
+                                // inteligente: detecta si la app está instalada → la abre,
+                                // si no → redirige a Play Store
+                                setReferralLink(`${getBaseUrl()}/join?code=${token}`);
+                                setReferralCopied(false);
+                              } catch {
+                                // silently ignore
+                              } finally {
+                                setReferralLoading(false);
+                              }
+                            }}
+                            disabled={referralLoading}
+                            className="relative w-full py-3 rounded-2xl font-bold text-sm text-white overflow-hidden active:scale-[0.97] transition-all disabled:opacity-50 disabled:cursor-not-allowed bg-gradient-to-r from-rose-500 via-fuchsia-500 to-indigo-500 shadow-lg shadow-fuchsia-500/30 hover:shadow-fuchsia-500/50 hover:brightness-110"
+                          >
+                            <span className="relative z-10 flex items-center justify-center gap-2">
+                              {referralLoading ? (
+                                <>
+                                  <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                                  </svg>
+                                  Generando...
+                                </>
+                              ) : (
+                                <>
+                                  <span>🔗</span>
+                                  Generar link único
+                                </>
+                              )}
+                            </span>
+                          </button>
+
+                          {/* Caja del link */}
+                          {referralLink && (
+                            <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-xl px-3 py-2">
+                              <span className="flex-1 text-xs text-cyan-300 truncate select-all">{referralLink}</span>
+                              <button
+                                onClick={() => {
+                                  navigator.clipboard.writeText(referralLink);
+                                  setReferralCopied(true);
+                                  setTimeout(() => setReferralCopied(false), 2000);
+                                }}
+                                className="shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg bg-violet-500/20 text-violet-300 hover:bg-violet-500/30 active:scale-95 transition-all"
+                              >
+                                {referralCopied ? '✓ Copiado' : 'Copiar'}
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </motion.div>
                     )}
@@ -2456,7 +2582,7 @@ function ProfileSeccion({
                             : "bg-white/5 border-white/5 text-white/40 hover:bg-white/10 hover:border-white/10"
                             }`}
                         >
-                          {t(`profile:availability.days.${day}`)}
+                          {(t as (k: string) => string)(`profile:availability.days.${day}`)}
                         </button>
                       );
                     })}
@@ -3386,7 +3512,7 @@ function ProfileSeccion({
             onSendGift={handleSendUserGift}
             gifts={Array.isArray(_fullGifts) ? _fullGifts : []}
             walletTokens={walletTokens}
-            subscriptionStatus={(user as { subscription_status?: string })?.subscription_status}
+            subscriptionStatus={(user as { subscription_status?: { is_active: boolean; plan?: string | { name: string }; plan_name?: string } | null })?.subscription_status}
           />
         )}
       </AnimatePresence>

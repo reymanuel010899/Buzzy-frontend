@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "993295175092",
+    "project_id": "buzzy-app-8086f",
+    "storage_bucket": "buzzy-app-8086f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:993295175092:android:c4d89bb7102e21f2edb6e1",
+        "android_client_info": {
+          "package_name": "com.buzzy.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "993295175092-6l5q4g5u401ieunl4pjp7lqj5psjpunj.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDxWvREEQUi7h5m3xWeJ0Kl5Iq9pWD4UQA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "993295175092-6l5q4g5u401ieunl4pjp7lqj5psjpunj.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
