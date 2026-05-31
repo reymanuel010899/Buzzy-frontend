@@ -54,8 +54,16 @@ function prefetchAudio(url: string): Promise<string> {
   if (audioCache.has(url)) return audioCache.get(url)!
   evictIfNeeded()
   const p = fetch(url)
-    .then(r => r.arrayBuffer())
+    .then(r => {
+      if (!r.ok) throw new Error(`audio fetch failed: ${r.status}`)
+      return r.arrayBuffer()
+    })
     .then(buf => URL.createObjectURL(new Blob([buf], { type: 'audio/mpeg' })))
+    .catch(err => {
+      // Remove the failed entry so the next attempt retries the network request
+      audioCache.delete(url)
+      return Promise.reject(err)
+    })
   audioCache.set(url, p)
   return p
 }

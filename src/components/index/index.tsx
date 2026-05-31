@@ -5,7 +5,7 @@ import axios from "axios";
 import { Link, useNavigate, useLocation } from "react-router-dom"
 import sendMessageSound from "../../assets/sounds/sendMessage.mp3";
 import { prefetchAudioUrl } from "../../hooks/useVideoAudio";
-import { Eye, MessageCircle, Heart, Volume2, VolumeX, Play, Pause, Plus, UserPlus, UserCheck, Loader2, X, MoreVertical, Music2, Camera, Image as ImageIcon, MapPin, Bookmark, Share2, Download } from "lucide-react"
+import { Eye, MessageCircle, Heart, Volume2, VolumeX, Play, Pause, Plus, UserPlus, UserCheck, Loader2, X, MoreVertical, Music2, Camera, Image as ImageIcon, MapPin, Bookmark, Share2, Download, Lock } from "lucide-react"
 import AdCard from "../ads/AdCard"
 import StoryEditor from "./StoryEditor"
 import BottomNavbar from "../Layout/ButtonNavar"
@@ -142,6 +142,10 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([])
   const [isMuted, setIsMuted] = useState(false)
   const [videosPaused, setVideosPaused] = useState(true)
+  // feedLocked = true until the user taps a video for the first time.
+  // While locked, scrolling does NOT autoplay — every video stays paused.
+  const [feedLocked, setFeedLocked] = useState(true)
+  const feedLockedRef = useRef(true)
   const mainRef = useRef<HTMLDivElement>(null)
   const [showLikeAnimation, setShowLikeAnimation] = useState<Record<string, boolean>>({});
   const [savedMap, setSavedMap] = useState<Record<string, boolean>>({});
@@ -512,22 +516,46 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     });
   }, [isCallActive, activeVideo, mergedFeed]);
 
+  // Ref to cancel any pending retry RAF for audio sync
+  const audioSyncRafRef = useRef<number>(0);
+
   const ensureAudioForTrack = useCallback(
     (feedItem?: any, videoElement?: HTMLVideoElement | null) => {
-      const isVideoPlaying = Boolean(
-        videoElement &&
-        !videoElement.paused &&
-        !videoElement.muted &&
-        !isMuted &&
-        activeAdIndex === null &&
-        viewingStoryUserIndex === null
-      );
+      // Cancel any pending retry before evaluating new state
+      if (audioSyncRafRef.current) {
+        cancelAnimationFrame(audioSyncRafRef.current);
+        audioSyncRafRef.current = 0;
+      }
 
-      if (!isAudioUnlocked || !feedItem || feedItem.type !== 'video' || !feedItem.audio_track_url || !isVideoPlaying) {
+      const globallyBlocked =
+        !isAudioUnlocked ||
+        !feedItem ||
+        feedItem.type !== 'video' ||
+        !feedItem.audio_track_url ||
+        isMuted ||
+        activeAdIndex !== null ||
+        viewingStoryUserIndex !== null;
+
+      if (globallyBlocked) {
         musicAudioRef.current?.pause();
         if (!feedItem || feedItem.type !== 'video' || !feedItem.audio_track_url) {
           activeAudioTrackRef.current = null;
         }
+        return;
+      }
+
+      // Video might be in a transitional state (play() called but paused still true for one frame).
+      // If so, retry on the next animation frame instead of giving up.
+      if (!videoElement || videoElement.paused) {
+        audioSyncRafRef.current = requestAnimationFrame(() => {
+          audioSyncRafRef.current = 0;
+          if (!videoElement || videoElement.paused) {
+            // Still paused after one frame — legitimately stopped, nothing to do
+            musicAudioRef.current?.pause();
+            return;
+          }
+          ensureAudioForTrack(feedItem, videoElement);
+        });
         return;
       }
 
@@ -542,9 +570,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         : null;
 
       // Apply original-audio volume to the video element immediately
-      if (videoElement) {
-        videoElement.volume = volumeOriginal;
-      }
+      videoElement.volume = volumeOriginal;
       activeFeedAudioTrimStartRef.current = trimStart;
       activeFeedAudioTrimEndRef.current = trimEndFromFeed ?? trimStart;
 
@@ -552,63 +578,78 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         !musicAudioRef.current ||
         activeAudioTrackRef.current !== trackId
       ) {
-        // Cleanup previous
+        // Cleanup previous track
         if (musicAudioRef.current) {
           musicAudioRef.current.pause();
           musicAudioRef.current.onended = null;
           musicAudioRef.current.ontimeupdate = null;
+          musicAudioRef.current = null;
         }
-        // Use blob from cache — no repeated server requests
-        prefetchAudioUrl(audioUrl).then(blobUrl => {
-          // If track changed while fetching, discard
-          if (activeAudioTrackRef.current !== trackId) return;
-          const audio = new Audio(blobUrl);
-          audio.loop = false;
-          audio.muted = false;
-          // Set volume after metadata is ready — Android WebView MediaPlayer
-          // ignores volume set before the element is initialized
-          audio.preload = "auto";
 
-          const initAudio = () => {
-            audio.volume = volumeMusic;
-            audio.currentTime = trimStart;
-            activeFeedAudioTrimEndRef.current = trimEndFromFeed ?? Math.max(trimStart, isFinite(audio.duration) ? audio.duration : trimStart);
-          };
-
-          audio.addEventListener("loadedmetadata", initAudio, { once: true });
-
-          // Fallback: already ready (blob URLs are usually ready immediately in web)
-          if (audio.readyState >= 1) {
-            initAudio();
-          }
-
-          audio.onended = () => {
-            audio.currentTime = trimStart;
-            audio.play().catch(() => { });
-          };
-          audio.ontimeupdate = () => {
-            if (activeFeedAudioTrimEndRef.current > trimStart && audio.currentTime >= activeFeedAudioTrimEndRef.current - 0.2) {
-              audio.currentTime = trimStart;
-              audio.play().catch(() => { });
-            }
-          };
-          musicAudioRef.current = audio;
-          audio.play().catch(() => { });
-        });
+        // Mark track as pending AFTER clearing — this prevents the null-ref path
+        // in the else branch from running while the fetch is in flight
         activeAudioTrackRef.current = trackId;
+
+        prefetchAudioUrl(audioUrl)
+          .then(blobUrl => {
+            // Discard if user scrolled to a different track while fetching
+            if (activeAudioTrackRef.current !== trackId) return;
+
+            const audio = new Audio(blobUrl);
+            audio.loop = false;
+            audio.muted = false;
+            audio.preload = "auto";
+
+            const initAudio = () => {
+              audio.volume = volumeMusic;
+              audio.currentTime = trimStart;
+              activeFeedAudioTrimEndRef.current =
+                trimEndFromFeed ??
+                Math.max(trimStart, isFinite(audio.duration) ? audio.duration : trimStart);
+            };
+
+            // loadedmetadata fires asynchronously; blob URLs often already have
+            // metadata ready so we also check readyState synchronously as fallback
+            audio.addEventListener("loadedmetadata", initAudio, { once: true });
+            if (audio.readyState >= 1) initAudio();
+
+            audio.onended = () => {
+              audio.currentTime = trimStart;
+              audio.play().catch(() => {});
+            };
+            audio.ontimeupdate = () => {
+              const trimEnd = activeFeedAudioTrimEndRef.current;
+              if (trimEnd > trimStart && audio.currentTime >= trimEnd - 0.2) {
+                audio.currentTime = trimStart;
+                audio.play().catch(() => {});
+              }
+            };
+
+            musicAudioRef.current = audio;
+
+            // Only play if the video is still playing at this point
+            if (videoElement && !videoElement.paused) {
+              audio.play().catch(() => {});
+            }
+          })
+          .catch(() => {
+            // Fetch failed — clear the pending marker so the next scroll attempt retries
+            if (activeAudioTrackRef.current === trackId) {
+              activeAudioTrackRef.current = null;
+            }
+          });
+
         return;
       }
 
+      // Same track already loaded — just resume
       if (!musicAudioRef.current) return;
       musicAudioRef.current.volume = volumeMusic;
       musicAudioRef.current.muted = false;
       if (trimEndFromFeed !== null) {
         activeFeedAudioTrimEndRef.current = trimEndFromFeed;
       }
-      const playPromise = musicAudioRef.current.play();
-      if (playPromise?.catch) {
-        playPromise.catch(() => { });
-      }
+      musicAudioRef.current.play().catch(() => {});
     },
     [activeAdIndex, isAudioUnlocked, isMuted, viewingStoryUserIndex],
   );
@@ -891,10 +932,11 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
   useEffect(() => {
     const unlockAudio = () => {
-      if (!sendAudioRef.current || audioUnlockedRef.current) return;
+      if (audioUnlockedRef.current) return;
+      if (!sendAudioRef.current) return;
 
-      const sa = sendAudioRef.current
-      sa.volume = 0
+      const sa = sendAudioRef.current;
+      sa.volume = 0;
       sa.play()
         .then(() => {
           sa.pause();
@@ -902,31 +944,37 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
           sa.volume = 1;
           audioUnlockedRef.current = true;
           setIsAudioUnlocked(true);
+          // Remove listeners only after confirmed success
+          window.removeEventListener("click", unlockAudio);
+          window.removeEventListener("keydown", unlockAudio);
+          window.removeEventListener("touchstart", unlockAudio);
+          window.removeEventListener("touchend", unlockAudio);
+
+          // Also unlock typing sound if available
+          const ta = typingAudioRef.current;
+          if (ta) {
+            ta.volume = 0;
+            ta.play()
+              .then(() => { ta.pause(); ta.currentTime = 0; ta.volume = 1; })
+              .catch(() => {});
+          }
         })
-        .catch(() => { });
-
-      const ta = typingAudioRef.current
-      if (ta) {
-        ta.volume = 0
-        ta.play()
-          .then(() => {
-            ta.pause();
-            ta.currentTime = 0;
-            ta.volume = 1;
-          })
-          .catch(() => { });
-      }
-
-      window.removeEventListener("click", unlockAudio);
-      window.removeEventListener("keydown", unlockAudio);
+        .catch(() => {
+          // play() rejected (browser policy) — leave listeners registered so the
+          // next user gesture retries the unlock
+        });
     };
 
     window.addEventListener("click", unlockAudio);
     window.addEventListener("keydown", unlockAudio);
+    window.addEventListener("touchstart", unlockAudio, { passive: true });
+    window.addEventListener("touchend", unlockAudio, { passive: true });
 
     return () => {
       window.removeEventListener("click", unlockAudio);
       window.removeEventListener("keydown", unlockAudio);
+      window.removeEventListener("touchstart", unlockAudio);
+      window.removeEventListener("touchend", unlockAudio);
     };
   }, []);
 
@@ -1335,8 +1383,8 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
             }
 
             const shouldBlockInitialAutoplay = index === 0 && !hasUserInteracted.current && !hasLeftInitialVideoRef.current;
-            if (activeAdIndex !== index && !videosPausedRef.current && !shouldBlockInitialAutoplay) {
-              video.currentTime = 0;
+            video.currentTime = 0;
+            if (activeAdIndex !== index && !videosPausedRef.current && !shouldBlockInitialAutoplay && !feedLockedRef.current) {
               video.play().catch(() => {/* Autoplay ignored */ })
             } else {
               video.pause()
@@ -1389,8 +1437,15 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     const videoElement = videoRefs.current[index];
     if (!videoElement) return;
     hasUserInteracted.current = true;
-    videosPausedRef.current = false
-    setVideosPaused(false)
+    videosPausedRef.current = false;
+    setVideosPaused(false);
+
+    // First tap unlocks the feed — from here on, scrolling autoplays normally
+    if (feedLockedRef.current) {
+      feedLockedRef.current = false;
+      setFeedLocked(false);
+    }
+
     if (videoElement.paused) {
       if (index === 0) hasPlayedFirstVideo.current = true;
       videoElement.play().catch(error => {
@@ -2746,6 +2801,30 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                         <div className="absolute inset-0 bg-gradient-to-t from-[#050718] via-[#050718]/10 to-transparent pointer-events-none"></div>
                         <div className="absolute inset-0 bg-gradient-to-r from-[#7000ff]/10 to-[#00f0ff]/10 opacity-0 group-hover:opacity-100 transition-opacity duration-500" onClick={() => handleGridVideoToggle(videoId, videoRefs.current[index])}>
                         </div>
+                        {/* Lock overlay — shown while feed is locked. Clickable so the tap reaches handleVideoClick even on mobile. */}
+                        <AnimatePresence>
+                          {feedLocked && activeVideo === index && data.media_type === 'video' && (
+                            <motion.div
+                              key="feed-lock"
+                              initial={{ opacity: 0, scale: 0.8 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                              exit={{ opacity: 0, scale: 0.8 }}
+                              transition={{ duration: 0.2 }}
+                              className="absolute inset-0 flex flex-col items-center justify-center z-20"
+                              onClick={() => handleVideoClick(index)}
+                            >
+                              <div className="flex flex-col items-center gap-2 pointer-events-none">
+                                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-black/60 backdrop-blur-md border border-white/20">
+                                  <Lock className="h-7 w-7 text-white" />
+                                </div>
+                                <span className="text-white/80 text-xs font-medium tracking-wide drop-shadow">
+                                  Toca para reproducir
+                                </span>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+
                         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                           <AnimatePresence>
                             {transientIconState?.videoId === videoId && (
