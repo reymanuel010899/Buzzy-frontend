@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, CreditCard, Plus, Trash2, Check, Loader2, AlertCircle } from 'lucide-react';
+import { X, CreditCard, Plus, Trash2, Loader2, AlertCircle } from 'lucide-react';
 import { Button } from '../ui/button';
 import { useDispatch, useSelector } from 'react-redux';
 import { getBankAccounts, addBankAccount, deleteBankAccount } from '../../redux/actions/bankActions';
@@ -13,7 +13,7 @@ interface BankAccountModalProps {
 
 const BankAccountModal: React.FC<BankAccountModalProps> = ({ isOpen, onClose }) => {
     const dispatch = useDispatch();
-    const { accounts, loading, error } = useSelector((state: RootState) => state.bankReducer);
+    const { accounts, loading, error: _error } = useSelector((state: RootState) => state.bankReducer);
     const [showAddForm, setShowAddForm] = useState(false);
     const [formData, setFormData] = useState({
         bank_name: '',

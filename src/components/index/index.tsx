@@ -136,7 +136,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   // Audio refs for sounds
   const audioRefs = useRef<Record<string, HTMLAudioElement | null>>({});
   const [_fullGifts, setFullGifts] = useState<GiftI[] | GiftI | []>([]);
-  const [giftsLoading, setGiftsLoading] = useState(true);
+  const [_giftsLoading, setGiftsLoading] = useState(true);
   // --- R3F Scope for Gift3D ---
   // Memoizar función para evitar recreaciones
   const isVideoContent = useCallback((file: string) => /\.(mp4|webm|ogg|mov)$/i.test(file), []);
@@ -1002,7 +1002,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [storyLikeCounts, setStoryLikeCounts] = useState<{ [key: string]: number }>({});
   const [showStoryLikeAnimation, setShowStoryLikeAnimation] = useState<{ [key: string]: boolean }>({});
 
-  const [gifts, setGifts] = useState<GiftI[]>([]);
+  const [_gifts, setGifts] = useState<GiftI[]>([]);
 
   const handleLikeStory = useCallback(() => {
     if (viewingStoryUserIndex === null) return;

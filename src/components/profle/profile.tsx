@@ -215,7 +215,6 @@ function ProfileSeccion({
     upgrade_required: boolean;
   } | null>(null);
 
-  const weekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
   // Formatear hora 24h → 12h con AM/PM (igual que la imagen)
   const formatTime12h = (time24: string) => {
@@ -547,7 +546,7 @@ console.log(user, "**********")
 
     // If we follow them or it's our profile or there is no clear state, just try to open chat
     setShowMessages(true);
-    setSelectedChat(user?.chat_uuid)
+    setSelectedChat(user?.chat_uuid ?? null)
     navigate("/")
   };
 
@@ -1416,7 +1415,7 @@ console.log(user, "**********")
                     <div className="absolute right-2 bottom-20 md:right-4 md:bottom-24 flex flex-col items-center gap-6 z-20">
                       <div className="relative mb-2">
                         <div className="w-12 h-12 rounded-full border-2 border-white overflow-hidden">
-                          <img src={`${getBaseUrl()}${video.user_id?.profile_picture || user?.profile_picture}`} className="w-full h-full object-cover" alt="user" />
+                          <img src={`${getBaseUrl()}media/${video.user_id?.profile_picture || user?.profile_picture}`} className="w-full h-full object-cover" alt="user" />
                         </div>
                         <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-[#ff0050] rounded-full p-0.5 w-5 h-5 flex items-center justify-center text-white text-xs font-bold">+</div>
                       </div>
@@ -1490,7 +1489,7 @@ console.log(user, "**********")
                 animate={{ y: 0 }}
                 exit={{ y: "100%" }}
                 transition={{ type: "spring", damping: 25, stiffness: 200 }}
-                className="fixed bottom-0 left-0 right-0 h-[60vh] z-[80] bg-[#0c1033] rounded-t-3xl flex flex-col border-t border-[#2a2f5e]"
+                className="fixed bottom-0 left-0 right-0 h-[60vh] z-[80] bg-[#050718] rounded-t-3xl flex flex-col border-t border-[#2a2f5e]"
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="flex items-center justify-between p-4 border-b border-[#2a2f5e]">
@@ -1508,12 +1507,12 @@ console.log(user, "**********")
                         'VIP': 2,
                         'NONE': 3
                       };
-                      const aPlan = a.user_id.subscription_status?.plan?.name?.toUpperCase() || 'NONE';
-                      const bPlan = b.user_id.subscription_status?.plan?.name?.toUpperCase() || 'NONE';
+                      const aPlan = a.user_id.subscription_status?.plan_name?.toUpperCase() || 'NONE';
+                      const bPlan = b.user_id.subscription_status?.plan_name?.toUpperCase() || 'NONE';
                       return (planOrder[aPlan] ?? 4) - (planOrder[bPlan] ?? 4);
                     })
                       .map((c, i) => {
-                        const planName = c.user_id.subscription_status?.plan?.name?.toUpperCase() || 'NONE';
+                        const planName = c.user_id.subscription_status?.plan_name?.toUpperCase() || 'NONE';
                         const isFriend = planName === 'FRIEND';
                         const isPlus = planName === 'PLUS';
                         const isVip = planName === 'VIP';
@@ -1538,7 +1537,7 @@ console.log(user, "**********")
                                     : 'bg-transparent'
                               : 'bg-transparent'
                               }`}>
-                              <img src={`${getBaseUrl()}${c.user_id.profile_picture}`} className="w-8 h-8 rounded-full object-cover border border-black" alt="u" />
+                              <img src={`${getBaseUrl()}media/${c.user_id.profile_picture}`} className="w-8 h-8 rounded-full object-cover border border-black" alt="u" />
                               {(isVip || isFriend) && (
                                 <div className={`absolute -top-1 -right-1 ${isFriend ? 'bg-cyan-400' : 'bg-amber-400'} rounded-full p-0.5 border border-black shadow-sm`}>
                                   <Sparkles size={6} className="text-black" />

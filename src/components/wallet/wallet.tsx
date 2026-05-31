@@ -5,8 +5,6 @@ import { motion } from "framer-motion"
 import { Wallet, Plus, ArrowDown, ArrowUp, Clock } from 'lucide-react';
 import BottomNavbar from "../Layout/ButtonNavar"
 import WalletModal from "./WalletModal";
-import { createTransactions } from "../../redux/actions/createTransactions";
-import { useDispatch } from 'react-redux';
 import { IUser } from "../../interfaces/auth";
 interface Transaction {
   id: string
@@ -28,7 +26,6 @@ type WalletComponentProps = {
 
 const WalletComponent = ({ balances, getWallet, pass_code, wallet_type, user, createDepositSession, withdrawFunds }: WalletComponentProps) => {
   console.log(user)
-  const dispatch = useDispatch();
   const [balance, setBalance] = useState(parseInt(balances?.toString() || "0"))
   const [isWalletModalOpen, setIsWalletModalOpen] = useState(false)
   const [defaultTab, setDefaultTab] = useState<'deposit' | 'withdraw'>('deposit')
@@ -85,12 +82,12 @@ const WalletComponent = ({ balances, getWallet, pass_code, wallet_type, user, cr
 
   const handleAddFunds = (amount: number) => {
     createDepositSession(amount)
-      .catch((err: any) => {
+      .catch((_err: any) => {
         alert("Error al crear la sesión de depósito");
       });
   }
 
-  const handleWithdraw = (amount: number, details: string) => {
+  const handleWithdraw = (amount: number, _details: string) => {
     withdrawFunds(amount)
       .then((res: any) => {
         alert(res.message || "Solicitud de retiro enviada con éxito");

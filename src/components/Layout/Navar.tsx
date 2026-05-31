@@ -874,21 +874,13 @@ const Navbar: React.FC = () => {
                           })
                           .map((chat) => {
                             const planName = chat.other_user.subscription_status?.plan?.name?.toUpperCase();
-                            let borderColor = "border-gray-700/30";
-                            let glowColor = "";
                             let itemBg = "hover:bg-white/5";
 
                             if (planName === 'FRIEND') {
-                              borderColor = "border-[#00f0ff] shadow-[0_0_20px_rgba(0,240,255,0.3)]";
-                              glowColor = "shadow-[#00f0ff]/50";
                               itemBg = "bg-[#00f0ff]/5 hover:bg-[#00f0ff]/10";
                             } else if (planName === 'PLUS') {
-                              borderColor = "border-purple-400/40 shadow-[0_0_15px_rgba(168,85,247,0.2)]";
-                              glowColor = "shadow-purple-400/20";
                               itemBg = "bg-purple-800/5 hover:bg-purple-800/10";
                             } else if (planName === 'VIP') {
-                              borderColor = "border-amber-400/40 shadow-[0_0_15px_rgba(251,191,36,0.15)]";
-                              glowColor = "shadow-amber-400/30";
                               itemBg = "bg-amber-400/5 hover:bg-amber-400/10";
                             }
 
