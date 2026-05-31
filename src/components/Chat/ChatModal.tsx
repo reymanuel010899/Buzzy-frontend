@@ -22,6 +22,7 @@ import ContactSelectionModal from "./ContactSelectionModal"
 
 import { useDispatch, useSelector } from 'react-redux';
 import { listChatRooms } from "../../redux/actions/message/listChatRoom"
+import type { ChatRoom } from "../../redux/reducers/message/listChatRoom"
 import { RootState } from "../../store"
 import { loadChatMessages } from "../../redux/actions/message/chatMeesage"
 import { getAvailabilityStatus } from "../../redux/actions/saveAvailability"
@@ -39,6 +40,8 @@ import { completeUpload } from "../../redux/reducers/uploadProgressReducer";
 import { useNotificationsStore } from "../../context/NotificationsStore";
 import HiddenChatPinModal from "./HiddenChatPinModal";
 import { getChatPrivacyStatus, verifyChatPin } from "../../redux/actions/chatPrivacy";
+import { pickMedia } from "../../hooks/useMediaPicker";
+import { loadChatList } from "../../services/chatCacheDB";
 
 enum ChatFolderFilter {
   Friends = "standard",
@@ -119,7 +122,6 @@ const ChatModal: React.FC = () => {
   }, []);
   const { connections } = useSelector((state: RootState) => state.socialReducer);
   const [messageText, setMessageText] = useState("")
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const attachmentOptions = [
     { icon: <ImageIcon className="text-blue-400" />, label: "Fotos y videos", type: "image/video" },
     { icon: <Camera className="text-pink-400" />, label: "Cámara", type: "camera" },
@@ -131,44 +133,43 @@ const ChatModal: React.FC = () => {
     { icon: <Users className="text-cyan-400" />, label: "Amigo", type: "move_standard" },
   ]
 
-  const handleFileSelect = (type: string) => {
-    const input = fileInputRef.current;
-    if (!input) return;
+  const handleFileSelect = async (type: string) => {
+    setShowAttachmentMenu(false);
+    let file: File | null = null;
 
     switch (type) {
       case "image/video":
-      case "camera":
-        input.accept = "image/*,video/*";
-        if (type === "camera") input.capture = "environment";
-        else input.removeAttribute("capture");
-        input.click();
+      case "camera": {
+        const picked = await pickMedia("any", 100);
+        file = picked?.file ?? null;
         break;
-      case "file":
-        input.accept = ".pdf,.doc,.docx,.txt,.zip";
-        input.removeAttribute("capture");
-        input.click();
+      }
+      case "audio": {
+        const picked = await pickMedia("any", 50);
+        file = picked?.file ?? null;
         break;
-      case "audio":
-        input.accept = "audio/*";
-        input.removeAttribute("capture");
-        input.click();
+      }
+      case "file": {
+        const picked = await pickMedia("any", 50);
+        file = picked?.file ?? null;
         break;
+      }
       case "contact":
         getSocialConnections()(dispatch);
         setShowContactModal(true);
-        break;
+        return;
       case "poll":
       case "event":
       case "sticker":
         handleSystemMessage(type);
-        break;
+        return;
       default:
-        input.accept = "*/*";
-        input.removeAttribute("capture");
-        input.click();
+        return;
     }
 
-    setShowAttachmentMenu(false);
+    if (file && backendMessages?.other_user?.id) {
+      await handleFileUploadDirect(file);
+    }
   };
 
   const handleSendContact = (contact: any) => {
@@ -234,10 +235,13 @@ const ChatModal: React.FC = () => {
     });
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !backendMessages?.other_user?.id) return;
+  const handleFileUploadDirect = async (file: File) => {
+    if (!backendMessages?.other_user?.id) return;
+    await handleFileUploadCore(file);
+  };
 
+  const handleFileUploadCore = async (file: File) => {
+    if (!backendMessages?.other_user?.id) return;
     const formData = new FormData();
     formData.append("recipient_id", backendMessages.other_user.id.toString());
     formData.append("file", file);
@@ -368,16 +372,43 @@ const ChatModal: React.FC = () => {
   const dispatch = useDispatch()
 
   const { chats: backendChats, loading } = useSelector((state: RootState) => state.listChatRoomsReducer)
-  const loginState = useSelector((state: RootState) => state.LoginReducer);
-  const user = loginState?.user || JSON.parse(localStorage.getItem("user") || "{}");
+  const [cachedChats, setCachedChats] = useState<ChatRoom[] | null>(null)
+  const [chatLoadTimeout, setChatLoadTimeout] = useState(false)
+
+  // Cargar cache de IndexedDB directamente al abrir el modal
+  useEffect(() => {
+    if (!showMessages) { setChatLoadTimeout(false); return; }
+    const t = setTimeout(() => setChatLoadTimeout(true), 3000);
+    loadChatList().then(cached => {
+      if (cached.length > 0) setCachedChats(cached);
+    }).catch(() => {});
+    return () => clearTimeout(t);
+  }, [showMessages]);
+
+  // Una vez que Redux tiene chats frescos del servidor, ya no necesitamos el cache local
+  // Solo limpiamos cachedChats si hay internet (datos frescos del servidor)
+  useEffect(() => {
+    if (navigator.onLine && backendChats?.chats && backendChats.chats.length > 0) {
+      setCachedChats(null);
+    }
+  }, [backendChats]);
+
+  // Fuente de verdad: Redux si tiene datos, sino cache local
+  const displayChats = useMemo(
+    () => backendChats?.chats?.length ? backendChats.chats : (cachedChats ?? []),
+    [backendChats, cachedChats]
+  );
+  type ChatUser = { username: string; id?: string | number; profile_picture?: string; subscription_status?: { plan?: { name?: string } } };
+  const loginState = useSelector((state: RootState) => state.LoginReducer as unknown as { user: ChatUser });
+  const user: ChatUser = loginState?.user || JSON.parse(localStorage.getItem("user") || "{}");
   const [lastMessageMap, setLastMessageMap] = useState<Record<string, string>>({});
   const [chatFolderMap, setChatFolderMap] = useState<Record<string, ChatFolderFilter>>({});
 
   useEffect(() => {
-    if (!backendChats?.chats) return;
+    if (!displayChats.length) return;
     setLastMessageMap(prev => {
       const next = { ...prev };
-      for (const chat of backendChats.chats) {
+      for (const chat of displayChats) {
         if (chat.last_message && !next[chat.uuid]) {
           next[chat.uuid] = chat.last_message.content;
         }
@@ -386,19 +417,19 @@ const ChatModal: React.FC = () => {
     });
     setChatFolderMap(prev => {
       const next = { ...prev };
-      for (const chat of backendChats.chats) {
+      for (const chat of displayChats) {
         next[chat.uuid] = chatFolder;
       }
       return next;
     });
-  }, [backendChats, chatFolder]);
+  }, [displayChats, chatFolder]);
 
   const { messages: backendMessages, loading: messagesLoading } = useSelector(
     (state: RootState) => state.chatMessagesReducer
   )
   void messagesLoading;
 
-  const currentBackendChat = backendChats?.chats.find(c => c.uuid === selectedChat) || null
+  const currentBackendChat = displayChats.find(c => c.uuid === selectedChat) || null
 
   useEffect(() => {
     if (selectedChat && currentBackendChat?.other_user?.username) {
@@ -871,16 +902,23 @@ const ChatModal: React.FC = () => {
     }
   }, [showMessages]);
 
+  // Load messages when chat changes
   useEffect(() => {
     if (selectedChat) {
       loadChatMessages(selectedChat)(dispatch);
-      markChatMessagesRead(selectedChat, currentBackendChat?.other_user?.id);
-      // reset search on chat change
       setShowChatSearch(false);
       setChatSearchQuery("");
       setChatSearchResults([]);
     }
-  }, [selectedChat, dispatch, markChatMessagesRead, currentBackendChat?.other_user?.id])
+  }, [selectedChat, dispatch]);
+
+  // Mark as read only once when chat changes (not when messages reload)
+  const markedReadRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selectedChat || markedReadRef.current === selectedChat) return;
+    markedReadRef.current = selectedChat;
+    markChatMessagesRead(selectedChat, currentBackendChat?.other_user?.id);
+  }, [selectedChat, markChatMessagesRead, currentBackendChat?.other_user?.id]);
 
   const seededChatRef = useRef<string | null>(null);
 
@@ -889,6 +927,8 @@ const ChatModal: React.FC = () => {
     setRealtimeMessages([]);
     setReactionsMap({});
     seededChatRef.current = null;
+    markedReadRef.current = null;
+    wsReadSentRef.current = null;
   }, [selectedChat]);
 
   useEffect(() => {
@@ -906,9 +946,12 @@ const ChatModal: React.FC = () => {
     setReactionsMap(seeded);
   }, [backendMessages?.messages, selectedChat]);
 
-  // Once backendMessages loads, notify sender so ✓✓ updates without reload
+  // Once backendMessages loads, notify sender so ✓✓ updates without reload (only once per chat)
+  const wsReadSentRef = useRef<string | null>(null);
   useEffect(() => {
     if (!backendMessages?.other_user?.id || !selectedChat || !showMessages) return;
+    if (wsReadSentRef.current === selectedChat) return;
+    wsReadSentRef.current = selectedChat;
     wsSend({
       type: "messages_read",
       chat_uuid: selectedChat,
@@ -916,6 +959,12 @@ const ChatModal: React.FC = () => {
       reader: user.username,
     });
   }, [backendMessages?.other_user?.id, selectedChat, showMessages, wsSend, user.username]);
+
+  // Scroll instantáneo al abrir un chat, suave al recibir mensajes nuevos
+  useEffect(() => {
+    if (!selectedChat) return;
+    messagesEndRef.current?.scrollIntoView({ behavior: "instant" })
+  }, [selectedChat])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -1042,7 +1091,7 @@ const ChatModal: React.FC = () => {
                 transition={{ type: "spring", damping: 30, stiffness: 300 }}
                 className="fixed inset-x-0 top-0 z-[60] mx-auto w-full max-w-md"
               >
-                <div className="bg-gray-900/95 backdrop-blur-xl border-x border-b border-gray-700/60 rounded-b-2xl shadow-2xl overflow-hidden">
+                <div className="bg-black border-x border-b border-white/8 rounded-b-2xl shadow-2xl overflow-hidden">
                   <div className="flex items-center justify-between px-5 py-4 border-b border-gray-700/50">
                     <h3 className="text-xl font-bold text-white">{t('common:messages.title', 'Mensajes')}</h3>
                     <motion.button
@@ -1068,11 +1117,22 @@ const ChatModal: React.FC = () => {
                         placeholder={t('common:messages.searchPlaceholder', 'Buscar chat...')}
                         value={chatSearchTerm}
                         onChange={(e) => setChatSearchTerm(e.target.value)}
-                        className="block w-full pl-10 pr-3 py-2 border border-gray-700/50 rounded-xl leading-5 bg-[#0c2033] text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-[#00f0ff]/50 focus:border-[#00f0ff]/50 sm:text-sm transition-all shadow-inner"
+                        className="block w-full pl-10 pr-3 py-2 border border-white/8 rounded-xl leading-5 bg-white/5 text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-[#00f0ff]/50 focus:border-[#00f0ff]/50 sm:text-sm transition-all"
                       />
                     </div>
                   </div>
 
+                  {!navigator.onLine && (
+                    <div className="mx-2 mb-2 flex items-center justify-between gap-2 rounded-xl bg-yellow-500/10 border border-yellow-500/30 px-3 py-2">
+                      <span className="text-yellow-400 text-xs">Sin conexión — mostrando chats guardados</span>
+                      <button
+                        onClick={() => listChatRooms({ folder: chatFolder })(dispatch)}
+                        className="text-xs font-bold text-yellow-300 bg-yellow-500/20 px-2 py-1 rounded-lg hover:bg-yellow-500/30 transition-all whitespace-nowrap"
+                      >
+                        Reintentar
+                      </button>
+                    </div>
+                  )}
                   <div className="h-[52vh] overflow-hidden relative">
                     <AnimatePresence mode="wait" initial={false}>
                       <motion.div
@@ -1083,7 +1143,7 @@ const ChatModal: React.FC = () => {
                         transition={{ duration: 0.2, ease: [0.25, 0.46, 0.45, 0.94] }}
                         className="h-full overflow-y-auto pb-3"
                       >
-                    {loading ? (
+                    {(loading || (displayChats.length === 0 && !chatLoadTimeout && backendChats === null && cachedChats === null)) ? (
                       <div className="p-4 space-y-4">
                         {[...Array(5)].map((_, i) => (
                           <div key={i} className="flex items-center gap-3 animate-pulse">
@@ -1095,7 +1155,7 @@ const ChatModal: React.FC = () => {
                           </div>
                         ))}
                       </div>
-                    ) : backendChats && backendChats.chats.length == 0 ? (
+                    ) : displayChats.length === 0 ? (
                       <div className="flex flex-col items-center justify-center h-full py-10 px-8 text-center">
                         {chatFolder === ChatFolderFilter.Hidden ? (
                           <>
@@ -1186,7 +1246,7 @@ const ChatModal: React.FC = () => {
                       </div>
                     ) : (
                       <ul>
-                        {backendChats?.chats
+                        {displayChats
                           .filter(chat => chat.other_user.username.toLowerCase().includes(chatSearchTerm.toLowerCase()) || chat.other_user.name?.toLowerCase().includes(chatSearchTerm.toLowerCase()))
                           .sort((a, b) => {
                             const planOrder: { [key: string]: number } = {
@@ -1293,7 +1353,7 @@ const ChatModal: React.FC = () => {
                   </div>
 
                   {/* Footer nav con iconos */}
-                  <div className="border-t border-white/8 bg-gray-900/80 backdrop-blur-md px-1 py-1">
+                  <div className="border-t border-white/8 bg-black px-1 py-1">
                     <div className="flex items-center justify-around">
                       {[
                         { key: ChatFolderFilter.Friends, icon: Users, label: "Amigos", gradient: "from-cyan-400 to-blue-500", glow: "shadow-cyan-500/40" },
@@ -2054,7 +2114,7 @@ const ChatModal: React.FC = () => {
                             const isMoveKnown = option.type === "move_known";
                             const isMoveStandard = option.type === "move_standard";
                             const isHidden = isHideChat && currentBackendChat?.folder_type === ChatFolderFilter.Hidden;
-                            const isActiveKnown = isMoveKnown && currentBackendChat?.folder_type === ChatFolderFilter.Known;
+                            const isActiveKnown = isMoveKnown && (currentBackendChat?.folder_type as string) === ChatFolderFilter.Known;
                             const isActiveStandard = isMoveStandard && currentBackendChat?.folder_type === ChatFolderFilter.Friends;
                             const isDisabled = false;
                             return (
@@ -2106,13 +2166,6 @@ const ChatModal: React.FC = () => {
                       )}
                     </AnimatePresence>
 
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      className="hidden"
-                      onChange={handleFileUpload}
-                      accept="image/*,video/*"
-                    />
 
                     <div className="flex gap-2 items-center bg-[#181b27]/75 backdrop-blur-xl rounded-full px-2.5 py-1.5 border border-white/8 shadow-[0_4px_24px_rgba(0,0,0,0.5)]">
                       {!isRecording && (
@@ -2233,7 +2286,7 @@ const ChatModal: React.FC = () => {
                 </p>
                 <p className="text-xs text-gray-500 mb-2">Selecciona destinatarios:</p>
                 <div className="max-h-48 overflow-y-auto space-y-1 mb-4">
-                  {backendChats?.chats?.map((chat: any) => {
+                  {displayChats.map((chat) => {
                     const other = chat.other_user;
                     const selected = forwardRecipients.includes(other.id);
                     return (

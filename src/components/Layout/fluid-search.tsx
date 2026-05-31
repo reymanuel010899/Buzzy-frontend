@@ -7,7 +7,7 @@ import { useDispatch, useSelector } from "react-redux"
 import { RootState, AppDispatch } from "../../store"
 import { globalSearch, getTrending, getRecentSearch, deleteRecentSearch } from "../../redux/actions/Search"
 import "../../footer.css"
-import { getBaseUrl, getMediaUrl } from "../../redux/client/api-client"
+import { getMediaUrl } from "../../redux/client/api-client"
 import { createFollower } from "../../redux/actions/createFollower"
 
 interface FluidSearchProps {
@@ -330,7 +330,7 @@ function VideoResult({ video, onClose }: { video: any, onClose: () => void }) {
     >
       <div className="relative w-24 h-14 rounded-lg overflow-hidden flex-shrink-0 bg-white/5 border border-white/5">
         <img
-          src={video.thumbnail_url || `${getBaseUrl()}${video.video_url}#t=0.1`}
+          src={getMediaUrl(video.thumbnail_url) || getMediaUrl(video.video_url)}
           alt={video.description}
           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
         />

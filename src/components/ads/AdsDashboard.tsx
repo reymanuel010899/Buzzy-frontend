@@ -1,6 +1,6 @@
 "use client"
 import React, { useState } from "react"
-import { motion } from "framer-motion"
+// motion removed — not used in this file
 import {
   Users, DollarSign, Rocket, RotateCcw,
   Download, Eye, BarChart2, MousePointer, Pause, Play,

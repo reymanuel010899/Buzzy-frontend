@@ -95,7 +95,8 @@ const listChatRoomsReducer = (
       return {
         ...state,
         loading: false,
-        chats: null,
+        // Conservar chats del cache — no borrar lo que ya se mostró
+        chats: state.chats,
         error: action.payload,
       };
 

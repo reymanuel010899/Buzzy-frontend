@@ -11,28 +11,37 @@ export interface BannerData {
   accent_color: string;
   reveal_content: string;
   countdown_label: string;
+  image_url: string | null;
+  action_url: string | null;
+  action_label: string | null;
+  priority: number;
   expires_at: string | null;
   created_at: string;
 }
 
 interface BannerState {
-  banner: BannerData | null;
-  dismissed: boolean;
+  queue: BannerData[];   // todos los banners pendientes
+  currentIndex: number;  // cuál está mostrando ahora
 }
 
 const initialState: BannerState = {
-  banner: null,
-  dismissed: false,
+  queue: [],
+  currentIndex: 0,
 };
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const bannerReducer = (state = initialState, action: any): BannerState => {
   switch (action.type) {
     case SUCCESS_GET_BANNER:
-      return { banner: action.payload, dismissed: false };
+      return { queue: action.payload ?? [], currentIndex: 0 };
     case FAILED_GET_BANNER:
-      return { ...state, banner: null };
+      return { ...state, queue: [] };
     case DISMISS_BANNER:
-      return { ...state, dismissed: true };
+      // avanza al siguiente; si no hay más, limpia
+      return {
+        queue: state.queue,
+        currentIndex: state.currentIndex + 1,
+      };
     default:
       return state;
   }

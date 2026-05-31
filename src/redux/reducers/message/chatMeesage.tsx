@@ -85,7 +85,7 @@ const chatMessagesReducer = (
       return {
         ...state,
         loading: false,
-        messages: null,
+        messages: state.messages, // conservar cache — no borrar lo que ya se mostró
         error: action.payload,
       };
 

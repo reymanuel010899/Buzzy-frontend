@@ -1,11 +1,11 @@
 "use client"
-import React, { useEffect, useState } from "react"
+import { useEffect, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { X, TrendingUp, Eye, MousePointer, DollarSign, Users, Target, Calendar } from "lucide-react"
 import axios from "axios"
 import { getBaseUrl } from "../../redux/client/api-client"
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid,
+  XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, BarChart, Bar,
 } from "recharts"
 

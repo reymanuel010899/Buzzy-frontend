@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { X, Upload, Sparkles, Video, Image as ImageIcon, AlertCircle, Loader2, CheckCircle2, SlidersHorizontal, ChevronDown, HelpCircle, ImagePlus, Paintbrush, Cuboid, Tv2, Music, Mic, AudioLines, Type, Wand2, Instagram, Facebook, Play, Pause, Volume2, VolumeX, Smartphone } from "lucide-react"
+import { X, Upload, Sparkles, Video, Image as ImageIcon, AlertCircle, Loader2, CheckCircle2, SlidersHorizontal, ChevronDown, HelpCircle, ImagePlus, Paintbrush, Cuboid, Tv2, Music, Mic, AudioLines, Type, Wand2, Instagram, Facebook, Play, VolumeX, Smartphone } from "lucide-react"
 import { getBaseUrl } from "../../redux/client/api-client"
+import { pickMedia } from "../../hooks/useMediaPicker"
 import { useDispatch } from "react-redux"
 import { startUpload } from "../../redux/reducers/uploadProgressReducer"
 
@@ -67,10 +68,9 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose, 
     const [uploadDescription, setUploadDescription] = useState('#BuzzyCreator #ProStudio\n')
     const [syncInstagram, setSyncInstagram] = useState(true)
     const [syncTikTok1, setSyncTikTok1] = useState(false)
-    const [syncTikTok2, setSyncTikTok2] = useState(false)
     const [uploadStatus, setUploadStatus] = useState<'idle' | 'pending' | 'processing' | 'ready' | 'blocked' | 'error'>('idle')
-    const [uploadJobId, setUploadJobId] = useState<number | null>(null)
-    const [safetyLabel, setSafetyLabel] = useState('')
+    const [, setUploadJobId] = useState<number | null>(null)
+    const [safetyLabel, _setSafetyLabel] = useState('')
 
     // Cleanup preview URL on unmount or file change
     useEffect(() => {
@@ -703,23 +703,15 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose, 
                                         </div>
                                         <h3 className="text-2xl font-black text-white mb-2">Subir Nuevo Video</h3>
                                         <p className="text-gray-400 max-w-xs mx-auto mb-10 leading-relaxed text-[15px]">Selecciona un archivo de tu dispositivo para compartirlo con la comunidad de Buzzy.</p>
-                                        <input
-                                            type="file"
-                                            id="video-upload"
-                                            className="hidden"
-                                            accept="video/*"
-                                            onChange={(e) => {
-                                                if (e.target.files && e.target.files[0]) {
-                                                    setUploadFile(e.target.files[0])
-                                                }
+                                        <button
+                                            onClick={async () => {
+                                                const picked = await pickMedia("video", 200);
+                                                if (picked) setUploadFile(picked.file);
                                             }}
-                                        />
-                                        <label
-                                            htmlFor="video-upload"
                                             className="block w-full py-4 bg-white text-black rounded-[20px] font-black text-lg cursor-pointer shadow-[0_0_20px_rgba(255,255,255,0.2)] hover:scale-[1.02] active:scale-95 transition-all text-center"
                                         >
                                             Seleccionar Archivo
-                                        </label>
+                                        </button>
                                     </div>
                                 ) : (
                                     <div className="relative text-left flex flex-col pt-2 max-w-lg mx-auto">

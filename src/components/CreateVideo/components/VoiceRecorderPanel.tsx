@@ -12,11 +12,26 @@ interface VoiceRecorderPanelProps {
 
 type RecordState = "idle" | "recording" | "recorded" | "playing"
 
+// Solicita permiso de micrófono en runtime — necesario en Capacitor Android
+async function requestMicPermission(): Promise<boolean> {
+  try {
+    // Capacitor runtime permissions API
+    const { Permissions } = await import('@capacitor/core') as any
+    if (Permissions?.request) {
+      const result = await Permissions.request({ name: 'microphone' })
+      return result?.state === 'granted'
+    }
+  } catch { /* no Capacitor, continuar con browser API */ }
+
+  // Navegador nativo — el permiso se pide implícitamente en getUserMedia
+  return true
+}
+
 const VoiceRecorderPanel: React.FC<VoiceRecorderPanelProps> = ({ isOpen, onClose, onApply }) => {
   const [recordState, setRecordState] = useState<RecordState>("idle")
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null)
   const [recordedUrl, setRecordedUrl] = useState<string | null>(null)
-  const [elapsed, setElapsed] = useState(0)           // segundos grabando
+  const [elapsed, setElapsed] = useState(0)
   const [waveform, setWaveform] = useState<number[]>(Array(40).fill(4))
   const [error, setError] = useState<string | null>(null)
 
@@ -28,7 +43,6 @@ const VoiceRecorderPanel: React.FC<VoiceRecorderPanelProps> = ({ isOpen, onClose
   const playbackRef = useRef<HTMLAudioElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
 
-  // Limpieza al cerrar
   useEffect(() => {
     if (!isOpen) {
       stopEverything()
@@ -60,6 +74,9 @@ const VoiceRecorderPanel: React.FC<VoiceRecorderPanelProps> = ({ isOpen, onClose
   const startRecording = async () => {
     setError(null)
     try {
+      // En Android solicita el permiso runtime antes de getUserMedia
+      await requestMicPermission()
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       streamRef.current = stream
 
@@ -83,17 +100,18 @@ const VoiceRecorderPanel: React.FC<VoiceRecorderPanelProps> = ({ isOpen, onClose
       }
       drawWave()
 
-      // MediaRecorder
       const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
         ? "audio/webm;codecs=opus"
-        : "audio/webm"
-      const recorder = new MediaRecorder(stream, { mimeType })
+        : MediaRecorder.isTypeSupported("audio/webm")
+          ? "audio/webm"
+          : ""
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
       mediaRecorderRef.current = recorder
       chunksRef.current = []
 
       recorder.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data) }
       recorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: mimeType })
+        const blob = new Blob(chunksRef.current, { type: mimeType || "audio/webm" })
         const url = URL.createObjectURL(blob)
         setRecordedBlob(blob)
         setRecordedUrl(url)
@@ -110,8 +128,12 @@ const VoiceRecorderPanel: React.FC<VoiceRecorderPanelProps> = ({ isOpen, onClose
       setRecordState("recording")
       setElapsed(0)
       timerRef.current = setInterval(() => setElapsed(s => s + 1), 1000)
-    } catch {
-      setError("No se pudo acceder al micrófono. Verifica los permisos.")
+    } catch (err: any) {
+      const isPermission = err?.name === "NotAllowedError" || err?.name === "PermissionDeniedError"
+      setError(isPermission
+        ? "Permiso de micrófono denegado. Ve a Configuración → Apps → Buzzy → Permisos y activa el micrófono."
+        : "No se pudo acceder al micrófono. Verifica los permisos."
+      )
     }
   }
 
@@ -162,7 +184,7 @@ const VoiceRecorderPanel: React.FC<VoiceRecorderPanelProps> = ({ isOpen, onClose
           transition={{ type: "spring", damping: 26, stiffness: 300 }}
           className="absolute inset-x-0 bottom-0 z-50 bg-[#0f0f1a]/95 backdrop-blur-xl rounded-t-2xl border-t border-white/10 p-5 pb-8"
         >
-          {/* Handle — tap to close */}
+          {/* Handle */}
           <div className="flex justify-center cursor-pointer mb-4" onClick={onClose}>
             <div className="w-10 h-1 rounded-full bg-white/30 active:bg-white/60 transition-colors" />
           </div>
@@ -186,7 +208,7 @@ const VoiceRecorderPanel: React.FC<VoiceRecorderPanelProps> = ({ isOpen, onClose
                 transition={{ duration: 0.05 }}
                 className={`w-1.5 rounded-full ${
                   recordState === "recording"
-                    ? "bg-gradient-to-t from-purple-500 to-pink-400"
+                    ? "bg-gradient-to-t from-pink-500 to-orange-400"
                     : "bg-white/20"
                 }`}
               />
@@ -212,7 +234,6 @@ const VoiceRecorderPanel: React.FC<VoiceRecorderPanelProps> = ({ isOpen, onClose
 
           {/* Controles */}
           <div className="flex items-center justify-center gap-4">
-            {/* Descartar */}
             {(recordState === "recorded" || recordState === "playing") && (
               <button
                 onClick={discard}
@@ -222,14 +243,13 @@ const VoiceRecorderPanel: React.FC<VoiceRecorderPanelProps> = ({ isOpen, onClose
               </button>
             )}
 
-            {/* Botón principal: grabar / detener */}
             {(recordState === "idle" || recordState === "recording") && (
               <button
                 onClick={recordState === "recording" ? stopRecording : startRecording}
                 className={`w-16 h-16 rounded-full flex items-center justify-center shadow-lg transition-all ${
                   recordState === "recording"
                     ? "bg-red-500 shadow-red-500/40"
-                    : "bg-gradient-to-br from-purple-500 to-pink-500 shadow-purple-500/40"
+                    : "bg-gradient-to-br from-pink-500 to-orange-400 shadow-pink-500/40"
                 }`}
               >
                 {recordState === "recording"
@@ -239,11 +259,10 @@ const VoiceRecorderPanel: React.FC<VoiceRecorderPanelProps> = ({ isOpen, onClose
               </button>
             )}
 
-            {/* Play/pause de lo grabado */}
             {(recordState === "recorded" || recordState === "playing") && (
               <button
                 onClick={togglePlayback}
-                className="w-16 h-16 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center shadow-lg shadow-purple-500/40"
+                className="w-16 h-16 rounded-full bg-gradient-to-br from-pink-500 to-orange-400 flex items-center justify-center shadow-lg shadow-pink-500/40"
               >
                 {recordState === "playing"
                   ? <Pause size={22} className="text-white" />
@@ -252,11 +271,10 @@ const VoiceRecorderPanel: React.FC<VoiceRecorderPanelProps> = ({ isOpen, onClose
               </button>
             )}
 
-            {/* Aplicar */}
             {(recordState === "recorded" || recordState === "playing") && (
               <button
                 onClick={handleApply}
-                className="w-11 h-11 rounded-full bg-gradient-to-br from-cyan-500 to-cyan-400 flex items-center justify-center shadow-lg shadow-cyan-500/40"
+                className="w-11 h-11 rounded-full bg-gradient-to-br from-orange-400 to-pink-500 flex items-center justify-center shadow-lg shadow-pink-500/40"
               >
                 <Check size={18} className="text-white" />
               </button>
@@ -270,7 +288,7 @@ const VoiceRecorderPanel: React.FC<VoiceRecorderPanelProps> = ({ isOpen, onClose
           )}
           {(recordState === "recorded" || recordState === "playing") && (
             <p className="text-white/30 text-xs text-center mt-5">
-              Pulsa <span className="text-cyan-400">✓</span> para añadir la voz al video
+              Pulsa <span className="text-pink-400">✓</span> para añadir la voz al video
             </p>
           )}
         </motion.div>

@@ -28,168 +28,136 @@ function buildCombinedFilter(filterCss: string, adjustmentsCss: string): string 
   return parts.join(" ") || "none"
 }
 
-/**
- * Applies a CSS-filter string to a canvas context via an off-screen canvas.
- * We draw the source image into an invisible <canvas>, set its CSS filter,
- * then drawImage it back. Because CSS filters don't affect canvas 2D drawImage,
- * we instead parse the filter manually and apply equivalent CanvasRenderingContext2D
- * operations so the output is identical in the recorded video.
- */
-function applyCssFilterToCtx(
-  ctx: CanvasRenderingContext2D,
-  canvas: HTMLCanvasElement,
-  combinedFilter: string
-) {
-  if (!combinedFilter || combinedFilter === "none") return
+// interface ParsedFilter {
+//   fn: string
+//   value: number
+// }
 
-  // We re-draw the current canvas content through an SVG feColorMatrix / feComponentTransfer
-  // or — more practically — we apply an SVG filter via an offscreen canvas trick.
-  // The most reliable cross-browser approach: draw to a tmp canvas with css filter set,
-  // then blit back. This works because the *browser compositor* handles the CSS filter
-  // when we do drawImage of an element that has a CSS filter set.
-  // However for MediaRecorder / canvas.captureStream the filter must be baked in.
+// function parseFilterString(css: string): ParsedFilter[] {
+//   const result: ParsedFilter[] = []
+//   const re = /([\w-]+)\(([^)]+)\)/g
+//   let m: RegExpExecArray | null
+//   while ((m = re.exec(css)) !== null) {
+//     const fn = m[1].toLowerCase()
+//     const raw = m[2].trim()
+//     const value = parseFloat(raw)
+//     if (!isNaN(value)) result.push({ fn, value })
+//   }
+//   return result
+// }
 
-  // Parse individual filter functions and apply them via globalCompositeOperation or
-  // a series of canvas transforms.
-  const filters = parseFilterString(combinedFilter)
+// function applyFiltersToImageData(imageData: ImageData, filters: ParsedFilter[]) {
+//   const d = imageData.data
+//   const len = d.length
 
-  // We apply filters by manipulating pixel data for accuracy.
-  // For performance we use an ImageData approach only for the combined filters.
-  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-  applyFiltersToImageData(imageData, filters)
-  ctx.putImageData(imageData, 0, 0)
-}
+//   // Aggregate values
+//   let brightness = 1
+//   let contrast = 1
+//   let saturate = 1
+//   let sepia = 0
+//   let grayscale = 0
+//   let hueRotate = 0  // degrees
 
-interface ParsedFilter {
-  fn: string
-  value: number
-}
+//   for (const { fn, value } of filters) {
+//     switch (fn) {
+//       case "brightness": brightness *= value; break
+//       case "contrast": contrast *= value; break
+//       case "saturate": saturate *= value; break
+//       case "sepia": sepia += value; break
+//       case "grayscale": grayscale += value; break
+//       case "hue-rotate": hueRotate += value; break
+//     }
+//   }
 
-function parseFilterString(css: string): ParsedFilter[] {
-  const result: ParsedFilter[] = []
-  const re = /([\w-]+)\(([^)]+)\)/g
-  let m: RegExpExecArray | null
-  while ((m = re.exec(css)) !== null) {
-    const fn = m[1].toLowerCase()
-    const raw = m[2].trim()
-    const value = parseFloat(raw)
-    if (!isNaN(value)) result.push({ fn, value })
-  }
-  return result
-}
+//   sepia = Math.min(1, sepia)
+//   grayscale = Math.min(1, grayscale)
 
-function applyFiltersToImageData(imageData: ImageData, filters: ParsedFilter[]) {
-  const d = imageData.data
-  const len = d.length
+//   for (let i = 0; i < len; i += 4) {
+//     let r = d[i]
+//     let g = d[i + 1]
+//     let b = d[i + 2]
 
-  // Aggregate values
-  let brightness = 1
-  let contrast = 1
-  let saturate = 1
-  let sepia = 0
-  let grayscale = 0
-  let hueRotate = 0  // degrees
+//     // 1) Brightness
+//     if (brightness !== 1) {
+//       r = clamp(r * brightness)
+//       g = clamp(g * brightness)
+//       b = clamp(b * brightness)
+//     }
 
-  for (const { fn, value } of filters) {
-    switch (fn) {
-      case "brightness": brightness *= value; break
-      case "contrast": contrast *= value; break
-      case "saturate": saturate *= value; break
-      case "sepia": sepia += value; break
-      case "grayscale": grayscale += value; break
-      case "hue-rotate": hueRotate += value; break
-    }
-  }
+//     // 2) Contrast
+//     if (contrast !== 1) {
+//       r = clamp((r - 128) * contrast + 128)
+//       g = clamp((g - 128) * contrast + 128)
+//       b = clamp((b - 128) * contrast + 128)
+//     }
 
-  sepia = Math.min(1, sepia)
-  grayscale = Math.min(1, grayscale)
+//     // 3) Grayscale
+//     if (grayscale > 0) {
+//       const gray = 0.299 * r + 0.587 * g + 0.114 * b
+//       r = lerp(r, gray, grayscale)
+//       g = lerp(g, gray, grayscale)
+//       b = lerp(b, gray, grayscale)
+//     }
 
-  for (let i = 0; i < len; i += 4) {
-    let r = d[i]
-    let g = d[i + 1]
-    let b = d[i + 2]
+//     // 4) Sepia
+//     if (sepia > 0) {
+//       const sr = clamp(r * 0.393 + g * 0.769 + b * 0.189)
+//       const sg = clamp(r * 0.349 + g * 0.686 + b * 0.168)
+//       const sb = clamp(r * 0.272 + g * 0.534 + b * 0.131)
+//       r = lerp(r, sr, sepia)
+//       g = lerp(g, sg, sepia)
+//       b = lerp(b, sb, sepia)
+//     }
 
-    // 1) Brightness
-    if (brightness !== 1) {
-      r = clamp(r * brightness)
-      g = clamp(g * brightness)
-      b = clamp(b * brightness)
-    }
+//     // 5) Saturate
+//     if (saturate !== 1) {
+//       const gray = 0.299 * r + 0.587 * g + 0.114 * b
+//       r = clamp(lerp(gray, r, saturate))
+//       g = clamp(lerp(gray, g, saturate))
+//       b = clamp(lerp(gray, b, saturate))
+//     }
 
-    // 2) Contrast
-    if (contrast !== 1) {
-      r = clamp((r - 128) * contrast + 128)
-      g = clamp((g - 128) * contrast + 128)
-      b = clamp((b - 128) * contrast + 128)
-    }
+//     // 6) Hue-rotate
+//     if (hueRotate !== 0) {
+//       const [hr, hg, hb] = rotateHue(r, g, b, hueRotate)
+//       r = hr; g = hg; b = hb
+//     }
 
-    // 3) Grayscale
-    if (grayscale > 0) {
-      const gray = 0.299 * r + 0.587 * g + 0.114 * b
-      r = lerp(r, gray, grayscale)
-      g = lerp(g, gray, grayscale)
-      b = lerp(b, gray, grayscale)
-    }
+//     d[i] = r
+//     d[i + 1] = g
+//     d[i + 2] = b
+//   }
+// }
 
-    // 4) Sepia
-    if (sepia > 0) {
-      const sr = clamp(r * 0.393 + g * 0.769 + b * 0.189)
-      const sg = clamp(r * 0.349 + g * 0.686 + b * 0.168)
-      const sb = clamp(r * 0.272 + g * 0.534 + b * 0.131)
-      r = lerp(r, sr, sepia)
-      g = lerp(g, sg, sepia)
-      b = lerp(b, sb, sepia)
-    }
+// function clamp(v: number): number {
+//   return v < 0 ? 0 : v > 255 ? 255 : Math.round(v)
+// }
 
-    // 5) Saturate
-    if (saturate !== 1) {
-      const gray = 0.299 * r + 0.587 * g + 0.114 * b
-      r = clamp(lerp(gray, r, saturate))
-      g = clamp(lerp(gray, g, saturate))
-      b = clamp(lerp(gray, b, saturate))
-    }
+// function lerp(a: number, b: number, t: number): number {
+//   return a + (b - a) * t
+// }
 
-    // 6) Hue-rotate
-    if (hueRotate !== 0) {
-      const [hr, hg, hb] = rotateHue(r, g, b, hueRotate)
-      r = hr; g = hg; b = hb
-    }
-
-    d[i] = r
-    d[i + 1] = g
-    d[i + 2] = b
-  }
-}
-
-function clamp(v: number): number {
-  return v < 0 ? 0 : v > 255 ? 255 : Math.round(v)
-}
-
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t
-}
-
-function rotateHue(r: number, g: number, b: number, deg: number): [number, number, number] {
-  const rad = (deg * Math.PI) / 180
-  const cos = Math.cos(rad)
-  const sin = Math.sin(rad)
-  const nr = clamp(
-    r * (0.213 + cos * 0.787 - sin * 0.213) +
-    g * (0.715 - cos * 0.715 - sin * 0.715) +
-    b * (0.072 - cos * 0.072 + sin * 0.928)
-  )
-  const ng = clamp(
-    r * (0.213 - cos * 0.213 + sin * 0.143) +
-    g * (0.715 + cos * 0.285 + sin * 0.140) +
-    b * (0.072 - cos * 0.072 - sin * 0.283)
-  )
-  const nb = clamp(
-    r * (0.213 - cos * 0.213 - sin * 0.787) +
-    g * (0.715 - cos * 0.715 + sin * 0.715) +
-    b * (0.072 + cos * 0.928 + sin * 0.072)
-  )
-  return [nr, ng, nb]
-}
+// function rotateHue(r: number, g: number, b: number, deg: number): [number, number, number] {
+//   const rad = (deg * Math.PI) / 180
+//   const cos = Math.cos(rad)
+//   const sin = Math.sin(rad)
+//   const nr = clamp(
+//     r * (0.213 + cos * 0.787 - sin * 0.213) +
+//     g * (0.715 - cos * 0.715 - sin * 0.715) +
+//     b * (0.072 - cos * 0.072 + sin * 0.928)
+//   )
+//   const ng = clamp(
+//     r * (0.213 - cos * 0.213 + sin * 0.143) +
+//     g * (0.715 + cos * 0.285 + sin * 0.140) +
+//     b * (0.072 - cos * 0.072 - sin * 0.283)
+//   )
+//   const nb = clamp(
+//     r * (0.213 - cos * 0.213 - sin * 0.787) +
+//     g * (0.715 - cos * 0.715 + sin * 0.715) +
+//     b * (0.072 + cos * 0.928 + sin * 0.072)
+//   )
+//   return [nr, ng, nb]
+// }
 
 // ── Text drawing ──────────────────────────────────────────────────────────────
 

@@ -5,10 +5,10 @@
   "addFunds": "Add Funds",
   "withdrawAction": "Withdraw",
   "history": {
-    "title": "Transaction History",
+    "title": "History",
     "subtitle": "Showing the latest {{limit}} transactions",
     "empty": "No transactions",
-    "emptyHint": "Transactions will appear here when you move funds in your wallet",
+    "emptyHint": "",
     "loadMore": "Load more",
     "filter": {
       "all": "All",

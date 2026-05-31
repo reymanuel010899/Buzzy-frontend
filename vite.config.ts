@@ -17,10 +17,22 @@ export default defineConfig({
   ],
   build: {
     sourcemap: false,
+    chunkSizeWarningLimit: 600,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-redux': ['redux', 'react-redux', '@reduxjs/toolkit'],
+          'vendor-motion': ['framer-motion'],
+          'vendor-i18n': ['react-i18next', 'i18next'],
+          'vendor-ui': ['lucide-react'],
+        },
+      },
+    },
   },
   server: {
+    host: true,
     sourcemapIgnoreList: () => true,
-    allowedHosts: ['stinky-dust-five.ngrok-free.dev'],
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:8000',

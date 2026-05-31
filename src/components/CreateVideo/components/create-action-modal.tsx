@@ -6,7 +6,7 @@ import {
   X, Upload, Sparkles, Music, Wand2,
   Scissors, Type, Layers, Volume2, VolumeX,
   ChevronRight, ChevronLeft, Play, Clock, Sliders,
-  Image, Palette, Mic, Hash, ArrowLeft, Globe, Lock, Users, AtSign, MapPin,
+  Image, Palette, Mic, Hash, ArrowLeft, Globe, Lock, Users, AtSign,
   Loader2, Check
 } from "lucide-react"
 import ImaginaAIModal from "./imagina-ai-modal"
@@ -22,8 +22,9 @@ import MixerPanel from "./MixerPanel"
 import VolumePanel from "./VolumePanel"
 import VoiceRecorderPanel from "./VoiceRecorderPanel"
 import { apiClient } from "../../../redux/client/api-client"
+import { pickMedia } from "../../../hooks/useMediaPicker"
 import { processVideoWithText } from "../utils/processVideoWithText"
-import { useVideoAudio } from "../../../hooks/useVideoAudio"
+import { useVideoAudio, preloadTracks } from "../../../hooks/useVideoAudio"
 import { useAudioTracks } from "../../../hooks/useAudioTracks"
 import { generateAIAndWait } from "@/services/aiService"
 
@@ -56,6 +57,16 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
   const [currentStep, setCurrentStep] = useState<'edit' | 'publish' | 'share'>('edit')
   const [description, setDescription] = useState('')
   const [privacy, setPrivacy] = useState<'public' | 'followers' | 'private'>('public')
+  const [location] = useState('')
+  // Mention suggestions
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null)
+  const [mentionResults, setMentionResults] = useState<{ id: number; username: string; profile_picture: string | null }[]>([])
+  const [mentionLoading, setMentionLoading] = useState(false)
+  // Hashtag suggestions
+  const [hashtagQuery, setHashtagQuery] = useState<string | null>(null)
+  const [hashtagResults, setHashtagResults] = useState<{ name: string; videos_count: number }[]>([])
+  const [hashtagLoading, setHashtagLoading] = useState(false)
+  const descTextareaRef = useRef<HTMLTextAreaElement>(null)
   const [socialNetworks, setSocialNetworks] = useState({
     instagram: false,
     tiktok: false,
@@ -152,6 +163,16 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
 
   const audioControls = useVideoAudio({ videoRef })
   const { tracks: apiTracks } = useAudioTracks()
+
+  const handlePickVideo = async () => {
+    const picked = await pickMedia("video", 200)
+    if (picked) setUploadFile(picked.file)
+  }
+
+  // const handleRecordVideo = async () => {
+  //   const picked = await pickMedia("video", 200, "camera")
+  //   if (picked) setUploadFile(picked.file)
+  // }
 
   // Keep refs in sync
   useEffect(() => { trimStartRef.current = trimStart }, [trimStart])
@@ -377,6 +398,7 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
       const formData = new FormData()
       formData.append('video', fileToUpload, uploadFile.name)
       formData.append('description', description)
+      if (location.trim()) formData.append('location', location.trim())
       if (audioData.audio_id && audioControls.selectedTrack) {
         formData.append('audio_id', audioData.audio_id)
         formData.append('audio_url', audioControls.selectedTrack.audio_url)
@@ -386,12 +408,17 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
         formData.append('audio_artist', audioControls.selectedTrack.artist)
         formData.append('audio_cover', audioControls.selectedTrack.cover)
         formData.append('audio_trim_start', String(audioData.trim_start ?? 0))
+        formData.append('audio_trim_end', String(audioData.trim_end ?? 0))
       }
+      formData.append('privacy', privacy)
       await apiClient.post('api/videos/create/', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
       handleClose()
     } catch (e: unknown) {
+      const status = (e as { response?: { status?: number } })?.response?.status
+      // 401 is handled by the interceptor (redirects to login) — don't show an error here
+      if (status === 401) return
       const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error
       setPublishError(msg || 'Error al publicar. Intenta de nuevo.')
     } finally {
@@ -501,6 +528,11 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
     setUploadPreview(null)
     setCurrentStep('edit')
     setDescription('')
+
+    setMentionQuery(null)
+    setMentionResults([])
+    setHashtagQuery(null)
+    setHashtagResults([])
     setSocialNetworks({ instagram: false, tiktok: false, facebook: false })
     setShowTrimmer(false)
     setFrames([])
@@ -574,6 +606,97 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
       endDirectorProcessing()
       setDirectorProcessingError(null)
     }
+  }
+
+  // ── Description helpers ───────────────────────────────────────────────────
+
+  const insertAtCursor = (insert: string) => {
+    const el = descTextareaRef.current
+    if (!el) { setDescription(d => d + insert); return }
+    const start = el.selectionStart ?? description.length
+    const end   = el.selectionEnd   ?? description.length
+    const next  = description.slice(0, start) + insert + description.slice(end)
+    setDescription(next)
+    requestAnimationFrame(() => {
+      el.focus()
+      el.setSelectionRange(start + insert.length, start + insert.length)
+    })
+  }
+
+  const handleDescriptionChange = (val: string) => {
+    setDescription(val)
+    const el = descTextareaRef.current
+    const cursor = el?.selectionStart ?? val.length
+    const textBefore = val.slice(0, cursor)
+
+    const mentionMatch = textBefore.match(/@(\w*)$/)
+    const hashtagMatch = textBefore.match(/#(\w*)$/)
+
+    if (mentionMatch) {
+      setMentionQuery(mentionMatch[1])
+      setHashtagQuery(null)
+      setHashtagResults([])
+    } else if (hashtagMatch) {
+      setHashtagQuery(hashtagMatch[1])
+      setMentionQuery(null)
+      setMentionResults([])
+    } else {
+      setMentionQuery(null)
+      setMentionResults([])
+      setHashtagQuery(null)
+      setHashtagResults([])
+    }
+  }
+
+  const pickHashtag = (name: string) => {
+    const el = descTextareaRef.current
+    const cursor = el?.selectionStart ?? description.length
+    const textBefore = description.slice(0, cursor)
+    const replaced = textBefore.replace(/#(\w*)$/, `#${name} `)
+    setDescription(replaced + description.slice(cursor))
+    setHashtagQuery(null)
+    setHashtagResults([])
+    requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(replaced.length, replaced.length) })
+  }
+
+  // Search users when mentionQuery changes
+  useEffect(() => {
+    if (mentionQuery === null) return
+    if (mentionQuery.length === 0) { setMentionResults([]); return }
+    setMentionLoading(true)
+    const timer = setTimeout(async () => {
+      try {
+        const res = await apiClient.get(`/api/search/global/?q=${encodeURIComponent(mentionQuery)}`)
+        setMentionResults((res.data.users ?? []).slice(0, 6))
+      } catch { setMentionResults([]) }
+      finally { setMentionLoading(false) }
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [mentionQuery])
+
+  // Search hashtags when hashtagQuery changes
+  useEffect(() => {
+    if (hashtagQuery === null) return
+    setHashtagLoading(true)
+    const timer = setTimeout(async () => {
+      try {
+        const res = await apiClient.get(`/api/hashtags/search/?q=${encodeURIComponent(hashtagQuery)}`)
+        setHashtagResults(res.data ?? [])
+      } catch { setHashtagResults([]) }
+      finally { setHashtagLoading(false) }
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [hashtagQuery])
+
+  const pickMention = (username: string) => {
+    const el = descTextareaRef.current
+    const cursor = el?.selectionStart ?? description.length
+    const textBefore = description.slice(0, cursor)
+    const replaced = textBefore.replace(/@(\w*)$/, `@${username} `)
+    setDescription(replaced + description.slice(cursor))
+    setMentionQuery(null)
+    setMentionResults([])
+    requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(replaced.length, replaced.length) })
   }
 
   const handleNext = () => {
@@ -767,23 +890,23 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
   type ToolItem = { icon: React.ElementType; label: string; color: string; onClick?: () => void; disabled?: boolean }
 
   const editTools: ToolItem[] = [
-    { icon: Scissors, label: 'Recortar', color: 'from-cyan-500 to-cyan-400', onClick: openTrimmer },
-    { icon: Type, label: 'Texto', color: 'from-purple-500 to-purple-400', onClick: () => setShowTextEditor(true) },
+    { icon: Scissors, label: 'Recortar', color: 'from-cyan-400 to-purple-600', onClick: openTrimmer },
+    { icon: Type, label: 'Texto', color: 'from-orange-400 to-pink-400', onClick: () => setShowTextEditor(true) },
     { icon: Layers, label: 'Capas', color: 'from-pink-500 to-pink-400', onClick: () => { setShowLayersPanel(true); videoRef.current?.pause() } },
     { icon: Clock, label: 'Duración', color: 'from-blue-500 to-blue-400', onClick: () => setShowSpeedPanel(true) },
   ]
 
   const effectTools: ToolItem[] = [
     { icon: Sparkles, label: 'Filtros', color: 'from-violet-500 to-violet-400', onClick: () => setShowFilterPanel(true) },
-    { icon: Palette, label: 'Ajustes', color: 'from-cyan-500 to-teal-400', onClick: () => setShowAdjustments(true) },
+    { icon: Palette, label: 'Ajustes', color: 'from-orange-500 to-pink-400', onClick: () => setShowAdjustments(true) },
     { icon: Wand2, label: 'IA', color: 'from-purple-500 to-pink-400', onClick: () => setShowDirectorAI(true), disabled: true },
     { icon: Image, label: 'Stickers', color: 'from-amber-500 to-orange-400', onClick: () => setShowStickerPanel(true) },
   ]
 
   const audioTools: ToolItem[] = [
-    { icon: Music, label: 'Música', color: 'from-cyan-500 to-cyan-400', onClick: () => setShowMusicSelector(true) },
-    { icon: Mic, label: 'Voz', color: 'from-purple-500 to-purple-400', onClick: () => setShowVoicePanel(true) },
-    { icon: Sliders, label: 'Mezclar', color: 'from-pink-500 to-pink-400', onClick: () => setShowMixerPanel(true) },
+    { icon: Music, label: 'Música', color: 'from-cyan-400 to-purple-600', onClick: () => { preloadTracks(apiTracks, 4); setShowMusicSelector(true) } },
+    { icon: Mic, label: 'Voz', color: 'from-cyan-400 to-blue-500', onClick: () => setShowVoicePanel(true) },
+    { icon: Sliders, label: 'Mezclar', color: 'from-cyan-400 to-purple-600', onClick: () => setShowMixerPanel(true) },
     { icon: Volume2, label: 'Volumen', color: 'from-blue-500 to-blue-400', onClick: () => setShowVolumePanel(true) },
   ]
 
@@ -864,7 +987,7 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
             <div className="h-full flex flex-col">
               {/* Gradient Background */}
               <div className="absolute inset-0 overflow-hidden">
-                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[600px] bg-gradient-to-b from-cyan-500/20 via-purple-500/10 to-transparent rounded-full blur-3xl" />
+                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[600px] bg-gradient-to-b from-purple-600/20 via-blue-500/10 to-transparent rounded-full blur-3xl" />
                 <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-gradient-to-tr from-purple-600/20 to-transparent rounded-full blur-3xl" />
               </div>
 
@@ -888,43 +1011,43 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
                   transition={{ delay: 0.1 }}
                   className="text-center w-full max-w-sm"
                 >
-                  <input
-                    type="file"
-                    id="video-upload"
-                    className="hidden"
-                    accept="video/*"
-                    onChange={(e) => {
-                      if (e.target.files && e.target.files[0]) {
-                        setUploadFile(e.target.files[0])
-                      }
-                    }}
-                  />
-                  <label htmlFor="video-upload" className="block cursor-pointer group">
+                  <button type="button" onClick={handlePickVideo} className="block cursor-pointer group w-full text-center">
                     <div className="relative mx-auto w-32 h-32 mb-6">
-                      <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-cyan-400 via-purple-500 to-pink-500 animate-spin-slow opacity-70 blur-sm"
+                      <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-purple-600 via-pink-500 to-purple-600 animate-spin-slow opacity-70 blur-sm"
                         style={{ animationDuration: '3s' }}
                       />
                       <div className="absolute inset-1 rounded-2xl bg-[#0a0a12]" />
-                      <div className="absolute inset-2 rounded-xl bg-gradient-to-br from-cyan-500/10 to-purple-500/10 border border-white/10 flex items-center justify-center group-hover:border-cyan-500/50 transition-all">
+                      <div className="absolute inset-2 rounded-xl bg-gradient-to-br from-cyan-500/10 to-blue-400/10 border border-white/10 flex items-center justify-center group-hover:border-cyan-500/50 transition-all">
                         <Upload size={36} className="text-cyan-400 group-hover:scale-110 transition-transform" />
                       </div>
                     </div>
 
                     <h2 className="text-xl font-bold text-white mb-2">
-                      Subir <span className="bg-gradient-to-r from-cyan-400 to-purple-500 bg-clip-text text-transparent">Video</span>
+                      Subir <span className="bg-gradient-to-r from-cyan-400 to-purple-600 bg-clip-text text-transparent">Video</span>
                     </h2>
                     <p className="text-gray-400 text-sm mb-6">
                       Comparte momentos únicos con Buzzy
                     </p>
-                  </label>
+                  </button>
 
-                  <label
-                    htmlFor="video-upload"
-                    className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-purple-600 text-white font-semibold cursor-pointer hover:shadow-lg hover:shadow-cyan-500/25 transition-all hover:scale-105 active:scale-95 text-sm"
-                  >
-                    <Upload size={18} />
-                    Seleccionar Video
-                  </label>
+                  <div className="flex flex-col items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={handlePickVideo}
+                      className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-cyan-400 to-purple-600 text-white font-semibold cursor-pointer hover:shadow-lg hover:shadow-cyan-400/25 transition-all hover:scale-105 active:scale-95 text-sm"
+                    >
+                      <Upload size={18} />
+                      Seleccionar Video
+                    </button>
+                    {/* <button
+                      type="button"
+                      onClick={handleRecordVideo}
+                      className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-white/10 border border-white/10 text-white font-semibold cursor-pointer hover:bg-white/15 transition-all hover:scale-105 active:scale-95 text-sm"
+                    >
+                      <Camera size={18} />
+                      Grabar Video
+                    </button> */}
+                  </div>
                 </motion.div>
               </div>
 
@@ -946,7 +1069,7 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
                     <div className="flex-1 text-left">
                       <div className="flex items-center gap-2">
                         <span className="text-white font-medium text-sm">Generar con IA</span>
-                        <span className="px-1.5 py-0.5 rounded-full bg-gradient-to-r from-cyan-500 to-purple-500 text-[9px] font-bold text-white">
+                        <span className="px-1.5 py-0.5 rounded-full bg-gradient-to-r from-cyan-400 to-purple-600 text-[9px] font-bold text-white">
                           NUEVO
                         </span>
                       </div>
@@ -1189,13 +1312,13 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
                 </button>
 
                 <button
-                  onClick={() => setShowMusicSelector(true)}
+                  onClick={() => { preloadTracks(apiTracks, 4); setShowMusicSelector(true) }}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg backdrop-blur-md border transition-all ${appliedMusic
-                      ? 'bg-gradient-to-r from-cyan-500/20 to-purple-500/20 border-cyan-500/50'
+                      ? 'bg-gradient-to-r from-cyan-400/20 to-purple-600/20 border-cyan-400/50'
                       : 'bg-black/50 border-white/10'
                     }`}
                 >
-                  <Music size={14} className={appliedMusic ? 'text-cyan-400' : 'text-cyan-400'} />
+                  <Music size={14} className={appliedMusic ? 'text-cyan-400' : 'text-white/70'} />
                   <span className="text-white text-xs font-medium max-w-[100px] truncate">
                     {appliedMusic ? appliedMusic.track.title : 'Añadir Sonido'}
                   </span>
@@ -1396,7 +1519,7 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
                                   )}
                                   <button
                                     onClick={applyTrim}
-                                    className="flex-1 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-cyan-400 text-white text-xs font-semibold flex items-center justify-center gap-1"
+                                    className="flex-1 py-2 rounded-xl bg-gradient-to-r from-cyan-400 to-purple-600 text-white text-xs font-semibold flex items-center justify-center gap-1"
                                   >
                                     <Check size={13} />
                                     Aplicar
@@ -1416,7 +1539,7 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
                                   {/* Trim range indicator when applied */}
                                   {trimApplied && (
                                     <div
-                                      className="absolute inset-y-0 bg-cyan-500/20"
+                                      className="absolute inset-y-0 bg-cyan-400/20"
                                       style={{
                                         left: `${trimStart * 100}%`,
                                         width: `${(trimEnd - trimStart) * 100}%`,
@@ -1424,7 +1547,7 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
                                     />
                                   )}
                                   <motion.div
-                                    className="absolute inset-y-0 left-0 bg-gradient-to-r from-cyan-400 to-purple-500 rounded-full"
+                                    className="absolute inset-y-0 left-0 bg-gradient-to-r from-cyan-400 to-purple-600 rounded-full"
                                     style={{ width: `${progress}%` }}
                                   />
                                 </div>
@@ -1447,7 +1570,7 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
                                 key={tab}
                                 onClick={() => setActiveTab(tab)}
                                 className={`px-4 py-1.5 rounded-lg text-xs font-medium transition-all ${activeTab === tab
-                                    ? 'bg-gradient-to-r from-cyan-500 to-purple-600 text-white'
+                                    ? 'bg-gradient-to-r from-cyan-400 to-purple-600 text-white'
                                     : 'bg-[#1a1a2e] border border-white/20 text-white/75 hover:text-white'
                                   }`}
                               >
@@ -1526,7 +1649,7 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
 
                             <button
                               onClick={handleNext}
-                              className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-purple-600 hover:shadow-lg hover:shadow-cyan-500/25 transition-all"
+                              className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-400 to-purple-600 hover:shadow-lg hover:shadow-cyan-400/25 transition-all"
                             >
                               <span className="text-white font-semibold text-sm">Siguiente</span>
                               <ChevronRight size={16} className="text-white" />
@@ -1544,40 +1667,130 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
                           transition={{ type: "spring", stiffness: 300, damping: 30 }}
                           className="px-4 pb-6"
                         >
-                          {/* Description Input - Smaller */}
-                          <div className="mb-2">
-                            <textarea
-                              value={description}
-                              onChange={(e) => setDescription(e.target.value)}
-                              placeholder="Escribe una descripción..."
-                              className="w-full h-14 px-3 py-2 rounded-xl bg-white/5 border border-white/10 focus:border-cyan-500/50 text-white text-xs placeholder-gray-500 resize-none outline-none transition-all"
-                            />
-                          </div>
+                           {/* Mention suggestions — fuera del div del textarea para evitar overflow-hidden */}
+                          {mentionQuery !== null && (
+                            <div className="mb-2 rounded-2xl border border-white/10 bg-[#14141f] overflow-hidden shadow-2xl">
+                              {/* Header */}
+                              <div className="px-3 py-2 border-b border-white/5 flex items-center gap-1.5">
+                                <AtSign size={11} className="text-orange-400" />
+                                <span className="text-[10px] text-white/50 font-medium">Mencionar usuario</span>
+                              </div>
 
-                          {/* Quick Options */}
+                              {mentionLoading && (
+                                <div className="px-3 py-3 flex items-center gap-2">
+                                  <Loader2 size={13} className="text-cyan-400 animate-spin" />
+                                  <span className="text-[11px] text-white/40">Buscando…</span>
+                                </div>
+                              )}
+
+                              {!mentionLoading && mentionResults.length === 0 && mentionQuery.length > 0 && (
+                                <div className="px-3 py-3 text-[11px] text-white/40 text-center">
+                                  Sin resultados para "@{mentionQuery}"
+                                </div>
+                              )}
+
+                              {!mentionLoading && mentionQuery.length === 0 && (
+                                <div className="px-3 py-3 text-[11px] text-white/40 text-center">
+                                  Escribe un nombre para buscar
+                                </div>
+                              )}
+
+                              {mentionResults.map(u => (
+                                <button
+                                  key={u.id}
+                                  onPointerDown={(e) => { e.preventDefault(); pickMention(u.username) }}
+                                  className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/5 active:bg-white/10 transition-colors border-b border-white/[0.04] last:border-0"
+                                >
+                                  <img
+                                    src={u.profile_picture ?? `https://picsum.photos/seed/${u.id}/32/32`}
+                                    className="w-8 h-8 rounded-full object-cover flex-shrink-0 border border-white/10"
+                                    alt=""
+                                  />
+                                  <div className="flex-1 text-left min-w-0">
+                                    <p className="text-white text-xs font-semibold truncate">@{u.username}</p>
+                                  </div>
+                                  <div className="w-5 h-5 rounded-full bg-orange-400/20 flex items-center justify-center flex-shrink-0">
+                                    <AtSign size={10} className="text-orange-400" />
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Hashtag suggestions */}
+                          {hashtagQuery !== null && (
+                            <div className="mb-2 rounded-2xl border border-white/10 bg-[#14141f] overflow-hidden shadow-2xl">
+                              <div className="px-3 py-2 border-b border-white/5 flex items-center gap-1.5">
+                                <Hash size={11} className="text-cyan-400" />
+                                <span className="text-[10px] text-white/50 font-medium">Hashtags populares</span>
+                              </div>
+
+                              {hashtagLoading && (
+                                <div className="px-3 py-3 flex items-center gap-2">
+                                  <Loader2 size={13} className="text-cyan-400 animate-spin" />
+                                  <span className="text-[11px] text-white/40">Buscando…</span>
+                                </div>
+                              )}
+
+                              {!hashtagLoading && hashtagResults.length === 0 && (
+                                <div className="px-3 py-3 text-[11px] text-white/40 text-center">
+                                  Sin hashtags encontrados
+                                </div>
+                              )}
+
+                              {hashtagResults.map(h => (
+                                <button
+                                  key={h.name}
+                                  onPointerDown={(e) => { e.preventDefault(); pickHashtag(h.name) }}
+                                  className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/5 active:bg-white/10 transition-colors border-b border-white/[0.04] last:border-0"
+                                >
+                                  <div className="w-8 h-8 rounded-full bg-pink-500/15 flex items-center justify-center flex-shrink-0">
+                                    <Hash size={14} className="text-cyan-400" />
+                                  </div>
+                                  <div className="flex-1 text-left min-w-0">
+                                    <p className="text-white text-xs font-semibold truncate">#{h.name}</p>
+                                    <p className="text-white/40 text-[10px]">{h.videos_count.toLocaleString()} videos</p>
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+
                           <div className="flex gap-1.5 mb-2">
-                            <button className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 hover:border-cyan-500/30 transition-all">
+                            <button
+                              onClick={() => insertAtCursor('#')}
+                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 hover:border-cyan-400/30 transition-all"
+                            >
                               <Hash size={12} className="text-cyan-400" />
                               <span className="text-white text-[10px]">Hashtags</span>
                             </button>
-                            <button className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 hover:border-cyan-500/30 transition-all">
-                              <AtSign size={12} className="text-purple-400" />
+                            <button
+                              onClick={() => insertAtCursor('@')}
+                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 hover:border-cyan-400/30 transition-all"
+                            >
+                              <AtSign size={12} className="text-orange-400" />
                               <span className="text-white text-[10px]">Mencionar</span>
                             </button>
-                            <button className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 hover:border-cyan-500/30 transition-all">
-                              <MapPin size={12} className="text-pink-400" />
-                              <span className="text-white text-[10px]">Ubicación</span>
-                            </button>
+                          </div>
+                          {/* Description */}
+                          <div className="mb-2">
+                            <textarea
+                              ref={descTextareaRef}
+                              value={description}
+                              onChange={(e) => handleDescriptionChange(e.target.value)}
+                              placeholder="Escribe una descripción..."
+                              className="w-full h-14 px-3 py-2 rounded-xl bg-black/60 backdrop-blur-md border border-white/20 focus:border-cyan-400/50 text-white text-xs placeholder-gray-400 resize-none outline-none transition-all shadow-[inset_0_1px_3px_rgba(0,0,0,0.5)]"
+                            />
                           </div>
 
-                          {/* Privacy Options - Compact */}
+                          {/* Privacy Options */}
                           <div className="flex gap-1.5 mb-3">
                             {privacyOptions.map((option) => (
                               <button
                                 key={option.value}
                                 onClick={() => setPrivacy(option.value)}
                                 className={`flex-1 flex flex-col items-center gap-0.5 p-1.5 rounded-lg border transition-all ${privacy === option.value
-                                    ? 'bg-gradient-to-br from-cyan-500/20 to-purple-500/20 border-cyan-500/50'
+                                    ? 'bg-gradient-to-br from-cyan-400/20 to-purple-600/20 border-cyan-400/50'
                                     : 'bg-white/5 border-white/10 hover:border-white/20'
                                   }`}
                               >
@@ -1600,7 +1813,7 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
 
                             <button
                               onClick={handleNext}
-                              className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-purple-600 hover:shadow-lg hover:shadow-cyan-500/25 transition-all"
+                              className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-400 to-purple-600 hover:shadow-lg hover:shadow-cyan-400/25 transition-all"
                             >
                               <span className="text-white font-semibold text-sm">Siguiente</span>
                               <ChevronRight size={16} className="text-white" />
@@ -1639,7 +1852,7 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
                                 <button
                                   onClick={() => toggleSocialNetwork(network.key)}
                                   className={`relative w-10 h-5 rounded-full transition-all ${socialNetworks[network.key]
-                                      ? 'bg-gradient-to-r from-cyan-500 to-purple-500'
+                                      ? 'bg-gradient-to-r from-cyan-400 to-purple-600'
                                       : 'bg-white/10'
                                     }`}
                                 >
@@ -1666,7 +1879,7 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
                               </div>
                               <div className="h-1 bg-white/10 rounded-full overflow-hidden">
                                 <motion.div
-                                  className="h-full bg-gradient-to-r from-cyan-500 to-purple-500 rounded-full"
+                                  className="h-full bg-gradient-to-r from-cyan-400 to-purple-600 rounded-full"
                                   style={{ width: `${processingProgress}%` }}
                                 />
                               </div>
@@ -1686,7 +1899,7 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
                             <button
                               onClick={handlePublish}
                               disabled={isPublishing}
-                              className="flex-1 flex flex-col items-center justify-center gap-1 px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-purple-600 hover:shadow-lg hover:shadow-cyan-500/25 transition-all disabled:opacity-70 disabled:cursor-not-allowed"
+                              className="flex-1 flex flex-col items-center justify-center gap-1 px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-400 to-purple-600 hover:shadow-lg hover:shadow-cyan-400/25 transition-all disabled:opacity-70 disabled:cursor-not-allowed"
                             >
                               {isPublishing ? (
                                 <div className="flex items-center gap-2">
@@ -1702,7 +1915,7 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
                               ) : (
                                 <div className="flex items-center gap-2">
                                   <span className="text-white font-semibold text-sm">Publicar</span>
-                                  <Sparkles size={16} className="text-white" />
+                                  <Upload size={16} className="text-white" />
                                 </div>
                               )}
                             </button>
@@ -1790,41 +2003,39 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
 
       {/* Music Selector */}
       <AnimatePresence>
-        {showMusicSelector && (
-          <MusicSelectorModal
-            key="music-selector-modal"
-            isOpen={showMusicSelector}
-            videoDuration={videoDuration}
-            onClose={() => {
-              audioControls.stopAll()
-              setShowMusicSelector(false)
-            }}
-            onApply={(result) => {
-              setAppliedMusic(result)
-              audioControls.applyTrack(result.track, result.trim_start, result.trim_end, result.volume_original, result.volume_music)
-              setShowMusicSelector(false)
-              if (videoRef.current) {
-                videoRef.current.currentTime = 0
-                videoRef.current.play().catch(() => {})
-              }
-              setIsPlaying(true)
-            }}
-            selectedTrack={audioControls.selectedTrack}
-            appliedTrimStart={appliedMusic?.trim_start}
-            appliedTrimEnd={appliedMusic?.trim_end}
-            previewTrackId={audioControls.previewTrackId}
-            volumeOriginal={audioControls.volumeOriginal}
-            volumeMusic={audioControls.volumeMusic}
-            favorites={audioControls.favorites}
-            onSelectAndPlay={(track, trimStart, trimEnd) => audioControls.togglePlayTrack(track, trimStart, trimEnd)}
-            onToggleFavorite={audioControls.toggleFavorite}
-            onClearTrack={audioControls.clearTrack}
-            onSetVolumeOriginal={audioControls.setVolumeOriginal}
-            onSetVolumeMusic={audioControls.setVolumeMusic}
-            onSeekPreview={audioControls.seekPreview}
-            tracks={apiTracks}
-          />
-        )}
+        <MusicSelectorModal
+          isOpen={showMusicSelector}
+          videoDuration={videoDuration}
+          onClose={() => {
+            audioControls.stopAll()
+            setShowMusicSelector(false)
+          }}
+          onApply={(result) => {
+            setAppliedMusic(result)
+            audioControls.stopAll()
+            audioControls.applyTrack(result.track, result.trim_start, result.trim_end, result.volume_original, result.volume_music)
+            setShowMusicSelector(false)
+            if (videoRef.current) {
+              videoRef.current.currentTime = 0
+              videoRef.current.play().catch(() => {})
+            }
+            setIsPlaying(true)
+          }}
+          selectedTrack={audioControls.selectedTrack}
+          appliedTrimStart={appliedMusic?.trim_start}
+          appliedTrimEnd={appliedMusic?.trim_end}
+          previewTrackId={audioControls.previewTrackId}
+          volumeOriginal={audioControls.volumeOriginal}
+          volumeMusic={audioControls.volumeMusic}
+          favorites={audioControls.favorites}
+          onSelectAndPlay={(track, trimStart, trimEnd) => audioControls.togglePlayTrack(track, trimStart, trimEnd)}
+          onToggleFavorite={audioControls.toggleFavorite}
+          onClearTrack={audioControls.clearTrack}
+          onSetVolumeOriginal={audioControls.setVolumeOriginal}
+          onSetVolumeMusic={audioControls.setVolumeMusic}
+          onSeekPreview={audioControls.seekPreview}
+          tracks={apiTracks}
+        />
       </AnimatePresence>
     </>
   )

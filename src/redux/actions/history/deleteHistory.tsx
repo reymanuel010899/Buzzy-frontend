@@ -14,7 +14,7 @@ export const deleteStory = (uuid: string) => async (dispatch: any) => {
   } catch (error) {
     dispatch({
       type: FAILED_DELETE_STORY,
-      payload: error,
+      payload: (error as any)?.message ?? 'error',
     });
   }
 };

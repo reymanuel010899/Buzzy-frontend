@@ -14,7 +14,7 @@ export const getStoryViewers = (uuid: string) => async (dispatch: any) => {
   } catch (error) {
     dispatch({
       type: FAILED_STORY_VIEWERS,
-      payload: error,
+      payload: (error as any)?.message ?? 'error',
     });
   }
 };

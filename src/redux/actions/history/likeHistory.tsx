@@ -12,7 +12,7 @@ export const likeStory = (data: any) => async (dispatch: any) => {
   } catch (error) {
     dispatch({
       type: FAILED_LIKE_STORY,
-      payload: error,
+      payload: (error as any)?.message ?? 'error',
     });
   }
 };

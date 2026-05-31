@@ -1,5 +1,9 @@
-import { SUCCEES_GET_USER, FAILED_GET_USER, USER_NOT_FOUND } from '../type'
+import { SUCCEES_GET_USER, FAILED_GET_USER, USER_NOT_FOUND, CLEAR_USER } from '../type'
 import { apiClient } from '../client/api-client';
+
+const USER_CACHE_KEY = (username: string) => `buzzy_user_${username}`;
+
+export const clearUser = () => ({ type: CLEAR_USER });
 
 export const getUser = (username = '') => async (dispatch: any) => {
   try {
@@ -12,9 +16,20 @@ export const getUser = (username = '') => async (dispatch: any) => {
         payload: { user: data.user, searchedUsername: username },
       });
     } else {
+      // Cachear datos del usuario para uso offline
+      try { localStorage.setItem(USER_CACHE_KEY(username), JSON.stringify(data)); } catch { /* cuota llena */ }
       dispatch({ type: SUCCEES_GET_USER, payload: data });
     }
   } catch (error: any) {
-    dispatch({ type: FAILED_GET_USER, payload: error });
+    // Sin internet: intentar cargar del cache local
+    try {
+      const cached = localStorage.getItem(USER_CACHE_KEY(username));
+      if (cached) {
+        const data = JSON.parse(cached);
+        dispatch({ type: SUCCEES_GET_USER, payload: { ...data, _fromCache: true } });
+        return;
+      }
+    } catch { /* cache inválido */ }
+    dispatch({ type: FAILED_GET_USER, payload: (error as any)?.message ?? 'error' });
   }
 };

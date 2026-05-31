@@ -11,10 +11,10 @@ export const getActiveGift = () => async (dispatch: any) => {
       payload: response.data,
     });
     return response
-  } catch (error) {
+  } catch (error: any) {
     dispatch({
       type: FAILED_ACTIVE_GIFTS,
-      payload: error,
+      payload: error?.message ?? 'error',
     });
   }
 };

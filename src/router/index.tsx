@@ -6,6 +6,7 @@ import {
 } from "react-router-dom";
 import Main from "../pages/main";
 import SignUp from "../pages/auth/signup";
+import RootLayout from "../components/Layout/RootLayout";
 import Wallet from "../pages/main/wallet";
 import Profile from "../pages/profille/profile";
 import SubscriptionSuccess from "../pages/main/SubscriptionSuccess";
@@ -20,12 +21,15 @@ import SupportForm from "../pages/main/Support";
 import AdsPage from "../pages/main/AdsPage";
 import PremiumSuccess from "../pages/main/PremiumSuccess";
 import NotFound from "../pages/NotFound";
+import JoinPage from "../pages/auth/JoinPage";
+import VideoDeepLink from "../components/VideoDeepLink";
 
 export const router = createBrowserRouter(
   createRoutesFromElements(
-    <>
+    <Route element={<RootLayout />}>
       <Route path="/sign-in" element={<Login />} />
       <Route path="/sign-up" element={<SignUp />} />
+      <Route path="/join" element={<JoinPage />} />
 
       <Route
         path="/"
@@ -132,17 +136,17 @@ export const router = createBrowserRouter(
           </ProtectedRoute>
         }
       />
-      {/* Video deep-link: redirect to home (video opens via feed) */}
+      {/* Video deep-link: redirect to home with the target video uuid */}
       <Route
         path="/video/:uuid"
         element={
           <ProtectedRoute>
-            <NotFound />
+            <VideoDeepLink />
           </ProtectedRoute>
         }
       />
       {/* Catch-all: 404 */}
       <Route path="*" element={<NotFound />} />
-    </>
+    </Route>
   )
 );

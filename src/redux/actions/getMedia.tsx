@@ -1,9 +1,20 @@
-import { SUCCEES_MEDIA, FAILED_MEDIA, APPEND_MEDIA } from '../type'
+import { SUCCEES_MEDIA, FAILED_MEDIA, APPEND_MEDIA, RESET_MEDIA } from '../type'
 import { apiClient } from '../client/api-client';
+import { saveFeed, loadFeed } from '../../services/feedCacheDB';
+
+// Guard global para evitar doble llamada al feed (re-mount de redux-persist, StrictMode, etc.)
+let _feedFetchInFlight = false;
 
 // list-home: top 20 videos populares para usuarios nuevos sin historial.
-// El backend devuelve directamente un array de videos.
-export const getMedia = () => async (dispatch: any) => {
+export const getMedia = () => async (dispatch: (a: unknown) => void) => {
+  // Mostrar cache primero mientras llega el servidor
+  try {
+    const cached = await loadFeed();
+    if (cached.length > 0) {
+      dispatch({ type: APPEND_MEDIA, payload: cached });
+    }
+  } catch { /* fallo silencioso */ }
+
   try {
     const response = await apiClient.get('/api/list-home/')
     if (response.status === 200) {
@@ -11,39 +22,63 @@ export const getMedia = () => async (dispatch: any) => {
         type: SUCCEES_MEDIA,
         payload: response.data,
       });
+      localStorage.setItem('seen_initial', 'true');
+      saveFeed(response.data).catch(() => {});
     }
-  } catch (error) {
+  } catch {
     dispatch({
       type: FAILED_MEDIA,
-      payload: ''
+      payload: 'offline'
     });
   }
 };
 
-// feed: recomendaciones personalizadas. El backend devuelve { mode, results }.
-// mode puede ser: 'cold_start' | 'warming_up' | 'personalized' | 'fallback'
-export const getRecommendedFeed = () => async (dispatch: any) => {
+export const refreshFeed = () => async (dispatch: (a: unknown) => void) => {
+  _feedFetchInFlight = false; // reset guard para permitir refresh manual
+  dispatch({ type: RESET_MEDIA });
+  return dispatch(getRecommendedFeed(true));
+};
+
+// feed: recomendaciones personalizadas.
+export const getRecommendedFeed = (forceRefresh = false) => async (dispatch: (a: unknown) => void) => {
+  // Evitar doble llamada simultánea al servidor (re-mount, StrictMode, etc.)
+  if (_feedFetchInFlight && !forceRefresh) return;
+  _feedFetchInFlight = true;
+
+  // 1. Mostrar cache de IndexedDB inmediatamente mientras llega el servidor
+  try {
+    const cached = await loadFeed();
+    if (cached.length > 0) {
+      dispatch({ type: APPEND_MEDIA, payload: cached });
+    }
+  } catch {
+    // fallo silencioso
+  }
+
+  // 2. Siempre llamar al servidor — con o sin cache previo
   try {
     const response = await apiClient.get('/api/recommendations/feed/');
     if (response.status === 200) {
       const videos = response.data?.results ?? response.data;
       const mode: string = response.data?.mode ?? 'personalized';
 
-      // Si el usuario ya tiene perfil personalizado, marcamos que ya vio videos
       if (mode === 'personalized' || mode === 'warming_up') {
         localStorage.setItem('seen_initial', 'true');
       }
 
-      dispatch({
-        type: APPEND_MEDIA,
-        payload: videos,
-      });
+      // Reemplaza el cache con datos frescos del servidor
+      dispatch({ type: SUCCEES_MEDIA, payload: videos });
+
+      // Actualizar IndexedDB con los videos frescos para la próxima vez offline
+      saveFeed(videos).catch(() => {});
+
       return videos;
     }
   } catch {
-    dispatch({
-      type: FAILED_MEDIA,
-      payload: 'Error fetching recommended feed'
-    });
+    // Sin internet: el cache de IndexedDB ya fue despachado arriba
+    dispatch({ type: FAILED_MEDIA, payload: 'offline' });
+  } finally {
+    // Liberar el guard después de 3s para permitir refreshes manuales
+    setTimeout(() => { _feedFetchInFlight = false; }, 3000);
   }
 };

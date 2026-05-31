@@ -1,14 +1,44 @@
 import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { X, Crown, Zap, Star, ChevronLeft, ChevronRight } from 'lucide-react';
 import { GiftI } from '../../interfaces/gift';
 import { useTranslation } from 'react-i18next';
+import { getMediaUrl } from '../../redux/client/api-client';
+
+// Muestra el emoji inmediatamente y lo reemplaza con el video cuando ya cargó,
+// evitando el flash negro en Android WebView.
+const GiftVideo: React.FC<{ src: string; emoji: string }> = ({ src, emoji }) => {
+    const [ready, setReady] = useState(false);
+    return (
+        <div className="w-full h-full relative">
+            {/* Emoji visible hasta que el video esté listo */}
+            <span
+                className="absolute inset-0 flex items-center justify-center text-4xl md:text-6xl transition-opacity duration-200"
+                style={{ opacity: ready ? 0 : 1 }}
+            >
+                {emoji}
+            </span>
+            <video
+                src={src}
+                autoPlay
+                loop
+                muted
+                playsInline
+                preload="auto"
+                onCanPlayThrough={() => setReady(true)}
+                className="w-full h-full object-cover rounded-full transition-opacity duration-200"
+                style={{ opacity: ready ? 1 : 0 }}
+            />
+        </div>
+    );
+};
 
 // --- Types ---
 
 interface VipGiftExperienceProps {
     onClose: () => void;
     onSendGift: (gift: GiftI | any) => void;
+    onBuyTokens?: () => void;
     gifts?: GiftI[] | any[];
     walletTokens: number;
     subscriptionStatus?: {
@@ -18,22 +48,6 @@ interface VipGiftExperienceProps {
         } | string;
         plan_name?: string;
     } | null;
-}
-
-interface GiftPanelLabels {
-    giftPresential: string;
-    vipMessageLabel: string;
-    vipMessagePlaceholder: string;
-    giftCost: string;
-    available: string;
-    tokensLabel: string;
-}
-
-interface SuccessOverlayLabels {
-    title: string;
-    subtitle: string;
-    newBalance: string;
-    button: string;
 }
 
 // --- Sub-components ---
@@ -91,30 +105,25 @@ const getPlanTheme = (subscriptionStatus: VipGiftExperienceProps['subscriptionSt
 
 const SpaceBackground: React.FC = () => (
     <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,_#1a1d3a_0%,_#020408_100%)]" />
-        {/* Stars */}
-        {[...Array(50)].map((_, i) => (
-            <div
-                key={i}
-                className="absolute rounded-full bg-white animate-pulse"
-                style={{
-                    width: Math.random() * 2 + 'px',
-                    height: Math.random() * 2 + 'px',
-                    top: Math.random() * 100 + '%',
-                    left: Math.random() * 100 + '%',
-                    opacity: Math.random(),
-                    animationDelay: Math.random() * 5 + 's'
-                }}
-            />
-        ))}
-        {/* Nebula Glows */}
-        <div className="absolute top-1/4 left-1/4 w-[400px] h-[400px] bg-purple-900/10 blur-[100px] rounded-full" />
-        <div className="absolute bottom-1/4 right-1/4 w-[400px] h-[400px] bg-blue-900/5 blur-[100px] rounded-full" />
+        {/* Base dark gradient — sin blur, sin animaciones */}
+        <div className="absolute inset-0 bg-gradient-to-b from-[#0a0a18] via-[#080810] to-[#04040c]" />
+        {/* Líneas de grid sutiles */}
+        <div
+            className="absolute inset-0 opacity-[0.04]"
+            style={{
+                backgroundImage: 'linear-gradient(#7c3aed 1px, transparent 1px), linear-gradient(90deg, #7c3aed 1px, transparent 1px)',
+                backgroundSize: '40px 40px',
+            }}
+        />
+        {/* Acento superior izquierdo — gradiente simple sin blur */}
+        <div className="absolute -top-20 -left-20 w-72 h-72 rounded-full bg-purple-600/8" />
+        {/* Acento inferior derecho */}
+        <div className="absolute -bottom-20 -right-20 w-72 h-72 rounded-full bg-indigo-600/8" />
     </div>
 );
 
 const Header: React.FC<{ onClose: () => void; title: string }> = ({ onClose, title }) => (
-    <div className="absolute top-4 left-0 right-0 flex justify-between items-center z-10 px-4">
+    <div className="absolute top-4 left-0 right-0 flex justify-between items-center z-50 px-4">
         <div className="flex items-center gap-3">
             <div className="p-2 bg-gradient-to-br from-purple-400 to-blue-500 rounded-lg shadow-[0_0_15px_rgba(147,51,234,0.4)]">
                 <Star size={20} className="text-white fill-white" />
@@ -125,9 +134,10 @@ const Header: React.FC<{ onClose: () => void; title: string }> = ({ onClose, tit
         </div>
         <button
             onClick={onClose}
-            className="p-2 bg-white/5 backdrop-blur-md rounded-full border border-white/10 hover:bg-white/20 hover:scale-105 transition-all shadow-xl group"
+            className="p-3 bg-white/10 rounded-full border border-white/20 active:scale-90 transition-all"
+            style={{ touchAction: 'manipulation' }}
         >
-            <X size={20} className="text-gray-400 group-hover:text-white" />
+            <X size={22} className="text-white" />
         </button>
     </div>
 );
@@ -187,13 +197,7 @@ const GiftCarousel: React.FC<{
                             >
                                 <div className="w-20 h-20 md:w-28 md:h-28 flex items-center justify-center bg-black/40 rounded-full backdrop-blur-sm relative overflow-hidden">
                                     {gift.video ? (
-                                        <video
-                                            src={gift.video}
-                                            autoPlay
-                                            loop
-                                            muted
-                                            className="w-full h-full object-cover rounded-full"
-                                        />
+                                        <GiftVideo src={getMediaUrl(gift.video)} emoji={gift.emoji} />
                                     ) : (
                                         <span className="text-4xl md:text-6xl">{gift.emoji}</span>
                                     )}
@@ -323,7 +327,7 @@ const VipPowerButton: React.FC<{
 
                         {/* Time & Mini Progress */}
                         <div className="flex flex-col items-end justify-center min-w-[50px]">
-                            <span className={`text-lg font-black italic ${theme.primaryColor}`}>2s</span>
+                            <span className={`text-lg font-black italic ${theme.primaryColor}`}>1s</span>
                             <div className="w-12 h-1 bg-white/10 rounded-full mt-1.5 overflow-hidden">
                                 <div
                                     className="h-full transition-all duration-75 ease-linear"
@@ -357,55 +361,17 @@ const VipPowerButton: React.FC<{
     </div>
 );
 
-const SuccessOverlay: React.FC<{ onClose: () => void; theme: any }> = ({ onClose, theme }) => (
-    <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 z-[120] bg-black/95 backdrop-blur-sm flex items-center justify-center p-6"
-    >
-        <div className="text-center">
-            <div className="relative inline-block mb-6">
-                <motion.div
-                    animate={{ scale: [1, 1.4, 1], opacity: [0.4, 0.8, 0.4] }}
-                    transition={{ duration: 2, repeat: Infinity }}
-                    className="absolute inset-0 blur-2xl rounded-full"
-                    style={{ backgroundColor: theme.primaryColor.replace('text-', '') }}
-                />
-                <Zap size={100} className="text-white relative z-10 fill-current drop-shadow-[0_0_30px_rgba(255,255,255,0.5)]" />
-            </div>
-            <h2 className="text-4xl md:text-6xl font-black italic text-white tracking-tighter uppercase drop-shadow-xl">
-                ENVÍO COMPLETADO
-            </h2>
-            <p className={`${theme.primaryColor} text-lg font-black tracking-[0.5em] mt-4 uppercase drop-shadow-md`}>
-                Tu prestigio se eleva
-            </p>
-
-            <motion.button
-                whileTap={{ scale: 0.95 }}
-                onClick={onClose}
-                className={`mt-12 px-10 py-3.5 bg-gradient-to-r ${theme.bgGradient} rounded-full font-black text-white tracking-[0.2em] shadow-xl transition-all uppercase border-2 shadow-inner text-xs`}
-                style={{ borderColor: theme.primaryColor.replace('text-', '') }}
-            >
-                Volver al Nexo
-            </motion.button>
-        </div>
-    </motion.div>
-);
-
 // --- Main Component ---
 
-const VipGiftExperience: React.FC<VipGiftExperienceProps> = ({ onClose, onSendGift, gifts: parentGifts, walletTokens, subscriptionStatus }) => {
+const VipGiftExperience: React.FC<VipGiftExperienceProps> = ({ onClose, onSendGift, onBuyTokens, gifts: parentGifts, walletTokens, subscriptionStatus }) => {
     const [isPressing, setIsPressing] = useState(false);
     const [progress, setProgress] = useState(0);
-    const [isSent, setIsSent] = useState(false);
     const sentRef = React.useRef(false);
     const [selectedIndex, setSelectedIndex] = useState(2);
     const [message, setMessage] = useState("");
     const { t } = useTranslation('videos');
 
     const theme = getPlanTheme(subscriptionStatus);
-    const powerLabel = t('videos:giftExperience.powerLabel', { plan: theme.name });
 
     const displayGifts = parentGifts && parentGifts.length > 0 ? parentGifts : [
         { id: '1', name: 'Tokens', token_price: 100, slug: '1', emoji: '🪙', video: null, is_active: true, created_at: '' },
@@ -418,11 +384,11 @@ const VipGiftExperience: React.FC<VipGiftExperienceProps> = ({ onClose, onSendGi
     const selectedGift = displayGifts[selectedIndex] || displayGifts[0];
 
     useEffect(() => {
-        let interval: NodeJS.Timeout;
+        let interval: ReturnType<typeof setInterval>;
         if (isPressing && progress < 100) {
             interval = setInterval(() => {
                 setProgress((prev) => Math.min(prev + 1, 100));
-            }, 20);
+            }, 10);
         } else if (progress >= 100) {
             handleComplete();
         } else if (!isPressing) {
@@ -434,16 +400,17 @@ const VipGiftExperience: React.FC<VipGiftExperienceProps> = ({ onClose, onSendGi
     const handleComplete = () => {
         if (sentRef.current) return;
         sentRef.current = true;
-        setIsSent(true);
         onSendGift({ ...selectedGift, vip_message: message });
         setIsPressing(false);
         setTimeout(onClose, 100);
     };
 
+    const needsTokens = walletTokens < (selectedGift.token_price || 0);
+
     return (
         <div className="fixed inset-0 z-[100] bg-[#020408] text-white font-sans overflow-hidden flex flex-col items-center justify-center p-4">
             <SpaceBackground />
-            <Header onClose={onClose} title={t('videos:giftExperience.specialGiftsTitle')} />
+            <Header onClose={onClose} title={t('videos:giftExperience.specialGiftsTitle' as any)} />
 
             <div className="flex flex-col items-center w-full max-w-2xl z-10 scale-[0.9] md:scale-100 transition-transform">
                 <GiftCarousel
@@ -471,6 +438,39 @@ const VipGiftExperience: React.FC<VipGiftExperienceProps> = ({ onClose, onSendGi
                     />
                 </div>
             </div>
+
+            {/* Buy Tokens — pegado al fondo, solo visible cuando no hay saldo suficiente */}
+            {needsTokens && onBuyTokens && (
+                <div className="absolute bottom-0 left-0 right-0 z-20 px-4 pb-6 pt-10 bg-gradient-to-t from-[#020408] via-[#020408]/90 to-transparent">
+                    <motion.button
+                        initial={{ y: 40, opacity: 0 }}
+                        animate={{ y: 0, opacity: 1 }}
+                        transition={{ type: "spring", stiffness: 300, damping: 24 }}
+                        whileTap={{ scale: 0.97 }}
+                        onClick={onBuyTokens}
+                        className="relative w-full overflow-hidden rounded-2xl py-4 flex items-center justify-center gap-3"
+                        style={{
+                            background: 'linear-gradient(135deg, #06b6d4 0%, #3b82f6 50%, #8b5cf6 100%)',
+                            boxShadow: '0 0 30px rgba(99,102,241,0.5), 0 0 60px rgba(6,182,212,0.2)',
+                        }}
+                    >
+                        {/* Shimmer */}
+                        <motion.div
+                            className="absolute inset-0 opacity-20"
+                            style={{ background: 'linear-gradient(90deg, transparent 0%, white 50%, transparent 100%)', backgroundSize: '200% 100%' }}
+                            animate={{ backgroundPosition: ['200% 0', '-200% 0'] }}
+                            transition={{ duration: 2.5, repeat: Infinity, ease: 'linear' }}
+                        />
+                        <Zap size={18} className="text-white fill-white relative z-10" />
+                        <span className="relative z-10 text-white font-black uppercase tracking-[0.2em] text-sm">
+                            Comprar Tokens
+                        </span>
+                        <span className="relative z-10 bg-white/20 text-white text-xs font-bold px-2 py-0.5 rounded-full backdrop-blur-sm">
+                            +💎
+                        </span>
+                    </motion.button>
+                </div>
+            )}
         </div>
     );
 };

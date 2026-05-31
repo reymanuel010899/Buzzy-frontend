@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { Volume2, VolumeX, Rocket, ExternalLink } from "lucide-react";
 import axios from "axios";
 import { getBaseUrl } from "../../redux/client/api-client";

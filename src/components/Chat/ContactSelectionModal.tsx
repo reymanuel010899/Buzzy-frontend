@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Search, Send, User } from "lucide-react";
-import { getBaseUrl, getMediaUrl } from "../../redux/client/api-client";
+import { getMediaUrl } from "../../redux/client/api-client";
 
 interface ContactSelectionModalProps {
     isOpen: boolean;

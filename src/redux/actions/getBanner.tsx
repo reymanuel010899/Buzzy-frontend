@@ -4,17 +4,25 @@ import { apiClient } from '../client/api-client';
 export const fetchActiveBanner = () => async (dispatch: any) => {
   try {
     const response = await apiClient.get('/api/banners/me/');
-    dispatch({ type: SUCCESS_GET_BANNER, payload: response.data.banner });
+    dispatch({ type: SUCCESS_GET_BANNER, payload: response.data.banners ?? [] });
   } catch {
     dispatch({ type: FAILED_GET_BANNER });
   }
 };
 
 export const dismissBanner = (bannerId: number) => async (dispatch: any) => {
+  dispatch({ type: DISMISS_BANNER });
   try {
-    await apiClient.post('/api/banners/me/', { banner_id: bannerId });
-    dispatch({ type: DISMISS_BANNER });
+    await apiClient.post('/api/banners/me/', { banner_id: bannerId, action: 'dismiss' });
   } catch {
-    dispatch({ type: DISMISS_BANNER });
+    // silencioso — el estado ya cambió localmente
+  }
+};
+
+export const trackBannerClick = (bannerId: number) => async () => {
+  try {
+    await apiClient.post('/api/banners/me/', { banner_id: bannerId, action: 'click' });
+  } catch {
+    // silencioso
   }
 };

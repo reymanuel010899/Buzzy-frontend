@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { CheckCircle2, ArrowRight, Sparkles, Loader2, AlertCircle, Clock } from 'lucide-react';
+import { CheckCircle2, ArrowRight, Loader2, AlertCircle, Clock } from 'lucide-react';
 import { apiClient } from '../../redux/client/api-client';
 
 const AccountSuccess: React.FC = () => {

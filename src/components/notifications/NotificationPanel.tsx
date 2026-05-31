@@ -6,7 +6,7 @@ import { X, Bell, Heart, MessageCircle, UserPlus, Eye, Star, Gift, AtSign, Check
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
 import { useNotificationsStore, BuzzyNotification } from "../../context/NotificationsStore"
-import { getBaseUrl, getMediaUrl } from "../../redux/client/api-client"
+import { getMediaUrl } from "../../redux/client/api-client"
 
 interface Props {
   open: boolean
@@ -136,8 +136,13 @@ export default function NotificationPanel({ open, onClose }: Props) {
 
   const handleClick = (n: BuzzyNotification) => {
     if (!n.is_read) markRead([n.id])
-    if (n.video_uuid) { navigate(`/video/${n.video_uuid}`); onClose() }
-    else if (n.actor?.username) { navigate(`/profile/${n.actor.username}`); onClose() }
+    if (n.video_uuid && n.actor?.username) {
+      navigate(`/profile/${n.actor.username}`, { state: { targetVideoUuid: n.video_uuid } })
+      onClose()
+    } else if (n.actor?.username) {
+      navigate(`/profile/${n.actor.username}`)
+      onClose()
+    }
   }
 
   const mainList = buildMainList(notifications)

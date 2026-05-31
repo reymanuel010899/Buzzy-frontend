@@ -1,19 +1,10 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { Mic, MicOff, Minimize2, PhoneOff, Video, VideoOff, Volume2, VolumeX, User } from "lucide-react";
+import { Mic, MicOff, Minimize2, PhoneOff, Video, VideoOff, Volume2, VolumeX } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { getMediaUrl } from "../../redux/client/api-client";
 import { IAgoraRTCRemoteUser, ICameraVideoTrack } from "agora-rtc-sdk-ng";
 import AgoraVideoPlayer from "./AgoraVideoPlayer";
-
-type CallPayload = {
-  uuid: string;
-  channel_name: string;
-  call_type: "voice" | "video";
-  allowed_seconds: number;
-  status?: string;
-  caller: { id: number; username: string };
-  callee: { id: number; username: string };
-};
+import { CallPayload } from "../../store/callStore";
 
 type Props = {
   call: CallPayload | null;
@@ -58,7 +49,7 @@ export default function OutgoingCallScreen({
 }: Props) {
   const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
   const [consumedSeconds, setConsumedSeconds] = useState(0);
-  const [ringingSeconds, setRingingSeconds] = useState(0);
+  const [, setRingingSeconds] = useState(0);
 
   // Refs to avoid stale closures inside intervals
   const timerRef = useRef<NodeJS.Timeout | null>(null);

@@ -21,7 +21,7 @@ export const createStory = (data: FormData) => async (dispatch: any) => {
   } catch (error) {
     dispatch({
       type: FAILED_CREATE_STORY,
-      payload: error,
+      payload: (error as any)?.message ?? 'error',
     });
   }
 };

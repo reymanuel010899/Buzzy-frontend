@@ -66,7 +66,7 @@ const WalletComponent = ({
   const [activeFilter, setActiveFilter] = useState<TxFilter>("all")
   const [converting, setConverting] = useState(false)
   const [convertedTokens, setConvertedTokens] = useState(tokens)
-
+  const [buyingTokens, setBuyingTokens] = useState(false)
   useEffect(() => { setConvertedTokens(tokens) }, [tokens])
 
   const handleConvertTokens = async () => {
@@ -82,6 +82,24 @@ const WalletComponent = ({
       // silently ignore
     } finally {
       setConverting(false)
+    }
+  }
+
+  const handleBuyTokensFromBalance = async () => {
+    if (balance <= 0 || buyingTokens) return
+    const tokensToGet = Math.floor(balance / token_value_usd)
+    if (tokensToGet <= 0) return
+    const cost = parseFloat((tokensToGet * token_value_usd).toFixed(4))
+    setBuyingTokens(true)
+    try {
+      const res = await apiClient.post('/api/buy-tokens/', { tokens: tokensToGet, cost })
+      dispatch({ type: SUCCEES_GET_WALLET, payload: res.data.data })
+      setBalance(parseFloat(res.data.data.balance))
+      getWallet()
+    } catch {
+      // silently ignore
+    } finally {
+      setBuyingTokens(false)
     }
   }
 
@@ -213,21 +231,38 @@ const WalletComponent = ({
                 ${balance.toFixed(2)}
               </p>
 
-              {/* Tokens → USD */}
-              <button
-                onClick={handleConvertTokens}
-                disabled={convertedTokens <= 0 || converting}
-                className="flex items-center gap-2 mb-3 px-4 py-2 rounded-2xl bg-white/5 border border-white/10 w-full justify-between hover:bg-white/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <span className="text-yellow-400 font-bold text-sm">🪙 {convertedTokens} tokens</span>
-                {converting
-                  ? <span className="text-white/40 text-xs animate-pulse">...</span>
-                  : <ArrowUp size={14} className="text-[#00f0ff]" />
-                }
-                <span className="text-[#00f0ff] font-bold text-sm">
+              {/* Conversions row */}
+              <div className="flex items-center gap-2 mb-3 px-4 py-2 rounded-2xl bg-white/5 border border-white/10 w-full">
+                {/* USD → Tokens (↓) */}
+                <button
+                  onClick={handleBuyTokensFromBalance}
+                  disabled={balance <= 0 || buyingTokens}
+                  className="flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {buyingTokens
+                    ? <span className="text-white/40 text-xs animate-pulse">...</span>
+                    : <ArrowDown size={14} className="text-yellow-400" />
+                  }
+                </button>
+
+                <span className="text-yellow-400 font-bold text-sm flex-1 text-left">🪙 {convertedTokens} tokens</span>
+
+                <span className="text-[#00f0ff] font-bold text-sm flex-1 text-right">
                   ${(convertedTokens * token_value_usd).toFixed(2)} USD
                 </span>
-              </button>
+
+                {/* Tokens → USD (↑) */}
+                <button
+                  onClick={handleConvertTokens}
+                  disabled={convertedTokens <= 0 || converting}
+                  className="flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {converting
+                    ? <span className="text-white/40 text-xs animate-pulse">...</span>
+                    : <ArrowUp size={14} className="text-[#00f0ff]" />
+                  }
+                </button>
+              </div>
 
               <div className="flex flex-col gap-2 mt-2 w-full">
                 <motion.button

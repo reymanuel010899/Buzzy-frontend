@@ -3,6 +3,7 @@
 import React, { useRef, useState, useEffect, useCallback } from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import { Heart, MessageCircle, Eye } from "lucide-react"
+import { Link } from "react-router-dom"
 import { Video } from "./main.interface"
 import { useUserVideos } from "../../hooks/useUserVideos"
 import { getMediaUrl } from "../../redux/client/api-client"
@@ -146,7 +147,7 @@ function SwipeHint({ show }: { show: boolean }) {
   )
 }
 
-export default function HorizontalCarousel({ video, isActive, isMuted, isExpanded, onLike, onComment, onGift, onSlideChange, children }: Props) {
+export default function HorizontalCarousel({ video, isActive, isMuted, isExpanded: _isExpanded, onLike, onComment, onGift, onSlideChange, children }: Props) {
   const { getFromCache, expandInBackground } = useUserVideos()
 
   // Cargar desde cache inmediatamente — sin esperar fetch
@@ -165,8 +166,8 @@ export default function HorizontalCarousel({ video, isActive, isMuted, isExpande
   const slideRef = useRef(slideIndex)
   slideRef.current = slideIndex
 
-  // Slides actuales — slide 0 = video del feed, resto = del mismo usuario
-  const slides = [video, ...userVideos]
+  // Slides actuales — slide 0 = video del feed, resto = del mismo usuario (sin duplicar el video principal)
+  const slides = [video, ...userVideos.filter((v) => v.id !== video.id)]
   const slidesLenRef = useRef(slides.length)
   slidesLenRef.current = slides.length
 
@@ -322,8 +323,8 @@ export default function HorizontalCarousel({ video, isActive, isMuted, isExpande
                 {/* Gradiente inferior */}
                 <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-black/80 to-transparent pointer-events-none" />
                 {/* Info usuario + descripción */}
-                <div className="absolute bottom-20 left-3 right-16 z-10">
-                  <p className="text-white text-sm font-semibold mb-1">@{s.user_id.username}</p>
+                <div className="absolute bottom-6 left-3 right-16 z-10">
+                  <Link to={`/profile/${s.user_id.username}`} className="text-white text-sm font-semibold mb-1 hover:text-[#00f0ff] transition-colors" onClick={e => e.stopPropagation()}>@{s.user_id.username}</Link>
                   {s.description && (
                     <p className="text-white/80 text-xs line-clamp-2">{s.description}</p>
                   )}

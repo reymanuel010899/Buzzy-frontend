@@ -2,7 +2,7 @@ import { FAILED_CREATE_LIKE, SUCCEES_CREATE_LIKE } from '../type'
 import { apiClient } from '../client/api-client';
 
 type CreateLikeBody = {
-  video_id: string;
+  video_id: string | number;
 };
 export const createLike = (body: CreateLikeBody) => async (dispatch: any) => {
   try {

@@ -1,7 +1,6 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, CheckCircle, Zap } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
 
 interface TokenPurchaseSuccessModalProps {
     isOpen: boolean;

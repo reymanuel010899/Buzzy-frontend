@@ -21,7 +21,7 @@ export const getFollowers = (username: string) => async (dispatch: any, getState
         dispatch({ type: SUCCESS_GET_FOLLOWERS, payload: response.data, username });
         return response.data;
     } catch (error) {
-        dispatch({ type: FAILED_GET_FOLLOWERS, payload: error });
+        dispatch({ type: FAILED_GET_FOLLOWERS, payload: (error as any)?.message ?? 'error' });
         console.error("Error fetching followers:", error);
         return [];
     }
@@ -38,7 +38,7 @@ export const getFollowing = (username: string) => async (dispatch: any, getState
         dispatch({ type: SUCCESS_GET_FOLLOWING, payload: response.data, username });
         return response.data;
     } catch (error) {
-        dispatch({ type: FAILED_GET_FOLLOWING, payload: error });
+        dispatch({ type: FAILED_GET_FOLLOWING, payload: (error as any)?.message ?? 'error' });
         console.error("Error fetching following:", error);
         return [];
     }
@@ -55,7 +55,7 @@ export const getSubscribers = (username: string) => async (dispatch: any, getSta
         dispatch({ type: SUCCESS_GET_SUBSCRIBERS, payload: response.data, username });
         return response.data;
     } catch (error) {
-        dispatch({ type: FAILED_GET_SUBSCRIBERS, payload: error });
+        dispatch({ type: FAILED_GET_SUBSCRIBERS, payload: (error as any)?.message ?? 'error' });
         console.error("Error fetching subscribers:", error);
         return [];
     }
@@ -72,7 +72,7 @@ export const getSuggestions = (username: string) => async (dispatch: any, getSta
         dispatch({ type: SUCCESS_GET_SUGGESTIONS, payload: response.data, username });
         return response.data;
     } catch (error) {
-        dispatch({ type: FAILED_GET_SUGGESTIONS, payload: error });
+        dispatch({ type: FAILED_GET_SUGGESTIONS, payload: (error as any)?.message ?? 'error' });
         console.error("Error fetching suggestions:", error);
         return [];
     }

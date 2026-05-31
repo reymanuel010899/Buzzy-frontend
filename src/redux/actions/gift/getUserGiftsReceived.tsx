@@ -7,7 +7,7 @@ export const getUserGiftsReceived = () => async (dispatch: any) => {
     dispatch({ type: "SUCCEES_USER_GIFTS_RECEIVED", payload: response.data });
     return response.data;
   } catch (error) {
-    dispatch({ type: "FAILED_USER_GIFTS_RECEIVED", payload: error });
+    dispatch({ type: "FAILED_USER_GIFTS_RECEIVED", payload: (error as any)?.message ?? 'error' });
   }
 };
 

@@ -16,9 +16,8 @@ export const register = (formData: IDataSignUp) => async (dispatch: AppDispatch)
   } catch (error) {
     dispatch({
       type: FAILED_REGISTER,
-      payload: error
+      payload: (error as any)?.message ?? 'error'
     });
     throw error;
   }
 };
-

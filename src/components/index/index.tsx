@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState, useMemo } from "react"
+import { createPortal } from "react-dom"
 import { useTranslation } from "react-i18next"
 import axios from "axios";
-import { Link, useNavigate } from "react-router-dom"
+import { Link, useNavigate, useLocation } from "react-router-dom"
 import sendMessageSound from "../../assets/sounds/sendMessage.mp3";
-import { Eye, MessageCircle, Heart, Volume2, VolumeX, Play, Pause, Plus, UserPlus, UserCheck, Loader2, X, MoreVertical, Music2 } from "lucide-react"
+import { prefetchAudioUrl } from "../../hooks/useVideoAudio";
+import { Eye, MessageCircle, Heart, Volume2, VolumeX, Play, Pause, Plus, UserPlus, UserCheck, Loader2, X, MoreVertical, Music2, Camera, Image as ImageIcon, MapPin, Bookmark, Share2, Download, Lock } from "lucide-react"
 import AdCard from "../ads/AdCard"
 import StoryEditor from "./StoryEditor"
 import BottomNavbar from "../Layout/ButtonNavar"
@@ -26,7 +28,7 @@ import { sendGift } from "../../redux/actions/gift/sendGift"
 import { getActiveGift } from "../../redux/actions/gift/listGiftActive"
 import { sendVideoGift } from "../../redux/actions/gift/sendVideoGift"
 import { getRecivedGift } from "../../redux/actions/gift/listGiftRecived"
-import { getOneActiveGift } from "../../redux/actions/gift/getGiftActive"
+// import { getOneActiveGift } from "../../redux/actions/gift/getGiftActive"
 import { getRecivedGiftByUser } from "../../redux/actions/gift/getGiftsByUser"
 import { GiftI } from "../../interfaces/gift"
 import { ShowComments } from "../comments/modalComents"
@@ -38,6 +40,7 @@ import { isNotifEnabled } from "../../utils/notifPrefs";
 import HorizontalCarousel from "./HorizontalCarousel";
 import StoryFilterCanvas from "./StoryFilterCanvas";
 import { useUserVideos } from "../../hooks/useUserVideos";
+import { pickMedia } from "../../hooks/useMediaPicker";
 import { useVideoMetrics } from "../../hooks/useVideoMetrics";
 import typingSound from "../../assets/sounds/whatsapp-typing.mp3";
 import VipGiftExperience from "../giftModal/modalGift";
@@ -49,14 +52,26 @@ const clampWords = (text: string, maxWords = 4): string => {
   if (words.length <= maxWords) return text
   return `${words.slice(0, maxWords).join(" ")}…`
 }
+
+const shortLocationLabel = (text: string) => {
+  const trimmed = text.trim()
+  if (!trimmed) return trimmed
+  const mainPart = trimmed.split(",")[0]?.trim() || trimmed
+  if (mainPart.length <= 22) return mainPart
+  return `${mainPart.slice(0, 21).trimEnd()}…`
+}
 import TokenPurchaseSuccessModal from "../giftModal/TokenPurchaseSuccessModal";
 import { buyTokens } from "../../redux/actions/buyTokens";
 import { getWallet } from "../../redux/actions/getWallet";
 import { useVideoEngagement } from "../../hooks/useVideoEngagement";
 import { deleteStory } from "../../redux/actions/history/deleteHistory";
 import { reportStory, ReportPayload } from "../../redux/actions/history/reportStory";
-import { getRecommendedFeed } from "../../redux/actions/getMedia";
+import { getRecommendedFeed, refreshFeed } from "../../redux/actions/getMedia";
+import { saveVideo, unsaveVideo } from "../../redux/actions/savedVideos";
+import { loadStoriesCache, saveStories } from "../../services/chatCacheDB";
 import { useCallStore } from "../../store/callStore";
+import { usePullToRefresh } from "../../hooks/usePullToRefresh";
+import { AppDispatch, RootState } from "../../store";
 interface StreamingUIProps {
   media: videoI[] | null
   getComment?: ({ video_id }: { video_id: string }) => any
@@ -83,28 +98,63 @@ export interface CommentData {
 }
 const StreamingUI = ({ media }: StreamingUIProps) => {
   const { t } = useTranslation(['videos', 'common']);
-  const dispatch = useDispatch();
+  const dispatch = useDispatch<AppDispatch>();
   const navigate = useNavigate()
+  const location = useLocation()
+
+  // Fetch and prepend a video when navigating via deep-link /video/:uuid
+  useEffect(() => {
+    const uuid = (location.state as { targetVideoUuid?: string } | null)?.targetVideoUuid
+    if (!uuid) return
+    navigate(location.pathname, { replace: true, state: {} })
+    apiClient.get(`/api/videos/${uuid}/`).then((res) => {
+      const video: videoI = res.data
+      setMedia(prev => {
+        if (!prev) return [video]
+        if (prev.some(v => v.uuid === video.uuid)) return prev
+        return [video, ...prev]
+      })
+      setActiveVideo(0)
+    }).catch(() => {})
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state])
   // Redux selectors para gifts
   const activeGifts = useSelector((state: any) => state.activeGiftReducer?.gift);
   // const receivedGifts = useSelector((state: any) => state.RecivedGiftReducer?.gift);
   const { setTypingUser, removeTypingUser } = useTypingUsers();
   // const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const { selectedChat } = useChat();
-  const oneActiveGift = useSelector((state: any) => state.GetOneactiveGiftReducer?.gift);
+  const { selectedChat, showMessages } = useChat();
+  // const oneActiveGift = useSelector((state: any) => state.GetOneactiveGiftReducer?.gift);
   const getWalletReducer = useSelector((state: any) => state.getWalletReducer);
   const walletTokens = getWalletReducer?.tokens || 0;
   const walletBalance = parseFloat(getWalletReducer?.balance || '0');
+  const [offlineToast, setOfflineToast] = useState(false);
+  const [commentsOffline, setCommentsOffline] = useState(false);
   const [showTokenShopModal, setShowTokenShopModal] = useState(false);
   const [showInsufficientFundsModal, setShowInsufficientFundsModal] = useState(false);
   const [showTokenPurchaseSuccessModal, setShowTokenPurchaseSuccessModal] = useState(false);
   const [purchasedTokenAmount, setPurchasedTokenAmount] = useState(0);
   const [activeVideo, setActiveVideo] = useState<number | null>(null)
   const hasPlayedFirstVideo = useRef(false)
+  const hasUserInteracted = useRef(false)
+  const hasLeftInitialVideoRef = useRef(false)
+  const videosPausedRef = useRef(true)
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([])
-  const [isMuted, setIsMuted] = useState(true)
+  const [isMuted, setIsMuted] = useState(false)
+  const [videosPaused, setVideosPaused] = useState(true)
+  // feedLocked = true until the user taps a video for the first time.
+  // While locked, scrolling does NOT autoplay — every video stays paused.
+  const [feedLocked, setFeedLocked] = useState(true)
+  const feedLockedRef = useRef(true)
   const mainRef = useRef<HTMLDivElement>(null)
   const [showLikeAnimation, setShowLikeAnimation] = useState<Record<string, boolean>>({});
+  const [savedMap, setSavedMap] = useState<Record<string, boolean>>({});
+  const [activeOptionsVideoId, setActiveOptionsVideoId] = useState<string | null>(null);
+  const [shareModal, setShareModal] = useState<{ videoId: string; videoUrl: string; description: string } | null>(null);
+  const [shareContacts, setShareContacts] = useState<any[]>([]);
+  const [shareSearch, setShareSearch] = useState('');
+  const [shareSending, setShareSending] = useState<string | null>(null);
+  const [shareSent, setShareSent] = useState<Record<string, boolean>>({});
   const [followingState, setFollowingState] = useState<Record<string, boolean>>({});
   const [videoProgress, setVideoProgress] = useState<Record<string, number>>({});
   const [videoDuration, setVideoDuration] = useState<Record<string, number>>({});
@@ -112,42 +162,36 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [stories, setStories] = useState<StoryList>([]);
   const audioUnlockedRef = useRef(false);
   const [isAudioUnlocked, setIsAudioUnlocked] = useState(false);
-  const LoginReducer = useSelector((state) => state?.LoginReducer);
+  const activeFeedAudioTrimStartRef = useRef<number>(0);
+  const activeFeedAudioTrimEndRef = useRef<number>(0);
+  const LoginReducer = useSelector((state: RootState) => (state as unknown as Record<string, { user?: Record<string, unknown> }>).LoginReducer);
 
   const [transientIconState, setTransientIconState] = useState<{
     videoId: string
     icon: 'play' | 'pause'
   } | null>(null)
   const [showCommentsModal, setShowCommentsModal] = useState(false);
+  const [selectedStoryLocation, setSelectedStoryLocation] = useState<string | null>(null);
   const [mediaVideo, setMedia] = useState<videoI[] | null>(media);
   const { prefetchBatch } = useUserVideos();
   const { onVideoPlay, onTimeUpdate: trackTimeUpdate, resetVideo } = useVideoMetrics();
   const [currentVideoId, setCurrentVideoId] = useState<string | null>(null);
+  const currentVideoIdRef = useRef<string | null>(null);
   const [viewedVideos, setViewedVideos] = useState<Set<string>>(new Set());
   // Stabilize user object to prevent unnecessary re-renders and WebSocket reconnections
   const user = useMemo(() => {
-    // 1. Valores por defecto si no hay nadie logueado
     const defaultUser = {
       username: 'BuzzyUser',
       profile_picture: '/avatar.webp',
-      id: null
+      id: null as string | null,
     };
-
-    // 2. Accedemos a la ruta exacta: LoginReducer -> user
-    // (Según tu imagen, los datos están en LoginReducer.user)
-    const userData = LoginReducer?.user;
-    // 3. Si no existe el objeto user, devolvemos el default
+    const userData = LoginReducer?.user as Record<string, string> | undefined;
     if (!userData) return defaultUser;
-
-    // 4. Retornamos el usuario combinado
     return {
       ...defaultUser,
       ...userData,
-      // Si profile_picture viene vacío o null en la DB, mantenemos el default
-      profile_picture: userData.profile_picture || defaultUser.profile_picture
+      profile_picture: (userData.profile_picture as string) || defaultUser.profile_picture,
     };
-
-    // IMPORTANTE: Cambiamos la dependencia a LoginReducer.user
   }, [LoginReducer?.user]);
   const [commentText, setCommentText] = useState("")
   const [comments, setComments] = useState<CommentData[] | null>(null)
@@ -172,7 +216,8 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   // New state for Story Upload
   const [isUploadingStory, setIsUploadingStory] = useState(false)
   const [storyEditorFile, setStoryEditorFile] = useState<File | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showStoryPicker, setShowStoryPicker] = useState(false);
+
   // --- New State for Story Viewer ---
   const [viewingStoryUserIndex, setViewingStoryUserIndex] = useState<number | null>(null);
   const [currentStoryItemIndex, setCurrentStoryItemIndex] = useState(0);
@@ -193,18 +238,19 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [showViewersModal, setShowViewersModal] = useState(false);
   const [realViewers, setRealViewers] = useState<any[]>([]);
   const [giftRecived, setGiftRecived] = useState<any[]>([]);
-  const [viewerGiftOverlay, setViewerGiftOverlay] = useState<{ gift_video: string; gift_type: string; sender: string; uuid?: string } | null>(null);
+  const [viewerGiftOverlay, setViewerGiftOverlay] = useState<{ gift_video: string; gift_type: string; sender: string; uuid?: string; blobUrl?: string } | null>(null);
   const [viewerGiftBlackout, setViewerGiftBlackout] = useState(false);
+  const [viewerGiftReady, setViewerGiftReady] = useState(false);
+  const viewerGiftBlobRef = useRef<string | null>(null);
   // --- Fixed State for Viewed Items per Media UUID ---
   const [viewedItems, setViewedItems] = useState<Record<string, boolean>>({});
   // --- New States for Gift System ---
   const [showGiftMenu, setShowGiftMenu] = useState(false);
   const [showFullGiftMenu, setShowFullGiftMenu] = useState(false);
   // const [giftAnimation, setGiftAnimation] = useState<{ type: string; sender: string; storyUuid: string; phase: 'initial' | 'crazy' | 'explode' | 'reward'; giftId: string } | null>(null);
-  const [storyPremiumStates, setStoryPremiumStates] = useState<Record<string, boolean>>({});
+  const [, setStoryPremiumStates] = useState<Record<string, boolean>>({});
   const sendAudioRef = useRef<HTMLAudioElement | null>(null);
-  const [storyPremiumStatesSee, setStoryPremiumStatesSee] = useState<Record<string, boolean>>({});
-  const [storyPremiumColors, setStoryPremiumColors] = useState<Record<string, string>>({}); // Guardar colores premium por story UUID
+  const [, setStoryPremiumColors] = useState<Record<string, string>>({});
   const isGiftsRef = useRef<GiftI[]>([]);
   const currentStoryUuidRef = useRef<string | null>(null);
   const chatSocketActiveRef = useRef(false);
@@ -218,7 +264,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const storyAudioRequestIdRef = useRef(0);
   const storyAudioFadeTimerRef = useRef<number | null>(null);
   const [_fullGifts, setFullGifts] = useState<GiftI[] | GiftI | []>([]);
-  const [giftsLoading, setGiftsLoading] = useState(true);
+  const [, setGiftsLoading] = useState(true);
   const [showVideoGiftModal, setShowVideoGiftModal] = useState(false);
   const [selectedVideoForGift, setSelectedVideoForGift] = useState<string | number | null>(null);
 
@@ -238,9 +284,11 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     videoId?: string | number;
     giftId: string;
     gift: string;
+    blobUrl?: string;
     amount?: number;
     color_premiun?: string;
   } | null>(null);
+  const giftAnimBlobRef = useRef<string | null>(null);
 
   const [expandedDescriptions, setExpandedDescriptions] = useState<{ [key: string]: boolean }>({});
   const [carouselDots, setCarouselDots] = useState<{ [key: string]: { index: number; total: number } }>({});
@@ -250,7 +298,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [shownAds, setShownAds] = useState<Set<string>>(new Set());
   const [lastAdTimestamp, setLastAdTimestamp] = useState<number>(0);
   const [adSequenceCount, setAdSequenceCount] = useState<number>(0);
-  const [videoLoopCount, setVideoLoopCount] = useState<Record<string, number>>({});
+  const [, setVideoLoopCount] = useState<Record<string, number>>({});
   const lastVideoTimeRef = useRef<Record<string, number>>({});
   const typingAudioRef = useRef<HTMLAudioElement | null>(null);
   const [showStoriesBar, setShowStoriesBar] = useState(true);
@@ -264,7 +312,28 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [isFetchingFeed, setIsFetchingFeed] = useState(false);
   const lastFetchedLengthRef = useRef<number>(0);
 
+  // Pull-to-refresh — usa el hook compartido
+  const { isPulling: isPullRefreshing, pullProgress, onTouchStart: handlePullTouchStart, onTouchMove: handlePullTouchMove, onTouchEnd: handlePullTouchEnd } = usePullToRefresh({
+    onRefresh: async () => {
+      setActiveVideo(0);
+      lastFetchedLengthRef.current = 0;
+      await Promise.all([
+        refreshFeed()(dispatch),
+        getActiveStories()(dispatch),
+      ]);
+    },
+    // Feed vacío: siempre permitir. Feed con videos: solo desde el primer video en scroll 0
+    checkScrollTop: () => !mediaVideo?.length || (activeVideo === 0 && (feedScrollRef.current?.scrollTop ?? 0) === 0),
+  });
+
   useEffect(() => {
+    // Pre-fetch music for next 4 videos as user scrolls
+    if (activeVideo !== null && mediaVideo) {
+      mediaVideo.slice(activeVideo + 1, activeVideo + 5).forEach(v => {
+        if (v.audio_track_url) prefetchAudioUrl(v.audio_track_url)
+      })
+    }
+
     // Threshold: Trigger when user reaches the 5th video from the end
     const threshold = 5;
     const currentLength = mediaVideo?.length || 0;
@@ -307,7 +376,9 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
   // Fetch delivery config once on mount
   useEffect(() => {
-    axios.get(`${getBaseUrl()}api/ads/campaigns/config/`, {
+    const base = getBaseUrl();
+    if (!base?.startsWith('http')) return;
+    axios.get(`${base.replace(/\/+$/, '')}/api/ads/campaigns/config/`, {
       headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` }
     }).then(r => setAdConfig(r.data)).catch(() => { });
   }, []);
@@ -333,7 +404,20 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     if (!media?.length) return
     const entries = media.map(v => ({ username: v.user_id.username, excludeId: v.id }))
     prefetchBatch(entries)
+    // Pre-fetch only first 4 music tracks — enough for immediate playback without RAM abuse
+    media.slice(0, 4).forEach(v => {
+      if (v.audio_track_url) prefetchAudioUrl(v.audio_track_url)
+    })
   }, [media, prefetchBatch]);
+
+  useEffect(() => {
+    if (activeVideo === null || !mediaVideo?.length) return;
+    const start = Math.max(0, activeVideo - 1);
+    const end = Math.min(mediaVideo.length, activeVideo + 3);
+    mediaVideo.slice(start, end).forEach(v => {
+      if (v.audio_track_url) prefetchAudioUrl(v.audio_track_url)
+    })
+  }, [activeVideo, mediaVideo]);
 
   const { activeIncomingCall, activeOutgoingCall } = useCallStore();
   const isCallActive = activeIncomingCall?.status === 'active' || activeOutgoingCall?.status === 'active';
@@ -355,21 +439,21 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   };
 
   const fetchAds = async () => {
+    const base = getBaseUrl();
+    if (!base?.startsWith('http')) return;
     try {
       const params: Record<string, any> = {};
       if (userGpsRef.current) {
         params.lat = userGpsRef.current.lat;
         params.lng = userGpsRef.current.lng;
       }
-      const response = await axios.get(`${getBaseUrl()}api/ads/campaigns/serve/`, {
+      const response = await axios.get(`${base.replace(/\/+$/, '')}/api/ads/campaigns/serve/`, {
         headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` },
         params,
       });
       const validAds = Array.isArray(response.data) ? response.data.filter(isPlayableAd) : [];
       setAds(validAds);
-    } catch (error) {
-      console.error("Error fetching ads:", error);
-    }
+    } catch { }
   };
 
   const isPremiumUser = LoginReducer?.user?.is_buzzy_premium === true;
@@ -432,20 +516,46 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     });
   }, [isCallActive, activeVideo, mergedFeed]);
 
+  // Ref to cancel any pending retry RAF for audio sync
+  const audioSyncRafRef = useRef<number>(0);
+
   const ensureAudioForTrack = useCallback(
     (feedItem?: any, videoElement?: HTMLVideoElement | null) => {
-      const isVideoPlaying = Boolean(
-        videoElement &&
-        !videoElement.paused &&
-        !videoElement.muted &&
-        !isMuted &&
-        activeAdIndex === null &&
-        viewingStoryUserIndex === null
-      );
+      // Cancel any pending retry before evaluating new state
+      if (audioSyncRafRef.current) {
+        cancelAnimationFrame(audioSyncRafRef.current);
+        audioSyncRafRef.current = 0;
+      }
 
-      if (!isAudioUnlocked || !feedItem || feedItem.type !== 'video' || !feedItem.audio_track_url || !isVideoPlaying) {
+      const globallyBlocked =
+        !isAudioUnlocked ||
+        !feedItem ||
+        feedItem.type !== 'video' ||
+        !feedItem.audio_track_url ||
+        isMuted ||
+        activeAdIndex !== null ||
+        viewingStoryUserIndex !== null;
+
+      if (globallyBlocked) {
         musicAudioRef.current?.pause();
-        activeAudioTrackRef.current = null;
+        if (!feedItem || feedItem.type !== 'video' || !feedItem.audio_track_url) {
+          activeAudioTrackRef.current = null;
+        }
+        return;
+      }
+
+      // Video might be in a transitional state (play() called but paused still true for one frame).
+      // If so, retry on the next animation frame instead of giving up.
+      if (!videoElement || videoElement.paused) {
+        audioSyncRafRef.current = requestAnimationFrame(() => {
+          audioSyncRafRef.current = 0;
+          if (!videoElement || videoElement.paused) {
+            // Still paused after one frame — legitimately stopped, nothing to do
+            musicAudioRef.current?.pause();
+            return;
+          }
+          ensureAudioForTrack(feedItem, videoElement);
+        });
         return;
       }
 
@@ -453,52 +563,93 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       const volumeMusic = Math.min(Math.max(feedItem.volume_music ?? 0.8, 0), 1);
       const volumeOriginal = Math.min(Math.max(feedItem.volume_original ?? 1.0, 0), 1);
       const trackId = feedItem.audio_track_id || audioUrl;
+      const trimStart = Math.max(0, feedItem.audio_trim_start ?? 0);
+      const trimEndCandidate = feedItem.audio_trim_end;
+      const trimEndFromFeed = typeof trimEndCandidate === "number" && isFinite(trimEndCandidate)
+        ? Math.max(trimStart, trimEndCandidate)
+        : null;
 
       // Apply original-audio volume to the video element immediately
-      if (videoElement) {
-        videoElement.volume = volumeOriginal;
-      }
-
-      const trimStart = feedItem.audio_trim_start ?? 0;
+      videoElement.volume = volumeOriginal;
+      activeFeedAudioTrimStartRef.current = trimStart;
+      activeFeedAudioTrimEndRef.current = trimEndFromFeed ?? trimStart;
 
       if (
         !musicAudioRef.current ||
-        musicAudioRef.current.src !== audioUrl ||
         activeAudioTrackRef.current !== trackId
       ) {
-        // Cleanup previous
+        // Cleanup previous track
         if (musicAudioRef.current) {
           musicAudioRef.current.pause();
           musicAudioRef.current.onended = null;
-        }
-        const audio = new Audio(audioUrl);
-        audio.loop = false;
-
-        const setTime = () => {
-          audio.currentTime = trimStart;
-          audio.removeEventListener("loadedmetadata", setTime);
-        };
-        audio.addEventListener("loadedmetadata", setTime);
-
-        if (audio.readyState >= 1) {
-          audio.currentTime = trimStart;
+          musicAudioRef.current.ontimeupdate = null;
+          musicAudioRef.current = null;
         }
 
-        // Manual loop — always restart from trimStart, never from 0
-        audio.onended = () => {
-          audio.currentTime = trimStart;
-          audio.play().catch(() => { });
-        };
-        musicAudioRef.current = audio;
+        // Mark track as pending AFTER clearing — this prevents the null-ref path
+        // in the else branch from running while the fetch is in flight
         activeAudioTrackRef.current = trackId;
+
+        prefetchAudioUrl(audioUrl)
+          .then(blobUrl => {
+            // Discard if user scrolled to a different track while fetching
+            if (activeAudioTrackRef.current !== trackId) return;
+
+            const audio = new Audio(blobUrl);
+            audio.loop = false;
+            audio.muted = false;
+            audio.preload = "auto";
+
+            const initAudio = () => {
+              audio.volume = volumeMusic;
+              audio.currentTime = trimStart;
+              activeFeedAudioTrimEndRef.current =
+                trimEndFromFeed ??
+                Math.max(trimStart, isFinite(audio.duration) ? audio.duration : trimStart);
+            };
+
+            // loadedmetadata fires asynchronously; blob URLs often already have
+            // metadata ready so we also check readyState synchronously as fallback
+            audio.addEventListener("loadedmetadata", initAudio, { once: true });
+            if (audio.readyState >= 1) initAudio();
+
+            audio.onended = () => {
+              audio.currentTime = trimStart;
+              audio.play().catch(() => {});
+            };
+            audio.ontimeupdate = () => {
+              const trimEnd = activeFeedAudioTrimEndRef.current;
+              if (trimEnd > trimStart && audio.currentTime >= trimEnd - 0.2) {
+                audio.currentTime = trimStart;
+                audio.play().catch(() => {});
+              }
+            };
+
+            musicAudioRef.current = audio;
+
+            // Only play if the video is still playing at this point
+            if (videoElement && !videoElement.paused) {
+              audio.play().catch(() => {});
+            }
+          })
+          .catch(() => {
+            // Fetch failed — clear the pending marker so the next scroll attempt retries
+            if (activeAudioTrackRef.current === trackId) {
+              activeAudioTrackRef.current = null;
+            }
+          });
+
+        return;
       }
 
+      // Same track already loaded — just resume
+      if (!musicAudioRef.current) return;
       musicAudioRef.current.volume = volumeMusic;
       musicAudioRef.current.muted = false;
-      const playPromise = musicAudioRef.current.play();
-      if (playPromise?.catch) {
-        playPromise.catch(() => { });
+      if (trimEndFromFeed !== null) {
+        activeFeedAudioTrimEndRef.current = trimEndFromFeed;
       }
+      musicAudioRef.current.play().catch(() => {});
     },
     [activeAdIndex, isAudioUnlocked, isMuted, viewingStoryUserIndex],
   );
@@ -518,8 +669,9 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     const watchLoop = () => {
       if (!videoElement) return;
       const ct = videoElement.currentTime;
+      const trimStart = activeFeedAudioTrimStartRef.current;
+
       if (ct < prevTime - 0.5 && musicAudioRef.current && feedItem?.audio_track_url) {
-        const trimStart = feedItem.audio_trim_start ?? 0;
         // Assign currentTime only if metadata logic is somewhat initialized
         if (musicAudioRef.current.readyState >= 1) {
           musicAudioRef.current.currentTime = trimStart;
@@ -557,6 +709,8 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       musicAudioRef.current?.pause();
       musicAudioRef.current = null;
       activeAudioTrackRef.current = null;
+      activeFeedAudioTrimStartRef.current = 0;
+      activeFeedAudioTrimEndRef.current = 0;
       storyAudioRef.current?.pause();
       storyAudioRef.current = null;
       activeStoryAudioTrackRef.current = null;
@@ -571,14 +725,15 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         return;
       }
       if (index === activeVideo && activeAdIndex === null) {
-        if (video.paused) {
+        const shouldBlockInitialAutoplay = index === 0 && !hasUserInteracted.current && !hasLeftInitialVideoRef.current;
+        if (video.paused && !videosPaused && !shouldBlockInitialAutoplay) {
           video.play().catch(() => { })
         }
       } else if (!video.paused) {
         video.pause();
       }
     });
-  }, [activeVideo, activeAdIndex]);
+  }, [activeVideo, activeAdIndex, videosPaused]);
 
   // Pause active feed video when upload modal opens
   useEffect(() => {
@@ -586,7 +741,8 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       videoRefs.current.forEach(v => { if (v && !v.paused) v.pause() })
     }
     const onResume = () => {
-      if (activeVideo !== null) {
+      const shouldBlockInitialAutoplay = activeVideo === 0 && !hasUserInteracted.current && !hasLeftInitialVideoRef.current;
+      if (activeVideo !== null && !shouldBlockInitialAutoplay) {
         const v = videoRefs.current[activeVideo]
         if (v && v.paused) v.play().catch(() => { })
       }
@@ -598,6 +754,21 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       window.removeEventListener('buzzy:resumefeed', onResume)
     }
   }, [activeVideo])
+
+  // Pause feed video when chat modal opens, resume when it closes
+  useEffect(() => {
+    if (showMessages) {
+      videoRefs.current.forEach(v => { if (v && !v.paused) v.pause() })
+      musicAudioRef.current?.pause()
+    } else {
+      const shouldBlockInitialAutoplay = activeVideo === 0 && !hasUserInteracted.current && !hasLeftInitialVideoRef.current;
+      if (activeVideo !== null && !shouldBlockInitialAutoplay) {
+        const v = videoRefs.current[activeVideo]
+        if (v && v.paused) v.play().catch(() => { })
+        if (musicAudioRef.current?.paused) musicAudioRef.current?.play().catch(() => { })
+      }
+    }
+  }, [showMessages, activeVideo])
 
   useEffect(() => {
     sendAudioRef.current = new Audio(sendMessageSound);
@@ -629,118 +800,131 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   }, [stories]);
 
   // ── Story Audio — direct, clean approach ──────────────────────────────────
+  // This effect creates/destroys the audio when the story changes.
+  // Pause/resume is handled separately below to avoid restarting from trimStart on unpause.
   useEffect(() => {
-    // Tear down any previous audio before starting the next story
     stopStoryAudio(false);
 
-    if (viewingStoryUserIndex === null || isStoryPaused || isMuted) return;
+    if (viewingStoryUserIndex === null) return;
 
     const currentGroup = groupedStories[viewingStoryUserIndex];
     if (!currentGroup) return;
     const currentStoryItem = currentGroup.media?.[currentStoryItemIndex];
     if (!currentStoryItem) return;
 
-    // Find the correct story for THIS media item (important for multi-story users)
     const originalStory = (stories as Story[])?.find((s) => s.id === currentStoryItem.story);
     if (!originalStory?.audio_track_url) return;
 
+    const audioUrl = originalStory.audio_track_url;
     const trimStart = originalStory.audio_trim_start ?? 0;
     const trimEnd = originalStory.audio_trim_end ?? null;
     const volume = Math.min(Math.max(originalStory.audio_volume_music ?? 0.8, 0), 1);
 
-    // Silence the story video's native audio if we have a custom track
     const videoEl = storyVideoRef.current;
     if (videoEl) videoEl.volume = 0;
 
-    const audio = new Audio(originalStory.audio_track_url);
-    audio.loop = false;
-    audio.preload = "auto";
-    // Start muted — browsers always allow muted audio to play regardless of autoplay policy
-    audio.muted = true;
-    audio.volume = 0;
+    const requestId = storyAudioRequestIdRef.current;
 
-    const loop = () => {
-      const end = trimEnd !== null ? trimEnd : audio.duration;
-      if (end && audio.currentTime >= end - 0.15) {
+    prefetchAudioUrl(audioUrl).then(blobUrl => {
+      if (requestId !== storyAudioRequestIdRef.current) return;
+
+      const audio = new Audio(blobUrl);
+      audio.loop = false;
+      audio.preload = "auto";
+      audio.muted = true;
+      audio.volume = 0;
+
+      const loop = () => {
+        const end = trimEnd !== null ? trimEnd : audio.duration;
+        if (end && audio.currentTime >= end - 0.15) {
+          audio.currentTime = trimStart;
+          audio.play().catch(() => { });
+        }
+      };
+      audio.ontimeupdate = loop;
+      audio.onended = () => {
         audio.currentTime = trimStart;
         audio.play().catch(() => { });
-      }
-    };
-    audio.ontimeupdate = loop;
-    audio.onended = () => {
-      audio.currentTime = trimStart;
-      audio.play().catch(() => { });
-    };
+      };
 
-    const requestId = storyAudioRequestIdRef.current;
-    const beginPlay = () => {
-      if (requestId !== storyAudioRequestIdRef.current) return;
-      audio.currentTime = trimStart;
-      audio.muted = true; // muted = always autoplay allowed
-      audio.play().then(() => {
-        if (requestId !== storyAudioRequestIdRef.current) {
-          audio.pause();
-          return;
-        }
-        // Once playing, immediately unmute to hear the sound
-        audio.muted = false;
-        const targetVolume = volume;
-        const steps = 8;
-        const stepMs = 25;
-        const stepSize = targetVolume / steps;
-        let currentStep = 0;
-        audio.volume = 0;
-        if (storyAudioFadeTimerRef.current !== null) {
-          window.clearInterval(storyAudioFadeTimerRef.current);
-        }
-        storyAudioFadeTimerRef.current = window.setInterval(() => {
+      const beginPlay = () => {
+        if (requestId !== storyAudioRequestIdRef.current) return;
+        audio.currentTime = trimStart;
+        audio.muted = true;
+        audio.play().then(() => {
           if (requestId !== storyAudioRequestIdRef.current) {
-            if (storyAudioFadeTimerRef.current !== null) {
-              window.clearInterval(storyAudioFadeTimerRef.current);
-              storyAudioFadeTimerRef.current = null;
-            }
+            audio.pause();
             return;
           }
-          currentStep += 1;
-          audio.volume = Math.min(targetVolume, currentStep * stepSize);
-          if (currentStep >= steps) {
-            if (storyAudioFadeTimerRef.current !== null) {
-              window.clearInterval(storyAudioFadeTimerRef.current);
-              storyAudioFadeTimerRef.current = null;
-            }
-          }
-        }, stepMs);
-      }).catch(() => {
-        // If even muted play fails, retry on next click (very rare)
-        document.addEventListener("click", () => {
-          if (requestId !== storyAudioRequestIdRef.current) return;
           audio.muted = false;
-          audio.play().catch(() => { });
-        }, { once: true });
-      });
-    };
+          if (isStoryPaused || isMuted) {
+            audio.pause();
+            return;
+          }
+          const targetVolume = volume;
+          const steps = 8;
+          const stepMs = 25;
+          const stepSize = targetVolume / steps;
+          let currentStep = 0;
+          audio.volume = 0;
+          if (storyAudioFadeTimerRef.current !== null) {
+            window.clearInterval(storyAudioFadeTimerRef.current);
+          }
+          storyAudioFadeTimerRef.current = window.setInterval(() => {
+            if (requestId !== storyAudioRequestIdRef.current) {
+              if (storyAudioFadeTimerRef.current !== null) {
+                window.clearInterval(storyAudioFadeTimerRef.current);
+                storyAudioFadeTimerRef.current = null;
+              }
+              return;
+            }
+            currentStep += 1;
+            audio.volume = Math.min(targetVolume, currentStep * stepSize);
+            if (currentStep >= steps) {
+              if (storyAudioFadeTimerRef.current !== null) {
+                window.clearInterval(storyAudioFadeTimerRef.current);
+                storyAudioFadeTimerRef.current = null;
+              }
+            }
+          }, stepMs);
+        }).catch(() => {
+          document.addEventListener("click", () => {
+            if (requestId !== storyAudioRequestIdRef.current) return;
+            audio.muted = false;
+            audio.play().catch(() => { });
+          }, { once: true });
+        });
+      };
 
-    if (audio.readyState >= 1) {
-      beginPlay();
-    } else {
-      audio.addEventListener("loadedmetadata", beginPlay, { once: true });
-    }
+      if (audio.readyState >= 1) {
+        beginPlay();
+      } else {
+        audio.addEventListener("loadedmetadata", beginPlay, { once: true });
+      }
 
-    storyAudioRef.current = audio;
-    activeStoryAudioTrackRef.current = originalStory.audio_track_url;
+      storyAudioRef.current = audio;
+      activeStoryAudioTrackRef.current = audioUrl;
+    });
+
+    activeStoryAudioTrackRef.current = audioUrl;
 
     return () => {
-      if (storyAudioRef.current === audio) {
-        stopStoryAudio(false);
-      } else {
-        audio.pause();
-        audio.ontimeupdate = null;
-        audio.onended = null;
-        audio.src = "";
-        audio.load();
-      }
+      stopStoryAudio(false);
     };
-  }, [viewingStoryUserIndex, currentStoryItemIndex, groupedStories, stories, isStoryPaused, isMuted, stopStoryAudio]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewingStoryUserIndex, currentStoryItemIndex, groupedStories, stories, stopStoryAudio]);
+
+  // Pause/resume existing story audio when isStoryPaused or isMuted changes (no audio recreation)
+  useEffect(() => {
+    const audio = storyAudioRef.current;
+    if (!audio) return;
+    if (isStoryPaused || isMuted) {
+      audio.pause();
+    } else {
+      audio.play().catch(() => { });
+    }
+  }, [isStoryPaused, isMuted]);
+
 
   useEffect(() => {
     sendAudioRef.current = new Audio(sendMessageSound);
@@ -748,36 +932,49 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
   useEffect(() => {
     const unlockAudio = () => {
-      if (!sendAudioRef.current || audioUnlockedRef.current) return;
+      if (audioUnlockedRef.current) return;
+      if (!sendAudioRef.current) return;
 
-      sendAudioRef.current
-        .play()
+      const sa = sendAudioRef.current;
+      sa.volume = 0;
+      sa.play()
         .then(() => {
-          sendAudioRef.current!.pause();
-          sendAudioRef.current!.currentTime = 0;
+          sa.pause();
+          sa.currentTime = 0;
+          sa.volume = 1;
           audioUnlockedRef.current = true;
           setIsAudioUnlocked(true);
-        })
-        .catch(() => { });
+          // Remove listeners only after confirmed success
+          window.removeEventListener("click", unlockAudio);
+          window.removeEventListener("keydown", unlockAudio);
+          window.removeEventListener("touchstart", unlockAudio);
+          window.removeEventListener("touchend", unlockAudio);
 
-      typingAudioRef.current
-        ?.play()
-        .then(() => {
-          typingAudioRef.current!.pause();
-          typingAudioRef.current!.currentTime = 0;
+          // Also unlock typing sound if available
+          const ta = typingAudioRef.current;
+          if (ta) {
+            ta.volume = 0;
+            ta.play()
+              .then(() => { ta.pause(); ta.currentTime = 0; ta.volume = 1; })
+              .catch(() => {});
+          }
         })
-        .catch(() => { });
-
-      window.removeEventListener("click", unlockAudio);
-      window.removeEventListener("keydown", unlockAudio);
+        .catch(() => {
+          // play() rejected (browser policy) — leave listeners registered so the
+          // next user gesture retries the unlock
+        });
     };
 
     window.addEventListener("click", unlockAudio);
     window.addEventListener("keydown", unlockAudio);
+    window.addEventListener("touchstart", unlockAudio, { passive: true });
+    window.addEventListener("touchend", unlockAudio, { passive: true });
 
     return () => {
       window.removeEventListener("click", unlockAudio);
       window.removeEventListener("keydown", unlockAudio);
+      window.removeEventListener("touchstart", unlockAudio);
+      window.removeEventListener("touchend", unlockAudio);
     };
   }, []);
 
@@ -788,69 +985,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     chatSocketActiveRef.current = !!selectedChat;
   }, [selectedChat]);
 
-  // Función para convertir nombres de colores a valores RGB/hex con colores MÁS INTENSOS
-  const getColorValue = (colorName: string | undefined): { hex: string; rgb: string; rgba: (opacity: number) => string } => {
-    if (!colorName) {
-      // Color por defecto (azul intenso)
-      return {
-        hex: '#00f0ff',
-        rgb: 'rgb(0, 240, 255)',
-        rgba: (opacity: number) => `rgba(0, 240, 255, ${opacity})`
-      };
-    }
-
-    // Colores originales con ligero aumento de intensidad
-    const colorMap: Record<string, { hex: string; rgb: string }> = {
-      red: { hex: '#ef4444', rgb: 'rgb(239, 68, 68)' },
-      blue: { hex: '#3b82f6', rgb: 'rgb(59, 130, 246)' },
-      green: { hex: '#10b981', rgb: 'rgb(16, 185, 129)' },
-      yellow: { hex: '#fbbf24', rgb: 'rgb(251, 191, 36)' }, // Un poco más brillante que el original
-      purple: { hex: '#a855f7', rgb: 'rgb(168, 85, 247)' },
-      pink: { hex: '#ec4899', rgb: 'rgb(236, 72, 153)' },
-      orange: { hex: '#f97316', rgb: 'rgb(249, 115, 22)' },
-      cyan: { hex: '#06b6d4', rgb: 'rgb(6, 182, 212)' },
-      indigo: { hex: '#6366f1', rgb: 'rgb(99, 102, 241)' },
-      gold: { hex: '#fbbf24', rgb: 'rgb(251, 191, 36)' },
-      multi: { hex: '#ff00ff', rgb: 'rgb(255, 0, 255)' },
-      rainbow: { hex: '#9333ea', rgb: 'rgb(147, 51, 234)' },
-    };
-
-    const color = colorMap[colorName.toLowerCase()];
-    if (color) {
-      // Extraer valores RGB del hex para crear rgba
-      const hex = color.hex.replace('#', '');
-      const r = parseInt(hex.substring(0, 2), 16);
-      const g = parseInt(hex.substring(2, 4), 16);
-      const b = parseInt(hex.substring(4, 6), 16);
-
-      return {
-        hex: color.hex,
-        rgb: color.rgb,
-        rgba: (opacity: number) => `rgba(${r}, ${g}, ${b}, ${opacity})`
-      };
-    }
-
-    // Si el color viene en formato hex, usarlo directamente
-    if (colorName.startsWith('#')) {
-      const hex = colorName.replace('#', '');
-      const r = parseInt(hex.substring(0, 2), 16);
-      const g = parseInt(hex.substring(2, 4), 16);
-      const b = parseInt(hex.substring(4, 6), 16);
-
-      return {
-        hex: colorName,
-        rgb: `rgb(${r}, ${g}, ${b})`,
-        rgba: (opacity: number) => `rgba(${r}, ${g}, ${b}, ${opacity})`
-      };
-    }
-
-    // Color por defecto si no se reconoce
-    return {
-      hex: '#00f0ff',
-      rgb: 'rgb(0, 240, 255)',
-      rgba: (opacity: number) => `rgba(0, 240, 255, ${opacity})`
-    };
-  };
 
   // ─── WebSocket events (via singleton context) ─────────────────────────────
 
@@ -874,7 +1008,19 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     };
     const normalizeGiftList = (value: any) => (Array.isArray(value) ? value : []);
     if (user.id == data.from_user) {
-      setGiftAnimation(giftEntry);
+      if (data.gift_video) {
+        if (giftAnimBlobRef.current) URL.revokeObjectURL(giftAnimBlobRef.current);
+        fetch(getMediaUrl(data.gift_video))
+          .then(r => r.blob())
+          .then(blob => {
+            const blobUrl = URL.createObjectURL(blob);
+            giftAnimBlobRef.current = blobUrl;
+            setGiftAnimation({ ...giftEntry, blobUrl });
+          })
+          .catch(() => setGiftAnimation(giftEntry));
+      } else {
+        setGiftAnimation(giftEntry);
+      }
     } else {
       setIsGift(prev => {
         const current = normalizeGiftList(prev);
@@ -938,10 +1084,10 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
           : video
       ) : prev
     );
-    if (currentVideoId?.toString() === data.video_id?.toString()) {
+    if (currentVideoIdRef.current?.toString() === data.video_id?.toString()) {
       setComments(prev => upsertComment(prev, data));
     }
-  }, [currentVideoId, setMedia, upsertComment]));
+  }, [setMedia, upsertComment]));
 
   useWsEvent("new_view", useCallback((data: any) => {
     setMedia(prev =>
@@ -1009,6 +1155,10 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     setMedia(media);
   }, [media]);
 
+  useEffect(() => {
+    setSelectedStoryLocation(null);
+  }, [viewingStoryUserIndex, currentStoryItemIndex]);
+
   // Reset scroll to top on mount so stories bar is always visible on reload
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -1027,21 +1177,79 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     if (hasFetchedStories.current) return;
     hasFetchedStories.current = true;
 
+    // 1. Mostrar cache inmediatamente
+    loadStoriesCache().then((cached) => {
+      if (cached.length > 0) {
+        setStories(cached);
+        cached.forEach((s: Story) => { if (s.audio_track_url) prefetchAudioUrl(s.audio_track_url); });
+      }
+    }).catch(() => {});
+
+    // 2. Pedir al servidor y actualizar
     getActiveStories()(dispatch).then((res: any) => {
-      setStories(Array.isArray(res) ? res : []);
+      const fresh = Array.isArray(res) ? res : [];
+      if (fresh.length > 0) {
+        setStories(fresh);
+        saveStories(fresh).catch(() => {});
+        fresh.forEach((s: Story) => { if (s.audio_track_url) prefetchAudioUrl(s.audio_track_url); });
+      }
     });
   }, [dispatch]); // Solo depende de dispatch que es estable
+
+  // Suscripción al evento global de refresh — refresca feed + stories
+  useEffect(() => {
+    const handleRefresh = () => {
+      if (!navigator.onLine) {
+        window.dispatchEvent(new CustomEvent("buzzy:offline-toast"));
+        return;
+      }
+      refreshFeed()(dispatch);
+      getActiveStories()(dispatch).then((res: any) => {
+        const refreshed = Array.isArray(res) ? res : [];
+        setStories(refreshed);
+        refreshed.forEach((s: Story) => { if (s.audio_track_url) prefetchAudioUrl(s.audio_track_url); });
+      });
+    };
+    const handleOfflineToast = () => {
+      setOfflineToast(true);
+      setTimeout(() => setOfflineToast(false), 3000);
+    };
+    window.addEventListener("buzzy:refresh", handleRefresh);
+    window.addEventListener("buzzy:offline-toast", handleOfflineToast);
+    return () => {
+      window.removeEventListener("buzzy:refresh", handleRefresh);
+      window.removeEventListener("buzzy:offline-toast", handleOfflineToast);
+    };
+  }, [dispatch]);
 
   const handleCommentClick = (index: number) => {
     if (mediaVideo && mediaVideo[index]) {
       const videoId = mediaVideo[index].id.toString();
+      const videoUuid = mediaVideo[index].uuid?.toString() ?? "";
       setCurrentVideoId(videoId);
-      setComments(null); // Limpiar comentarios previos inmediatamente
+      currentVideoIdRef.current = videoId;
+      setComments(null);
       setShowCommentsModal(true);
-      getComment({ video_id: mediaVideo?.[index]?.uuid?.toString() ?? "" })(dispatch).then((res: any) => {
+
+      if (!navigator.onLine) {
+        setCommentsOffline(true);
+        return;
+      }
+
+      setCommentsOffline(false);
+      getComment({ video_id: videoUuid })(dispatch).then((res: unknown) => {
         setComments(Array.isArray(res) ? res : [])
       })
     }
+  }
+
+  const handleRetryComments = () => {
+    setCommentsOffline(false);
+    const videoUuid = mediaVideo?.find(v => v.id.toString() === currentVideoId)?.uuid?.toString() ?? "";
+    if (!videoUuid) return;
+    getComment({ video_id: videoUuid })(dispatch).then((res: unknown) => {
+      setComments(Array.isArray(res) ? res : [])
+    })
   }
   const handlePostComment = (parent_uuid?: string, audioBlob?: Blob, audioDuration?: number, imageFile?: File) => {
     if (!commentText.trim() && !audioBlob && !imageFile) return;
@@ -1050,7 +1258,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     // Record interaction for recommendation system
     const videoItem = mediaVideo?.find(v => v.id.toString() === currentVideoId);
     if (videoItem) {
-      recordInteraction(videoItem.category?.id || videoItem.category || null);
+      recordInteraction(videoItem.category || null);
     }
 
     createComment({
@@ -1166,14 +1374,23 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
           if (entry.isIntersecting) {
             // Track intersection for recommendation system
-            if (videoItem && videoItem.type === 'video') {
-              onIntersectionChange(videoItem.id, true, videoItem.category?.id || videoItem.category || null);
+          if (videoItem && videoItem.type === 'video') {
+              onIntersectionChange(videoItem.id, true, videoItem.category || null);
             }
 
-            if (activeAdIndex !== index) {
+            if (index !== 0) {
+              hasLeftInitialVideoRef.current = true;
+            }
+
+            const shouldBlockInitialAutoplay = index === 0 && !hasUserInteracted.current && !hasLeftInitialVideoRef.current;
+            video.currentTime = 0;
+            if (activeAdIndex !== index && !videosPausedRef.current && !shouldBlockInitialAutoplay && !feedLockedRef.current) {
               video.play().catch(() => {/* Autoplay ignored */ })
+            } else {
+              video.pause()
             }
             setActiveVideo(index)
+            setActiveOptionsVideoId(null)
             // Reset loop count for this video when it comes into view
             const vidId = mergedFeed[index]?.type === 'video' ? mergedFeed[index].id?.toString() : `ad-${mergedFeed[index].id}`;
             if (vidId) {
@@ -1183,9 +1400,12 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
           } else {
             // Track leaving view
             if (videoItem && videoItem.type === 'video') {
-              onIntersectionChange(videoItem.id, false, videoItem.category?.id || videoItem.category || null);
+              onIntersectionChange(videoItem.id, false, videoItem.category || null);
             }
-            video.pause()
+            // Pause the video and its music track immediately when leaving view.
+            // The active-video useEffect will resume the correct audio for the new video.
+            video.pause();
+            musicAudioRef.current?.pause();
           }
         })
       },
@@ -1216,6 +1436,16 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     if (activeAdIndex !== null) return;
     const videoElement = videoRefs.current[index];
     if (!videoElement) return;
+    hasUserInteracted.current = true;
+    videosPausedRef.current = false;
+    setVideosPaused(false);
+
+    // First tap unlocks the feed — from here on, scrolling autoplays normally
+    if (feedLockedRef.current) {
+      feedLockedRef.current = false;
+      setFeedLocked(false);
+    }
+
     if (videoElement.paused) {
       if (index === 0) hasPlayedFirstVideo.current = true;
       videoElement.play().catch(error => {
@@ -1225,14 +1455,70 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       videoElement.pause();
     }
   };
+  const handleShareVideo = async (videoUrl: string, description?: string) => {
+    setActiveOptionsVideoId(null);
+    setShareSent({});
+    setShareSearch('');
+    setShareModal({ videoId: '', videoUrl, description: description || '' });
+    // Cargar contactos (chats existentes)
+    try {
+      const res = await apiClient.get('/api/chats/');
+      const chats = res.data?.chats ?? res.data ?? [];
+      setShareContacts(Array.isArray(chats) ? chats : []);
+    } catch { setShareContacts([]); }
+  };
+
+  const handleSendShareToContact = async (chatUuid: string) => {
+    if (!shareModal || shareSending) return;
+    setShareSending(chatUuid);
+    try {
+      const form = new FormData();
+      form.append('chat_uuid', chatUuid);
+      form.append('content', shareModal.videoUrl);
+      form.append('message_type', 'text');
+      await apiClient.post('api/chats/send/', form, { headers: { 'Content-Type': 'multipart/form-data' } });
+      setShareSent(prev => ({ ...prev, [chatUuid]: true }));
+    } catch { /* silent */ }
+    finally { setShareSending(null); }
+  };
+
+  const handleDownloadVideo = async (videoUrl: string, videoId: string) => {
+    try {
+      const res = await fetch(videoUrl);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `buzzy_${videoId}.mp4`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch {
+      // fallback: abrir en nueva pestaña
+      window.open(videoUrl, '_blank');
+    }
+    setActiveOptionsVideoId(null);
+  };
+
+  const handleSaveClick = (videoId: string) => {
+    const isSaved = savedMap[videoId];
+    setSavedMap(prev => ({ ...prev, [videoId]: !isSaved }));
+    if (isSaved) {
+      unsaveVideo(videoId)(dispatch as any);
+    } else {
+      saveVideo(videoId)(dispatch as any);
+    }
+  };
+
   const handleLikeClick = (videoId: string, index: number) => {
     // Record interaction for recommendation system
     const videoItem = mediaVideo?.[index];
     if (videoItem) {
-      recordInteraction(videoItem.category?.id || videoItem.category || null);
+      recordInteraction(videoItem.category || null);
     }
 
-    createLike({ video_id: videoId })(dispatch).then((res: any) => {
+    createLike({ video_id: videoId })(dispatch).then(() => {
     }).catch((error: any) => {
       console.error("Error dispatching like action for video ID:", videoId, error);
     });
@@ -1245,7 +1531,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         ...prev,
         [videoId]: false,
       }));
-    }, 1000);
+    }, 450);
   };
   const iconTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const handleGridVideoToggle = (videoId: string, videoElement: HTMLVideoElement | null) => {
@@ -1285,21 +1571,36 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   };
   const toggleMute = () => setIsMuted(!isMuted)
   // --- Logic for Create History ---
-  const handleAddHistory = () => {
-    // We click the hidden input element programmatically
-    fileInputRef.current?.click();
-  }
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    if (file.size > 50 * 1024 * 1024) {
-      setFeedbackModal({ show: true, success: false, message: "El archivo es demasiado grande. El máximo permitido es 50MB." });
-      return;
-    }
-    // Open editor instead of uploading directly
+  const openStoryEditor = (file: File) => {
+    setShowStoryPicker(false);
+    // Pause feed video when story editor opens
+    videoRefs.current.forEach(v => { if (v && !v.paused) v.pause(); });
+    musicAudioRef.current?.pause();
     setStoryEditorFile(file);
-    if (fileInputRef.current) fileInputRef.current.value = "";
   }
+
+  const handleAddHistory = () => {
+    if (isUploadingStory) return;
+    setShowStoryPicker(prev => !prev);
+  }
+
+  const handlePickStoryFromLibrary = async () => {
+    const picked = await pickMedia("any", 50);
+    if (!picked) return;
+    openStoryEditor(picked.file);
+  }
+
+  const handleCaptureStoryPhoto = async () => {
+    const picked = await pickMedia("image", 50, "camera");
+    if (!picked) return;
+    openStoryEditor(picked.file);
+  }
+
+  // const handleCaptureStoryVideo = async () => {
+  //   const picked = await pickMedia("video", 50, "camera");
+  //   if (!picked) return;
+  //   openStoryEditor(picked.file);
+  // }
 
   const handleStoryPublish = async (
     file: File,
@@ -1308,6 +1609,8 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     filterCss?: string,
     textLayers: any[] = [],
     stickerLayers: any[] = [],
+    location?: string,
+    stickerFiles: { id: string; file: File }[] = [],
   ) => {
     setIsUploadingStory(true);
     const formData = new FormData();
@@ -1316,8 +1619,20 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     if (filterCss && filterCss !== "none") {
       formData.append('filter_css', filterCss);
     }
+    // Strip base64 src from image stickers — backend will receive them as files
+    const stickerLayersClean = stickerLayers.map(l =>
+      l.kind === "image" ? { ...l, src: "" } : l
+    );
     formData.append('text_layers', JSON.stringify(textLayers));
-    formData.append('sticker_layers', JSON.stringify(stickerLayers));
+    formData.append('sticker_layers', JSON.stringify(stickerLayersClean));
+    // Upload sticker image files with id-prefixed filenames so backend can map them
+    for (const { id, file: sf } of stickerFiles) {
+      const ext = sf.name.split(".").pop() || "png";
+      formData.append('sticker_files', sf, `${id}__sticker.${ext}`);
+    }
+    if (location) {
+      formData.append('location', location);
+    }
     if (music) {
       formData.append('audio_track_url', music.track.audio_url);
       formData.append('audio_track_title', music.track.title);
@@ -1354,6 +1669,12 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const closeStoryViewer = () => {
     stopStoryAudio(true);
     setViewingStoryUserIndex(null);
+    // Resume feed video
+    const shouldBlockInitialAutoplay = activeVideo === 0 && !hasUserInteracted.current && !hasLeftInitialVideoRef.current;
+    if (activeVideo !== null && !shouldBlockInitialAutoplay) {
+      const v = videoRefs.current[activeVideo];
+      if (v && v.paused) v.play().catch(() => {});
+    }
     setCurrentStoryItemIndex(0);
     setGroupProgresses({});
     setIsStoryPaused(false);
@@ -1621,7 +1942,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [storyReplyText, setStoryReplyText] = useState("")
   const [storyReplySending, setStoryReplySending] = useState(false)
 
-  const [gifts, setGifts] = useState<GiftI[]>([]);
+  const [, setGifts] = useState<GiftI[]>([]);
 
   const handleLikeStory = useCallback(() => {
     if (viewingStoryUserIndex === null) return;
@@ -1640,7 +1961,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     setShowStoryLikeAnimation(prev => ({ ...prev, [storyId]: true }));
     setTimeout(() => {
       setShowStoryLikeAnimation(prev => ({ ...prev, [storyId]: false }));
-    }, 1000);
+    }, 450);
     // Dispatch action
     likeStory({ story_uuid: storyId })(dispatch).then((res: any) => {
       // Update from response if available
@@ -1705,7 +2026,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       if (storyVideoRef.current && !storyVideoRef.current.paused) {
         storyVideoRef.current.pause();
       }
-      setShowGiftMenu(true);
+      setShowFullGiftMenu(true);
     }
   };
 
@@ -1775,7 +2096,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     }
 
     const currentStory = stories.find(s => s.uuid === currentStoryUuid);
-    const isMyStory = currentStory?.user?.id === user.id;
+    const isMyStory = String(currentStory?.user?.id) === String(user.id);
 
     // CASO 1: Es MI story → siempre permitimos cargar (pueden llegar regalos nuevos)
     if (isMyStory) {
@@ -1853,20 +2174,13 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   let countSendGift = useRef(false)
   const handleSendGift = async (giftTypeOrGift: string | GiftI, amount?: number) => {
     let type: string | null = null;
-    let giftId: string | null = null
-    let sound: string | null = null
     let cost: string | number | null = null
     if (typeof giftTypeOrGift === 'string') {
-      // Legacy for category gifts
-      giftId = giftTypeOrGift;
       type = giftTypeOrGift;
       cost = amount || 0;
     } else {
-      // For full gifts
-      giftId = giftTypeOrGift.slug;
       type = giftTypeOrGift.emoji;
       cost = giftTypeOrGift.token_price;
-      sound = giftTypeOrGift.video
     }
 
     if (cost !== null && cost !== undefined && walletTokens < Number(cost)) {
@@ -1979,21 +2293,41 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
 
   const claimAndShowGift = (g: any, senderUsername: string) => {
-    // Quitar inmediatamente del state para que el badge desaparezca
     setGiftRecived(prev => (prev || []).filter((gift: any) => gift.uuid !== g.uuid));
     setIsGift(prev => (prev || []).filter((gift: any) => gift.uuid !== g.uuid));
-    setViewerGiftOverlay({
-      gift_video: g.gift,
-      gift_type: g.type,
-      sender: senderUsername,
-      uuid: g.uuid,
-    });
+    setViewerGiftReady(false);
+
     if (g.uuid) {
       apiClient.post('/api/stories/gifts/mark-seen/', { uuid: g.uuid })
         .then(() => apiClient.get('/api/get-wallet/'))
         .then(res => dispatch({ type: 'SUCCEES_GET_WALLET', payload: res.data }))
         .catch(() => {});
     }
+
+    // Precargar video en memoria para reproducción instantánea sin freeze
+    const videoUrl = g.gift ? getMediaUrl(g.gift) : null;
+    if (!videoUrl) {
+      setViewerGiftOverlay({ gift_video: g.gift, gift_type: g.type, sender: senderUsername, uuid: g.uuid });
+      return;
+    }
+
+    // Liberar blob anterior si existe
+    if (viewerGiftBlobRef.current) {
+      URL.revokeObjectURL(viewerGiftBlobRef.current);
+      viewerGiftBlobRef.current = null;
+    }
+
+    fetch(videoUrl)
+      .then(r => r.blob())
+      .then(blob => {
+        const blobUrl = URL.createObjectURL(blob);
+        viewerGiftBlobRef.current = blobUrl;
+        setViewerGiftOverlay({ gift_video: g.gift, gift_type: g.type, sender: senderUsername, uuid: g.uuid, blobUrl });
+      })
+      .catch(() => {
+        // Si falla el precache, mostrar igual con URL directa
+        setViewerGiftOverlay({ gift_video: g.gift, gift_type: g.type, sender: senderUsername, uuid: g.uuid });
+      });
   };
 
   const showGiftRecived = (viewer: any) => {
@@ -2024,6 +2358,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
 
   return (
+    <>
     <div className="relative min-h-screen overflow-hidden bg-black text-white font-sans">
       {/* Story Editor */}
       <AnimatePresence>
@@ -2031,20 +2366,21 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
           <StoryEditor
             file={storyEditorFile}
             onPublish={handleStoryPublish}
-            onClose={() => setStoryEditorFile(null)}
+            onClose={() => {
+              setStoryEditorFile(null);
+              // Resume feed video when story editor closes
+              const shouldBlockInitialAutoplay = activeVideo === 0 && !hasUserInteracted.current && !hasLeftInitialVideoRef.current;
+              if (activeVideo !== null && !shouldBlockInitialAutoplay) {
+                const v = videoRefs.current[activeVideo];
+                if (v && v.paused) v.play().catch(() => {});
+                if (musicAudioRef.current?.paused) musicAudioRef.current?.play().catch(() => {});
+              }
+            }}
             isUploading={isUploadingStory}
           />
         )}
       </AnimatePresence>
 
-      {/* Hidden Input for File Upload */}
-      <input
-        type="file"
-        ref={fileInputRef}
-        onChange={handleFileChange}
-        className="hidden"
-        accept="video/mp4,video/quicktime,image/jpeg,image/png,image/webp"
-      />
       <div className="fixed inset-0 z-0">
         <div className="absolute inset-0 bg-black  opacity-80"></div>
         <div className="absolute inset-0 bg-black opacity-[0.03]"></div>
@@ -2064,13 +2400,13 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ duration: 0.15 }}
-                className="flex flex-col items-center gap-1 min-w-[52px] cursor-pointer snap-start relative group"
-                onClick={handleAddHistory}
-              >
-                <div className="relative">
+	                className="flex flex-col items-center gap-1 min-w-[52px] cursor-pointer snap-start relative group"
+	                onClick={handleAddHistory}
+	              >
+	                <div className="relative">
                   <div className={`relative h-[40px] w-[40px] rounded-full p-[2px] bg-[#0c1033] ${isUploadingStory ? 'animate-pulse' : ''}`}>
                     <img
-                      src={getMediaUrl(user.profile_picture)}
+                      src={getMediaUrl(user.profile_picture as string)}
                       className={`w-full h-full rounded-full object-cover filter ${isUploadingStory ? 'brightness-50' : 'brightness-90 group-hover:brightness-100'} transition-all`}
                       alt="Tu historia"
                       loading="lazy"
@@ -2084,9 +2420,45 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                         <Plus size={14} strokeWidth={3} />
                       </div>
                     )}
-                  </div>
-                </div>
-                <span className="text-[9px] text-gray-300 font-medium truncate w-[52px] text-center group-hover:text-white">
+	                  </div>
+	                  <AnimatePresence>
+	                    {showStoryPicker && !isUploadingStory && (
+	                      <motion.div
+	                        initial={{ opacity: 0, y: 8, scale: 0.96 }}
+	                        animate={{ opacity: 1, y: 0, scale: 1 }}
+	                        exit={{ opacity: 0, y: 8, scale: 0.96 }}
+	                        className="absolute left-0 top-[48px] z-50 w-44 overflow-hidden rounded-xl border border-white/10 bg-[#0b0b14]/95 shadow-2xl backdrop-blur-md"
+	                        onClick={(e) => e.stopPropagation()}
+	                      >
+	                        <button
+	                          type="button"
+	                          onClick={handlePickStoryFromLibrary}
+	                          className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs font-medium text-white hover:bg-white/10 active:bg-white/15"
+	                        >
+	                          <ImageIcon size={15} className="text-cyan-400" />
+	                          Galeria
+		                        </button>
+		                        <button
+		                          type="button"
+		                          onClick={handleCaptureStoryPhoto}
+		                          className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs font-medium text-white hover:bg-white/10 active:bg-white/15"
+		                        >
+		                          <Camera size={15} className="text-purple-400" />
+		                          Tomar foto
+		                        </button>
+		                        {/* <button
+		                          type="button"
+		                          onClick={handleCaptureStoryVideo}
+		                          className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs font-medium text-white hover:bg-white/10 active:bg-white/15"
+		                        >
+		                          <VideoIcon size={15} className="text-pink-400" />
+		                          Grabar video
+		                        </button> */}
+	                      </motion.div>
+	                    )}
+	                  </AnimatePresence>
+	                </div>
+	                <span className="text-[9px] text-gray-300 font-medium truncate w-[52px] text-center group-hover:text-white">
                   {isUploadingStory ? t('common:actions.uploading') : t('videos:feed.yourStory')}
                 </span>
               </motion.div>
@@ -2138,7 +2510,37 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
             ref={feedScrollRef}
             className="flex h-full flex-col overflow-y-auto overscroll-y-contain scroll-smooth snap-y snap-mandatory"
             onScroll={handleFeedScroll}
+            onTouchStart={handlePullTouchStart}
+            onTouchMove={handlePullTouchMove}
+            onTouchEnd={handlePullTouchEnd}
           >
+            {/* ── Offline toast ── */}
+            {offlineToast && (
+              <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[9200] flex items-center gap-2 px-4 py-2 rounded-full bg-black/80 backdrop-blur-md border border-white/15 animate-fade-in">
+                <svg className="w-4 h-4 text-yellow-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <path d="M18.364 5.636a9 9 0 010 12.728M15.536 8.464a5 5 0 010 7.072M12 12h.01M8.464 15.536a5 5 0 010-7.072M5.636 18.364a9 9 0 010-12.728" strokeLinecap="round" strokeLinejoin="round"/>
+                  <line x1="2" y1="2" x2="22" y2="22" strokeLinecap="round"/>
+                </svg>
+                <span className="text-xs font-bold text-white/90">Sin conexión</span>
+              </div>
+            )}
+            {/* ── Pull-to-refresh indicator ── */}
+            {(isPullRefreshing || pullProgress > 0) && (
+              <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[9100] flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 backdrop-blur-md border border-white/15"
+                style={{ opacity: isPullRefreshing ? 1 : pullProgress }}
+              >
+                <svg
+                  className={`w-4 h-4 text-cyan-400 ${isPullRefreshing ? 'animate-spin' : ''}`}
+                  style={{ transform: isPullRefreshing ? undefined : `rotate(${pullProgress * 360}deg)` }}
+                  viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+                >
+                  <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+                <span className="text-xs font-bold text-white/70">
+                  {isPullRefreshing ? "Actualizando..." : "Suelta para actualizar"}
+                </span>
+              </div>
+            )}
             {/* ── Empty feed state ── */}
             {mediaVideo !== null && mediaVideo.length === 0 && (
               <div className="relative h-full w-full snap-start snap-always flex-shrink-0 flex flex-col items-center justify-center gap-4 px-6 text-center">
@@ -2146,7 +2548,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 <h3 className="text-white font-black text-lg">No hay videos disponibles</h3>
                 <p className="text-gray-500 text-sm max-w-xs">Pronto habrá más contenido. Vuelve a intentarlo en un momento.</p>
                 <button
-                  onClick={() => window.location.reload()}
+                  onClick={() => window.dispatchEvent(new CustomEvent("buzzy:refresh"))}
                   className="mt-2 px-5 py-2.5 rounded-xl bg-cyan-500/20 border border-cyan-500/40 text-cyan-400 text-sm font-bold hover:bg-cyan-500/30 transition-all"
                 >
                   Recargar
@@ -2272,6 +2674,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                     onComment={(uuid, id) => {
                       setComments(null)
                       setCurrentVideoId(String(id))
+                      currentVideoIdRef.current = String(id)
                       setShowCommentsModal(true)
                       getComment({ video_id: uuid })(dispatch).then((res: any) => {
                         setComments(Array.isArray(res) ? res : [])
@@ -2285,7 +2688,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                       <div className="relative h-full w-full rounded-t-xl rounded-b-none overflow-hidden bg-black">
                         {data.media_type === 'image' ? (
                           <img
-                            src={data.video}
+                            src={data.video?.startsWith("http") ? data.video : getMediaUrl(data.video)}
                             className="h-full w-full object-cover border-[#00f0ff]/5"
                             alt="Feed Content"
                             onClick={() => handleVideoClick(index)}
@@ -2398,6 +2801,30 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                         <div className="absolute inset-0 bg-gradient-to-t from-[#050718] via-[#050718]/10 to-transparent pointer-events-none"></div>
                         <div className="absolute inset-0 bg-gradient-to-r from-[#7000ff]/10 to-[#00f0ff]/10 opacity-0 group-hover:opacity-100 transition-opacity duration-500" onClick={() => handleGridVideoToggle(videoId, videoRefs.current[index])}>
                         </div>
+                        {/* Lock overlay — shown while feed is locked. Clickable so the tap reaches handleVideoClick even on mobile. */}
+                        <AnimatePresence>
+                          {feedLocked && activeVideo === index && data.media_type === 'video' && (
+                            <motion.div
+                              key="feed-lock"
+                              initial={{ opacity: 0, scale: 0.8 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                              exit={{ opacity: 0, scale: 0.8 }}
+                              transition={{ duration: 0.2 }}
+                              className="absolute inset-0 flex flex-col items-center justify-center z-20"
+                              onClick={() => handleVideoClick(index)}
+                            >
+                              <div className="flex flex-col items-center gap-2 pointer-events-none">
+                                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-black/60 backdrop-blur-md border border-white/20">
+                                  <Lock className="h-7 w-7 text-white" />
+                                </div>
+                                <span className="text-white/80 text-xs font-medium tracking-wide drop-shadow">
+                                  Toca para reproducir
+                                </span>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+
                         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                           <AnimatePresence>
                             {transientIconState?.videoId === videoId && (
@@ -2412,7 +2839,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                                 <motion.div
                                   className="flex h-12 w-12 items-center justify-center rounded-full bg-black/50 backdrop-blur-md"
                                 >
-                                  {transientIconState.icon === 'play' ? (
+                                  {transientIconState!.icon === 'play' ? (
                                     <Play className="h-6 w-6 text-white" fill="white" />
                                   ) : (
                                     <Pause className="h-6 w-6 text-white" fill="white" />
@@ -2517,6 +2944,11 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                                 >
                                   @{String(data.user_id?.username || "").slice(0, 20)}
                                 </Link>
+                                <img
+                                  src="/screenshots/buzzy_icon_1024.png"
+                                  alt="Buzzy"
+                                  className="w-4 h-4 rounded-full flex-shrink-0 ml-1"
+                                />
                                 <AnimatePresence mode="wait">
                                   {data.user_id.username !== user.username && (
                                     (!followingState[data.user_id.id.toString()] && !data.current_user_followered) ? (
@@ -2648,15 +3080,15 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                               className="relative flex flex-col items-center gap-1"
                             >
                               <motion.div
-                                animate={{ scale: data.liked ? [1, 1.3, 1] : 1 }}
-                                transition={{ duration: 0.3 }}
+                                animate={{ scale: data.liked ? [1, 1.4, 0.9, 1] : 1 }}
+                                transition={{ duration: 0.25, ease: [0.34, 1.56, 0.64, 1] }}
                                 className={`flex h-10 w-10 items-center justify-center rounded-full ${data.liked
                                   ? "bg-red-500/20 text-red-500"
                                   : "bg-white/10 text-white"
                                   }`}
                               >
                                 <Heart
-                                  className={`h-5 w-5 ${data.liked ? "fill-red-900 text-red-500" : "text-white"
+                                  className={`h-5 w-5 ${data.liked ? "fill-red-500 text-red-500" : "text-white"
                                     }`}
                                 />
                               </motion.div>
@@ -2667,28 +3099,17 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                                     {[...Array(5)].map((_, i) => (
                                       <motion.div
                                         key={`heart-particle-${data.id}-${i}`}
-                                        initial={{
-                                          opacity: 1,
-                                          y: 0,
-                                          x: 0,
-                                          scale: 0.5,
-                                        }}
+                                        initial={{ opacity: 1, y: 0, x: 0, scale: 0.4 }}
                                         animate={{
                                           opacity: 0,
-                                          y: -50 - Math.random() * 50,
-                                          x: (Math.random() - 0.5) * 40,
-                                          scale: 1.5,
+                                          y: -35 - i * 8,
+                                          x: (i % 2 === 0 ? 1 : -1) * (8 + i * 5),
+                                          scale: 1.2,
                                         }}
                                         exit={{ opacity: 0 }}
-                                        transition={{
-                                          duration: 1 + Math.random() * 0.5,
-                                        }}
-                                        className="absolute text-red-500"
-                                        style={{
-                                          top: "50%",
-                                          left: "50%",
-                                          transform: "translate(-50%, -50%)",
-                                        }}
+                                        transition={{ duration: 0.4, ease: "easeOut" }}
+                                        className="absolute text-red-500 pointer-events-none"
+                                        style={{ top: "50%", left: "50%", transform: "translate(-50%, -50%)" }}
                                       >
                                         ❤️
                                       </motion.div>
@@ -2817,15 +3238,15 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                               className="relative flex flex-col items-center gap-1"
                             >
                               <motion.div
-                                animate={{ scale: data.liked ? [1, 1.3, 1] : 1 }}
-                                transition={{ duration: 0.3 }}
+                                animate={{ scale: data.liked ? [1, 1.4, 0.9, 1] : 1 }}
+                                transition={{ duration: 0.25, ease: [0.34, 1.56, 0.64, 1] }}
                                 className={`flex h-10 w-10 items-center justify-center rounded-full ${data.liked
                                   ? "bg-red-500/20 text-red-500"
                                   : "bg-white/10 text-white"
                                   }`}
                               >
                                 <Heart
-                                  className={`h-5 w-5 ${data.liked ? "fill-red-900 text-red-500" : "text-white"
+                                  className={`h-5 w-5 ${data.liked ? "fill-red-500 text-red-500" : "text-white"
                                     }`}
                                 />
                               </motion.div>
@@ -2836,28 +3257,17 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                                     {[...Array(5)].map((_, i) => (
                                       <motion.div
                                         key={`heart-particle-${data.id}-${i}`}
-                                        initial={{
-                                          opacity: 1,
-                                          y: 0,
-                                          x: 0,
-                                          scale: 0.5,
-                                        }}
+                                        initial={{ opacity: 1, y: 0, x: 0, scale: 0.4 }}
                                         animate={{
                                           opacity: 0,
-                                          y: -50 - Math.random() * 50,
-                                          x: (Math.random() - 0.5) * 40,
-                                          scale: 1.5,
+                                          y: -35 - i * 8,
+                                          x: (i % 2 === 0 ? 1 : -1) * (8 + i * 5),
+                                          scale: 1.2,
                                         }}
                                         exit={{ opacity: 0 }}
-                                        transition={{
-                                          duration: 1 + Math.random() * 0.5,
-                                        }}
-                                        className="absolute text-red-500"
-                                        style={{
-                                          top: "50%",
-                                          left: "50%",
-                                          transform: "translate(-50%, -50%)",
-                                        }}
+                                        transition={{ duration: 0.4, ease: "easeOut" }}
+                                        className="absolute text-red-500 pointer-events-none"
+                                        style={{ top: "50%", left: "50%", transform: "translate(-50%, -50%)" }}
                                       >
                                         ❤️
                                       </motion.div>
@@ -2899,6 +3309,26 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                               </span>
                             </div>
 
+                            {/* Save */}
+                            <motion.button
+                              whileTap={{ scale: 0.85 }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleSaveClick(String(data.id));
+                              }}
+                              className="flex flex-col items-center"
+                            >
+                              <motion.div
+                                animate={{ scale: savedMap[String(data.id)] ? [1, 1.4, 0.9, 1] : 1 }}
+                                transition={{ duration: 0.25, ease: [0.34, 1.56, 0.64, 1] }}
+                                className="flex h-8 w-8 items-center justify-center"
+                              >
+                                <Bookmark
+                                  className={`h-6 w-6 transition-colors duration-200 ${savedMap[String(data.id)] ? 'text-pink-400 fill-pink-400' : 'text-white'}`}
+                                />
+                              </motion.div>
+                            </motion.button>
+
                             {/* Gift */}
                             <motion.button
                               onClick={(e) => {
@@ -2928,6 +3358,20 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                               <span className="text-[10px] mt-0.5 text-pink-300/90 font-medium drop-shadow-md">
                                 {t('videos:actions.sendGift')}
                               </span>
+                            </motion.button>
+
+                            {/* More options ··· */}
+                            <motion.button
+                              whileTap={{ scale: 0.85 }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActiveOptionsVideoId(prev => prev === videoId ? null : videoId);
+                              }}
+                              className="flex flex-col items-center"
+                            >
+                              <div className="flex h-8 w-8 items-center justify-center">
+                                <MoreVertical className="h-5 w-5 text-white/70" />
+                              </div>
                             </motion.button>
 
                           </div>
@@ -3086,6 +3530,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 const storyMediaSrc = getMediaUrl(currentMediaItem.file);
                 const textLayers = (storyForThisMedia?.text_layers ?? []) as StoryTextLayer[];
                 const stickerLayers = (storyForThisMedia?.sticker_layers ?? []) as StoryStickerLayer[];
+                const storyLocation = storyForThisMedia?.location ?? stickerLayers.find(layer => layer.kind === "location" && layer.text)?.text ?? null;
                 return isVideoContent(currentMediaItem.file) ? (
                   <div className="relative w-full h-full flex items-center justify-center">
                     <video
@@ -3130,20 +3575,57 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                         </span>
                       </div>
                     ))}
-                    {stickerLayers.map((layer) => (
-                      <div
-                        key={layer.id}
-                        className="absolute z-20 pointer-events-none select-none"
-                        style={{
-                          left: `${layer.x}%`,
-                          top: `${layer.y}%`,
-                          transform: "translate(-50%, -50%)",
-                          fontSize: `${layer.size}px`,
-                        }}
-                      >
-                        {layer.emoji}
-                      </div>
-                    ))}
+                    {stickerLayers.map((layer) => {
+                      const isLocation = layer.kind === "location" && !!layer.text;
+                      const isImage = layer.kind === "image" && !!layer.src;
+                      const rotation = layer.rotation ?? 0;
+                      return (
+                        <div
+                          key={layer.id}
+                          className={`absolute z-20 select-none ${isLocation ? "pointer-events-auto cursor-pointer" : "pointer-events-none"}`}
+                          style={{
+                            left: `${layer.x}%`,
+                            top: `${layer.y}%`,
+                            transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
+                          }}
+                          onClick={(e) => {
+                            if (!isLocation) return;
+                            e.stopPropagation();
+                            setSelectedStoryLocation(layer.text || storyLocation);
+                          }}
+                        >
+                          {isLocation ? (
+                            <div className="inline-flex max-w-[250px] items-center gap-2 rounded-[22px] border border-white/15 bg-[rgba(10,10,16,0.72)] px-3 py-2 shadow-[0_18px_40px_rgba(0,0,0,0.35)] backdrop-blur-xl">
+                              <div className="relative flex h-9 w-9 items-center justify-center rounded-[14px] bg-gradient-to-br from-pink-500 via-fuchsia-500 to-orange-400 text-white shadow-[0_10px_25px_rgba(0,0,0,0.35)]">
+                                <MapPin size={14} />
+                                <span className="absolute -right-1 -bottom-1 h-3 w-3 rounded-full bg-white/90 ring-2 ring-black/35" />
+                              </div>
+                              <div className="min-w-0 flex flex-col text-left">
+                                <span className="text-[9px] font-black uppercase tracking-[0.35em] text-white/55">
+                                  Ubicación
+                                </span>
+                                <span className="truncate font-black uppercase tracking-wide text-white" style={{ fontSize: "12px" }}>
+                                  {shortLocationLabel(layer.text || storyLocation || "")}
+                                </span>
+                              </div>
+                              <div className="ml-1 flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-white/8 text-white/70">
+                                <span className="text-[10px] font-black">›</span>
+                              </div>
+                            </div>
+                          ) : isImage ? (
+                            <img
+                              src={layer.src}
+                              alt="Sticker"
+                              className="drop-shadow-[0_2px_12px_rgba(0,0,0,0.45)]"
+                              style={{ width: `${layer.size * 1.4}px`, height: "auto" }}
+                              draggable={false}
+                            />
+                          ) : (
+                            <span style={{ fontSize: `${layer.size}px` }}>{layer.emoji}</span>
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
                 ) : (
                   <div className="relative w-full h-full flex items-center justify-center">
@@ -3185,20 +3667,57 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                         </span>
                       </div>
                     ))}
-                    {stickerLayers.map((layer) => (
-                      <div
-                        key={layer.id}
-                        className="absolute z-20 pointer-events-none select-none"
-                        style={{
-                          left: `${layer.x}%`,
-                          top: `${layer.y}%`,
-                          transform: "translate(-50%, -50%)",
-                          fontSize: `${layer.size}px`,
-                        }}
-                      >
-                        {layer.emoji}
-                      </div>
-                    ))}
+                    {stickerLayers.map((layer) => {
+                      const isLocation = layer.kind === "location" && !!layer.text;
+                      const isImage = layer.kind === "image" && !!layer.src;
+                      const rotation = layer.rotation ?? 0;
+                      return (
+                        <div
+                          key={layer.id}
+                          className={`absolute z-20 select-none ${isLocation ? "pointer-events-auto cursor-pointer" : "pointer-events-none"}`}
+                          style={{
+                            left: `${layer.x}%`,
+                            top: `${layer.y}%`,
+                            transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
+                          }}
+                          onClick={(e) => {
+                            if (!isLocation) return;
+                            e.stopPropagation();
+                            setSelectedStoryLocation(layer.text || storyLocation);
+                          }}
+                        >
+                          {isLocation ? (
+                            <div className="inline-flex max-w-[250px] items-center gap-2 rounded-[22px] border border-white/15 bg-[rgba(10,10,16,0.72)] px-3 py-2 shadow-[0_18px_40px_rgba(0,0,0,0.35)] backdrop-blur-xl">
+                              <div className="relative flex h-9 w-9 items-center justify-center rounded-[14px] bg-gradient-to-br from-pink-500 via-fuchsia-500 to-orange-400 text-white shadow-[0_10px_25px_rgba(0,0,0,0.35)]">
+                                <MapPin size={14} />
+                                <span className="absolute -right-1 -bottom-1 h-3 w-3 rounded-full bg-white/90 ring-2 ring-black/35" />
+                              </div>
+                              <div className="min-w-0 flex flex-col text-left">
+                                <span className="text-[9px] font-black uppercase tracking-[0.35em] text-white/55">
+                                  Ubicación
+                                </span>
+                                <span className="truncate font-black uppercase tracking-wide text-white" style={{ fontSize: "12px" }}>
+                                  {shortLocationLabel(layer.text || storyLocation || "")}
+                                </span>
+                              </div>
+                              <div className="ml-1 flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-white/8 text-white/70">
+                                <span className="text-[10px] font-black">›</span>
+                              </div>
+                            </div>
+                          ) : isImage ? (
+                            <img
+                              src={layer.src}
+                              alt="Sticker"
+                              className="drop-shadow-[0_2px_12px_rgba(0,0,0,0.45)]"
+                              style={{ width: `${layer.size * 1.4}px`, height: "auto" }}
+                              draggable={false}
+                            />
+                          ) : (
+                            <span style={{ fontSize: `${layer.size}px` }}>{layer.emoji}</span>
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
                 );
               })()}
@@ -3268,35 +3787,41 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
               }
               <motion.button
                 onClick={handleLikeStory}
-                className="relative p-2  hover:from-[#ff0099]/80 rounded-full backdrop-blur-md text-white shadow-lg shadow-pink-500/20"
-                whileTap={{ scale: 0.95 }}
+                className="relative p-2 hover:from-[#ff0099]/80 rounded-full backdrop-blur-md text-white shadow-lg shadow-pink-500/20"
+                whileTap={{ scale: 0.85 }}
               >
-                <Heart
-                  className={`w-5 h-5 ${storyLikedStates[currentStoryUuid || ''] ? 'fill-red-500 text-red-500' : 'text-white'}`}
-                />
-                {showStoryLikeAnimation[currentStoryUuid || ''] && (
-                  <AnimatePresence>
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0 }}
-                      className="absolute -top-2 left-1/2 transform -translate-x-1/2"
-                    >
-                      {[...Array(3)].map((_, i) => (
+                <motion.div
+                  animate={{ scale: storyLikedStates[currentStoryUuid || ''] ? [1, 1.4, 0.9, 1] : 1 }}
+                  transition={{ duration: 0.25, ease: [0.34, 1.56, 0.64, 1] }}
+                >
+                  <Heart
+                    className={`w-5 h-5 ${storyLikedStates[currentStoryUuid || ''] ? 'fill-red-500 text-red-500' : 'text-white'}`}
+                  />
+                </motion.div>
+                <AnimatePresence>
+                  {showStoryLikeAnimation[currentStoryUuid || ''] && (
+                    <>
+                      {[...Array(4)].map((_, i) => (
                         <motion.span
                           key={i}
-                          initial={{ y: 0, opacity: 1 }}
-                          animate={{ y: -20, opacity: 0 }}
-                          transition={{ duration: 0.5, delay: i * 0.1 }}
-                          className="text-red-500 text-lg absolute"
-                          style={{ left: `${i * 10}px` }}
+                          initial={{ y: 0, x: 0, opacity: 1, scale: 0.5 }}
+                          animate={{
+                            y: -28 - i * 7,
+                            x: (i % 2 === 0 ? 1 : -1) * (6 + i * 4),
+                            opacity: 0,
+                            scale: 1.1,
+                          }}
+                          exit={{ opacity: 0 }}
+                          transition={{ duration: 0.38, ease: "easeOut" }}
+                          className="text-red-500 text-sm absolute pointer-events-none"
+                          style={{ top: "50%", left: "50%", transform: "translate(-50%, -50%)" }}
                         >
                           ❤️
                         </motion.span>
                       ))}
-                    </motion.div>
-                  </AnimatePresence>
-                )}
+                    </>
+                  )}
+                </AnimatePresence>
               </motion.button>
               {/* New Gift Button */}
 
@@ -3356,13 +3881,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                       </motion.button>
                       <motion.button
                         whileTap={{ scale: 0.98 }}
-                        onClick={() => { setShowGiftMenu(false); setShowTokenShopModal(true); }}
-                        className="w-full bg-blue-500/20 text-blue-300 p-3 rounded-xl border border-blue-500/30"
-                      >
-                        💎 {t('videos:actions.giftInvest')}
-                      </motion.button>
-                      <motion.button
-                        whileTap={{ scale: 0.98 }}
                         onClick={() => handleCategoryClick('vip', 20)}
                         className="w-full bg-purple-500/20 text-purple-300 p-3 rounded-xl border border-purple-500/30"
                       >
@@ -3386,6 +3904,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 <VipGiftExperience
                   onClose={() => setShowFullGiftMenu(false)}
                   onSendGift={handleSendGift}
+                  onBuyTokens={() => { setShowFullGiftMenu(false); setShowTokenShopModal(true); }}
                   gifts={Array.isArray(_fullGifts) ? _fullGifts : []}
                   walletTokens={walletTokens}
                   subscriptionStatus={groupedStories[viewingStoryUserIndex]?.user?.subscription_status}
@@ -3628,6 +4147,54 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
           )
         }
       </AnimatePresence >
+      {/* Location sticker modal */}
+      <AnimatePresence>
+        {selectedStoryLocation && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200]"
+              onClick={() => setSelectedStoryLocation(null)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.88, y: 24 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.88, y: 24 }}
+              transition={{ type: "spring", stiffness: 320, damping: 28 }}
+              className="fixed inset-x-6 bottom-1/3 z-[201] rounded-[28px] border border-white/10 bg-[#0d0f1e] p-5 shadow-[0_24px_80px_rgba(0,0,0,0.6)]"
+            >
+              <div className="flex items-start gap-3 mb-4">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-pink-500 via-fuchsia-500 to-orange-400 shadow-lg">
+                  <MapPin size={20} className="text-white" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] font-black uppercase tracking-[0.3em] text-white/40 mb-1">Ubicación</p>
+                  <p className="text-white font-bold text-base leading-snug break-words">{selectedStoryLocation}</p>
+                </div>
+                <button
+                  onClick={() => setSelectedStoryLocation(null)}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/8 border border-white/10 text-white/50 hover:text-white transition-colors"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+              <a
+                href={`https://maps.google.com/?q=${encodeURIComponent(selectedStoryLocation)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-center gap-2 w-full py-3 rounded-2xl bg-gradient-to-r from-pink-500 to-orange-400 text-white text-sm font-bold shadow-lg shadow-pink-500/25 active:scale-95 transition-transform"
+                onClick={() => setSelectedStoryLocation(null)}
+              >
+                <MapPin size={16} />
+                Ver en Google Maps
+              </a>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
       {/* Options Modal */}
       <AnimatePresence>
         {showOptionsModal && viewingStoryUserIndex !== null && (
@@ -3848,7 +4415,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
           </React.Fragment>
         )}
       </AnimatePresence>
-      <ShowComments showCommentsModal={showCommentsModal} setShowCommentsModal={setShowCommentsModal} comments={comments} user={user} commentText={commentText} setCommentText={setCommentText} handlePostComment={handlePostComment} />
+      <ShowComments showCommentsModal={showCommentsModal} setShowCommentsModal={setShowCommentsModal} comments={comments as unknown as null} user={user} commentText={commentText} setCommentText={setCommentText} handlePostComment={handlePostComment} isOffline={commentsOffline} onRetry={handleRetryComments} />
 
       {/* Feedback Modal */}
       <AnimatePresence>
@@ -3938,7 +4505,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
           >
             <motion.video
               key={giftAnimation.giftId}
-              src={getMediaUrl(giftAnimation.gift)}
+              src={giftAnimation.blobUrl || getMediaUrl(giftAnimation.gift)}
               autoPlay
               playsInline
               muted={false}
@@ -3971,6 +4538,10 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
               }}
               onEnded={() => {
                 setIsBlackout(false);
+                if (giftAnimBlobRef.current) {
+                  URL.revokeObjectURL(giftAnimBlobRef.current);
+                  giftAnimBlobRef.current = null;
+                }
                 setGiftAnimation(null);
               }}
             />
@@ -4007,25 +4578,33 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.35 }}
-            style={{ position: 'fixed', inset: 0, zIndex: 9000, pointerEvents: 'auto' }}
+            style={{ position: 'fixed', inset: 0, zIndex: 9000, pointerEvents: 'auto', background: 'rgba(0,0,0,0.85)' }}
             onClick={() => { setViewerGiftOverlay(null); setViewerGiftBlackout(false); }}
           >
-            <motion.video
-              key={viewerGiftOverlay.gift_video}
-              src={viewerGiftOverlay.gift_video ? getMediaUrl(viewerGiftOverlay.gift_video) : undefined}
+            {/* Emoji placeholder visible mientras el video no está listo */}
+            <div style={{
+              position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 96, opacity: viewerGiftReady ? 0 : 1, transition: 'opacity 0.3s',
+              pointerEvents: 'none',
+            }}>
+              {viewerGiftOverlay.gift_type}
+            </div>
+
+            <video
+              key={viewerGiftOverlay.blobUrl || viewerGiftOverlay.gift_video}
+              src={viewerGiftOverlay.blobUrl || (viewerGiftOverlay.gift_video ? getMediaUrl(viewerGiftOverlay.gift_video) : undefined)}
               autoPlay
               playsInline
+              preload="auto"
               muted={false}
-              initial={{ scale: 0.6, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.6, opacity: 0 }}
-              transition={{ type: "spring", damping: 22, stiffness: 200 }}
               style={{
                 position: 'absolute', inset: 0, width: '100%', height: '100%',
                 objectFit: 'cover', pointerEvents: 'none',
+                opacity: viewerGiftReady ? 1 : 0, transition: 'opacity 0.3s',
                 maskImage: 'radial-gradient(ellipse 70% 65% at 50% 45%, black 30%, transparent 75%)',
                 WebkitMaskImage: 'radial-gradient(ellipse 70% 65% at 50% 45%, black 30%, transparent 75%)',
               }}
+              onCanPlayThrough={() => setViewerGiftReady(true)}
               onTimeUpdate={(e) => {
                 const v = e.currentTarget;
                 const type = viewerGiftOverlay.gift_type?.toLowerCase();
@@ -4037,12 +4616,19 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                   }
                 }
               }}
-              onEnded={() => { setViewerGiftOverlay(null); setViewerGiftBlackout(false); }}
+              onEnded={() => {
+                setViewerGiftOverlay(null);
+                setViewerGiftBlackout(false);
+                if (viewerGiftBlobRef.current) {
+                  URL.revokeObjectURL(viewerGiftBlobRef.current);
+                  viewerGiftBlobRef.current = null;
+                }
+              }}
             />
             <motion.div
               initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3 }}
+              animate={{ opacity: viewerGiftReady ? 1 : 0, y: viewerGiftReady ? 0 : 20 }}
+              transition={{ duration: 0.4 }}
               style={{ position: 'absolute', bottom: 96, left: 0, right: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, pointerEvents: 'none' }}
             >
               <p style={{ color: 'white', fontWeight: 900, fontSize: 24, textShadow: '0 2px 12px rgba(0,0,0,0.9)' }}>
@@ -4122,6 +4708,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
           <VipGiftExperience
             onClose={() => setShowVideoGiftModal(false)}
             onSendGift={handleSendVideoGift}
+            onBuyTokens={() => { setShowVideoGiftModal(false); setShowTokenShopModal(true); }}
             gifts={Array.isArray(_fullGifts) ? _fullGifts : []}
             walletTokens={walletTokens}
             subscriptionStatus={
@@ -4166,6 +4753,198 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         }
       `}</style>
     </div >
+
+    {/* ── Video options pill — portal al body para escapar overflow:hidden ── */}
+    {activeOptionsVideoId && (() => {
+      const vid = mergedFeed.find(d => d.type === 'video' && d.id?.toString() === activeOptionsVideoId);
+      const opts = [
+        {
+          icon: <Bookmark size={16} className={savedMap[activeOptionsVideoId] ? 'fill-pink-400 text-pink-400' : 'text-white/80'} />,
+          color: 'from-pink-500/30 to-rose-600/15',
+          glow: 'rgba(236,72,153,0.4)',
+          active: !!savedMap[activeOptionsVideoId],
+          onClick: () => { handleSaveClick(activeOptionsVideoId); setActiveOptionsVideoId(null); },
+        },
+        {
+          icon: <Share2 size={16} className="text-cyan-300" />,
+          color: 'from-cyan-500/25 to-blue-600/15',
+          glow: 'rgba(6,182,212,0.35)',
+          active: false,
+          onClick: () => handleShareVideo((vid as any)?.video_url || '', (vid as any)?.description),
+        },
+        {
+          icon: <Download size={16} className="text-violet-300" />,
+          color: 'from-violet-500/25 to-purple-600/15',
+          glow: 'rgba(139,92,246,0.35)',
+          active: false,
+          onClick: () => handleDownloadVideo((vid as any)?.video_url || '', activeOptionsVideoId),
+        },
+      ];
+      return createPortal(
+        <AnimatePresence>
+          <motion.div
+            key="options-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            style={{ position: 'fixed', inset: 0, zIndex: 9998, touchAction: 'none' }}
+            onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); setActiveOptionsVideoId(null); }}
+          />
+          <motion.div
+            key="options-pill"
+            initial={{ opacity: 0, y: 14, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 14, scale: 0.9 }}
+            transition={{ type: 'spring', stiffness: 450, damping: 32 }}
+            onPointerDown={e => e.stopPropagation()}
+            onClick={e => e.stopPropagation()}
+            style={{
+              position: 'fixed',
+              bottom: 'calc(env(safe-area-inset-bottom) + 9rem)',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              zIndex: 9999,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '8px',
+              borderRadius: '16px',
+              background: 'rgba(10,10,16,0.92)',
+              backdropFilter: 'blur(28px)',
+              WebkitBackdropFilter: 'blur(28px)',
+              border: '1px solid rgba(255,255,255,0.08)',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.04)',
+            }}
+          >
+            {opts.map((opt, i) => (
+              <motion.button
+                key={i}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.05 }}
+                whileTap={{ scale: 0.88 }}
+                onClick={opt.onClick}
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 12,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: `linear-gradient(to bottom, ${opt.color.replace('from-', '').replace(' to-', ', ')})`,
+                  boxShadow: opt.active ? `0 0 14px ${opt.glow}` : 'none',
+                  border: opt.active ? `1px solid ${opt.glow}` : '1px solid rgba(255,255,255,0.06)',
+                }}
+              >
+                {opt.icon}
+              </motion.button>
+            ))}
+          </motion.div>
+        </AnimatePresence>,
+        document.body
+      );
+    })()}
+
+    {/* ── Share to contact modal ── */}
+    {shareModal && createPortal(
+      <AnimatePresence>
+        <motion.div
+          key="share-backdrop"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          style={{ position: 'fixed', inset: 0, zIndex: 10000, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
+          onClick={() => setShareModal(null)}
+        />
+        <motion.div
+          key="share-sheet"
+          initial={{ y: '100%' }}
+          animate={{ y: 0 }}
+          exit={{ y: '100%' }}
+          transition={{ type: 'spring', stiffness: 380, damping: 36 }}
+          style={{
+            position: 'fixed', bottom: 0, left: 0, right: 0,
+            zIndex: 10001, borderRadius: '24px 24px 0 0',
+            background: 'rgba(10,10,18,0.97)',
+            border: '1px solid rgba(255,255,255,0.08)',
+            boxShadow: '0 -8px 40px rgba(0,0,0,0.6)',
+            maxHeight: '75vh', display: 'flex', flexDirection: 'column',
+          }}
+          onClick={e => e.stopPropagation()}
+        >
+          {/* Handle */}
+          <div style={{ width: 36, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.2)', margin: '12px auto 0' }} />
+
+          {/* Header */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px 8px' }}>
+            <span style={{ color: 'white', fontWeight: 700, fontSize: 16 }}>Compartir video</span>
+            <button onClick={() => setShareModal(null)} style={{ color: 'rgba(255,255,255,0.4)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 20 }}>✕</button>
+          </div>
+
+          {/* Search */}
+          <div style={{ padding: '0 16px 10px' }}>
+            <input
+              value={shareSearch}
+              onChange={e => setShareSearch(e.target.value)}
+              placeholder="Buscar contacto..."
+              style={{
+                width: '100%', padding: '10px 14px', borderRadius: 12,
+                background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.1)',
+                color: 'white', fontSize: 13, outline: 'none', boxSizing: 'border-box',
+              }}
+            />
+          </div>
+
+          {/* Contacts list */}
+          <div style={{ overflowY: 'auto', flex: 1, padding: '0 12px 24px' }}>
+            {shareContacts
+              .filter(c => {
+                const name = (c.other_user?.username || c.other_user?.name || '').toLowerCase();
+                return name.includes(shareSearch.toLowerCase());
+              })
+              .map((contact: any) => {
+                const uuid = contact.uuid;
+                const sent = shareSent[uuid];
+                const sending = shareSending === uuid;
+                const avatar = contact.other_user?.profile_picture;
+                const name = contact.other_user?.username || contact.other_user?.name || 'Usuario';
+                return (
+                  <div key={uuid} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 8px', borderRadius: 14, marginBottom: 4 }}>
+                    {/* Avatar */}
+                    <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(255,255,255,0.1)', overflow: 'hidden', flexShrink: 0 }}>
+                      {avatar && <img src={avatar} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="" />}
+                    </div>
+                    <span style={{ color: 'white', fontSize: 14, fontWeight: 500, flex: 1 }}>@{name}</span>
+                    <motion.button
+                      whileTap={{ scale: 0.9 }}
+                      onClick={() => handleSendShareToContact(uuid)}
+                      disabled={sent || sending}
+                      style={{
+                        padding: '8px 18px', borderRadius: 20, border: 'none', cursor: sent ? 'default' : 'pointer',
+                        fontWeight: 700, fontSize: 12,
+                        background: sent ? 'rgba(34,197,94,0.2)' : 'linear-gradient(135deg,#06b6d4,#3b82f6)',
+                        color: sent ? '#4ade80' : 'white',
+                        boxShadow: sent ? 'none' : '0 0 14px rgba(6,182,212,0.35)',
+                        transition: 'all 0.2s',
+                      }}
+                    >
+                      {sending ? '...' : sent ? '✓ Enviado' : 'Enviar'}
+                    </motion.button>
+                  </div>
+                );
+              })}
+            {shareContacts.length === 0 && (
+              <div style={{ textAlign: 'center', color: 'rgba(255,255,255,0.3)', paddingTop: 32, fontSize: 14 }}>
+                No tienes conversaciones aún
+              </div>
+            )}
+          </div>
+        </motion.div>
+      </AnimatePresence>,
+      document.body
+    )}
+
+    </>
   )
 }
 export default StreamingUI
