@@ -13,6 +13,8 @@ export const updateProfile = (data: FormData) => async (dispatch: any) => {
         });
 
         if (response.status === 200) {
+            localStorage.setItem("user", JSON.stringify(response.data.user));
+
             dispatch({
                 type: SUCCESS_UPDATE_PROFILE,
                 payload: response.data,
@@ -22,8 +24,8 @@ export const updateProfile = (data: FormData) => async (dispatch: any) => {
             dispatch({
                 type: SUCCEES_LOGIN,
                 payload: {
-                    access: localStorage.getItem('access'),
-                    refresh: localStorage.getItem('refresh'),
+                    access: localStorage.getItem('accessToken'),
+                    refresh: localStorage.getItem('refreshToken'),
                     user: response.data.user
                 }
             });

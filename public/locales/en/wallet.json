@@ -1,0 +1,103 @@
+{
+  "title": "My Wallet",
+  "balance": "Balance",
+  "passcode": "{{code}}",
+  "addFunds": "Add Funds",
+  "withdrawAction": "Withdraw",
+  "history": {
+    "title": "History",
+    "subtitle": "Showing the latest {{limit}} transactions",
+    "empty": "No transactions",
+    "emptyHint": "",
+    "loadMore": "Load more",
+    "filter": {
+      "all": "All",
+      "income": "Income",
+      "expense": "Expenses"
+    },
+    "status": {
+      "pending": "Pending",
+      "failed": "Failed",
+      "completed": "Completed"
+    },
+    "pagination": {
+      "prev": "Previous",
+      "next": "Next",
+      "pageInfo": "Page {{current}} of {{total}}"
+    }
+  },
+  "modal": {
+    "totalBalance": "Your Total Balance",
+    "deposit": "Deposit",
+    "withdrawTab": "Withdraw",
+    "customAmount": "Custom Amount",
+    "continuePayment": "Continue to Payment",
+    "withdrawAmount": "Withdraw Amount",
+    "destinationAccount": "Destination Account",
+    "noAccount": "No account configured",
+    "noAccountHint": "You must add a bank account before withdrawing.",
+    "configureAccount": "Configure Account",
+    "requestWithdraw": "Request Withdrawal",
+    "stripeSecurity": "Stripe Security",
+    "withdrawTime": "Withdrawals in 24-48h",
+    "minDeposit": "Minimum $1.00",
+    "amountPlaceholder": "0.00"
+  },
+  "errors": {
+    "depositSession": "Error creating deposit session",
+    "insufficientFunds": "Insufficient funds",
+    "invalidAmount": "Invalid amount",
+    "withdrawProcessing": "Error processing withdrawal"
+  },
+  "withdraw": {
+    "errorTitle": "An Error Occurred!",
+    "backToWallet": "Back to my Wallet",
+    "contactSupport": "Need help? Contact support"
+  },
+  "bankAccount": {
+    "title": "Bank Accounts",
+    "bankName": "Bank",
+    "bankNamePlaceholder": "E.g: Popular Bank",
+    "holderName": "Account Holder Name",
+    "holderNamePlaceholder": "Full name",
+    "accountNumber": "Account Number / IBAN",
+    "accountNumberPlaceholder": "Enter digits",
+    "addAccount": "Add account",
+    "deleteConfirm": "Are you sure you want to delete this account?",
+    "deleteLastError": "You cannot delete your only bank account.",
+    "addError": "Error adding account. Please verify the details.",
+    "primary": "Primary",
+    "active": "Active",
+    "pending": "Pending verification"
+  },
+  "success": {
+    "title": "Account added!",
+    "message": "Your bank account was added successfully. You can now receive payments and withdraw your earnings.",
+    "goToWallet": "Go to my Wallet",
+    "reviewTitle": "Account under review",
+    "reviewMessage": "Your account is being verified. This may take up to 1 hour.",
+    "backToWallet": "Back to Wallet"
+  },
+  "cancel": {
+    "title": "Verification Failed",
+    "message": "You cancelled the payment account verification process. To receive payments and withdraw your earnings, you must complete your bank account setup.",
+    "backToWallet": "Back to my Wallet",
+    "contactSupport": "Need help? Contact support"
+  },
+  "depositSuccess": {
+    "verifyError": "We could not verify your deposit details, but your funds should be available soon."
+  },
+  "subscriptionSuccess": {
+    "verifyError": "We could not verify your purchase details, but your subscription should be active soon."
+  },
+  "withdrawSuccess": {
+    "title": "Withdrawal in progress!",
+    "description": "Funds will appear in your destination account within 2 to 5 business days.",
+    "cta": "Understood"
+  },
+  "withdrawFailure": {
+    "title": "An error occurred",
+    "ctaBack": "Back to my Wallet",
+    "contactSupport": "Need help? Contact support"
+  }
+}

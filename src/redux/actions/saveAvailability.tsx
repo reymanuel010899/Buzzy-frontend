@@ -56,8 +56,7 @@ export const getAvailabilityStatus = (username: string) => async () => {
         if (response.status === 200) {
             return response.data
         }
-    } catch (error: any) {
-        console.error("Error fetching availability status:", error)
-        throw error
+    } catch {
+        // fallo silencioso — no disponible offline
     }
 }

@@ -26,6 +26,7 @@ export interface ChatRoom {
   unread_count: number;            // Mensajes no leídos por TI
   updated_at: string;              // ISO string de la última actividad
   other_user_online: OtherUserOnline;
+  folder_type?: 'standard' | 'known' | 'request' | 'hidden';
 }
 
 // Respuesta completa de la API /chats/
@@ -34,15 +35,17 @@ export interface ChatListResponse {
 }
 
 // types/message.ts (o donde guardes tus interfaces)
-export type MessageType = 'text' | 'image' | 'video' | 'voice' | 'gif';;
+export type MessageType = 'text' | 'image' | 'video' | 'voice' | 'gif' | 'story_reply';
 
 export interface Message {
-  uuid: string;                    // ID único del mensaje (ej: "a1b2c3d4")
-  content: string;                 // Texto del mensaje
-  sender_username: string;         // @username del que envía (ej: "@ana_22")
-  sender_avatar: string | null;     // URL completa de la foto de perfil o null
-  created_at: string;              // Fecha ISO (ej: "2026-01-08T15:30:45.123456Z")
-  message_type: MessageType; // Tipo de mensaje
+  uuid: string;
+  content: string;
+  sender_username: string;
+  sender_avatar: string | null;
+  created_at: string;
+  message_type: MessageType;
   reactions?: Record<string, string[]>;
+  story_uuid?: string | null;
+  story_media_url?: string | null;
+  story_audio_url?: string | null;
 }
-

@@ -1,23 +1,56 @@
 import axios from "axios";
+import i18n from "@/i18n/config";
+import { router } from "../../router/index";
+
+declare global {
+  interface Window {
+    __RUNTIME_CONFIG__?: {
+      VITE_DOMAIN_SERVER?: string;
+    };
+  }
+}
+
+const DEFAULT_BASE_URL = "http://127.0.0.1:8000";
+
+const normalizeBaseUrl = (value: unknown): string | null => {
+  if (typeof value !== "string") return null;
+
+  const rawUrl = value.trim();
+  if (!rawUrl) return null;
+
+  const url = /^https?:\/\//i.test(rawUrl) ? rawUrl : `http://${rawUrl}`;
+
+  try {
+    const parsed = new URL(url);
+    return parsed.origin;
+  } catch {
+    return null;
+  }
+};
 
 export const getBaseUrl = (): string => {
-  // @ts-ignore
-  const runtimeUrl = window.__RUNTIME_CONFIG__?.NEXT_PUBLIC_BACKEND_URL;
+  const viteUrl = normalizeBaseUrl(import.meta.env.VITE_DOMAIN_SERVER);
+  if (viteUrl) return viteUrl;
 
-  let url = (runtimeUrl && !runtimeUrl.includes("NEXT_PUBLIC_BACKEND_URL"))
-    ? runtimeUrl.trim()
-    : (process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000/");
-
-  if (!url.startsWith("http")) {
-    url = `http://${url}`;
-  }
-
-  return url.endsWith("/") ? url : `${url}/`;
+  const runtimeUrl = normalizeBaseUrl(
+    typeof window !== "undefined" ? window.__RUNTIME_CONFIG__?.VITE_DOMAIN_SERVER : undefined
+  );
+  return runtimeUrl || DEFAULT_BASE_URL;
 };
 
 export const BASE_URL = getBaseUrl();
 
-// 1. Exportación nombrada para apiClient
+export const getMediaUrl = (path: string | null | undefined): string => {
+  if (!path || typeof path !== 'string') return ""
+  if (path.startsWith("http")) return path
+  const base = getBaseUrl().replace(/\/+$/, "")
+  const clean = path.replace(/^\/+/, "")
+  if (clean.startsWith("media/")) {
+    return `${base}/${clean}`
+  }
+  return `${base}/media/${clean}`
+}
+
 export const apiClient = axios.create({
   baseURL: getBaseUrl(),
   headers: {
@@ -30,12 +63,10 @@ apiClient.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  config.headers["Accept-Language"] = i18n.language || "en";
   return config;
 });
 
-// 2. Exportación nombrada para apiClientStory
-// NOTA: Leer el localStorage aquí solo funcionará la primera vez que se cargue el archivo.
-// Es mejor usar un interceptor para que el token siempre esté actualizado.
 export const apiClientStory = axios.create({
   baseURL: getBaseUrl(),
   headers: {
@@ -43,12 +74,12 @@ export const apiClientStory = axios.create({
   },
 });
 
-// Interceptor para apiClientStory (Para que el token sea dinámico y no falle si cambia)
 apiClientStory.interceptors.request.use((config) => {
   const token = localStorage.getItem("accessToken");
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  config.headers["Accept-Language"] = i18n.language || "en";
   return config;
 });
 
@@ -87,7 +118,7 @@ const responseInterceptor = async (error: any) => {
 
     if (refreshToken) {
       try {
-        const { data } = await axios.post(`${getBaseUrl()}api/token/refresh/`, {
+        const { data } = await axios.post(`${getBaseUrl()}/api/token/refresh/`, {
           refresh: refreshToken,
         });
 
@@ -103,9 +134,7 @@ const responseInterceptor = async (error: any) => {
         localStorage.removeItem("refreshToken");
         localStorage.removeItem("isAuthenticated");
         localStorage.removeItem("user");
-        if (typeof window !== "undefined") {
-          window.location.href = "/sign-in";
-        }
+        router.navigate("/sign-in", { replace: true });
         return Promise.reject(err);
       } finally {
         isRefreshing = false;
@@ -115,9 +144,7 @@ const responseInterceptor = async (error: any) => {
       localStorage.removeItem("refreshToken");
       localStorage.removeItem("isAuthenticated");
       localStorage.removeItem("user");
-      if (typeof window !== "undefined") {
-        window.location.href = "/sign-in";
-      }
+      router.navigate("/sign-in", { replace: true });
       return Promise.reject(error);
     }
   }
@@ -125,6 +152,5 @@ const responseInterceptor = async (error: any) => {
   return Promise.reject(error);
 };
 
-// Interceptor de respuesta para apiClient
 apiClient.interceptors.response.use((response) => response, responseInterceptor);
 apiClientStory.interceptors.response.use((response) => response, responseInterceptor);

@@ -29,6 +29,7 @@ export interface ChatRoom {
   unread_count: number;
   updated_at: string;
   other_user_online: OtherUserOnline;
+  folder_type?: 'standard' | 'request' | 'hidden';
 }
 
 export interface ChatListResponse {
@@ -94,7 +95,8 @@ const listChatRoomsReducer = (
       return {
         ...state,
         loading: false,
-        chats: null,
+        // Conservar chats del cache — no borrar lo que ya se mostró
+        chats: state.chats,
         error: action.payload,
       };
 

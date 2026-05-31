@@ -1,656 +1,63 @@
 "use client"
 
 import type React from "react"
-import sendMessageSound from "../../assets/sounds/sendMessage.mp3";
-import typingSound from "../../assets/sounds/whatsapp-typing.mp3";
-
-import { useState, useEffect, useRef, useCallback, useMemo } from "react"
-import {
-  FileText, Image as ImageIcon, Camera, Headphones, User, BarChart2, Calendar, Smile,
-  Mic, Trash2, StopCircle, Search, Bell, X, Phone, Video, Plus, Send, Download, Play, MessageCircleMore,
-  Sparkles,
-} from "lucide-react"
-// import { Link } from "react-router-dom"
-import { motion, AnimatePresence, LayoutGroup } from "framer-motion"
+import { useState, useEffect } from "react"
+import { useTranslation } from "react-i18next"
+import { Search, Bell, Megaphone } from "lucide-react"
+import { motion, AnimatePresence } from "framer-motion"
 import { useNavigate } from "react-router-dom"
 import FluidSearch from "./fluid-search"
-import { useChat } from "../../context/ChatContext"
-import { getSocialConnections } from "../../redux/actions/message/social"
-import CustomAudioPlayer from "../Chat/CustomAudioPlayer"
-import FullscreenMediaPreview from "../Chat/FullscreenMediaPreview"
-import ContactSelectionModal from "../Chat/ContactSelectionModal"
+import NotificationPanel from "../notifications/NotificationPanel"
+import { useNotificationsStore } from "../../context/NotificationsStore"
+import { useCallStore } from "../../store/callStore"
 
-import { useDispatch, useSelector } from 'react-redux';
-import { listChatRooms } from "../../redux/actions/message/listChatRoom"
-import { RootState } from "../../store"
-import { loadChatMessages } from "../../redux/actions/message/chatMeesage"
-import { getAvailabilityStatus } from "../../redux/actions/saveAvailability"
-import { sendMessage } from "../../redux/actions/message/sendMessage"
-import { useWebSocket } from "../../hooks/useWebSocket"
-import { allEmojis } from "../comments/emojis";
-import { useTypingUsers } from "../../context/useTyping";
-import { useUnreadMessages } from "../../context/UnreadAcount";
-import { getBaseUrl } from "../../redux/client/api-client";
-
-const WS_URL = "ws://localhost:8001/ws/chat/";
 const Navbar: React.FC = () => {
+  const { t } = useTranslation(['common'])
+  void t;
   const [search, setSearch] = useState("")
-  const [chatSearchTerm, setChatSearchTerm] = useState("")
-  const navigate = useNavigate()
-  // const total = useUnreadMessages((state) => state.getTotalUnread());
   const [showSearch, setShowSearch] = useState(false)
-  const [scrollPosition, setScrollPosition] = useState(0)
   const [showNotifications, setShowNotifications] = useState(false)
-  const [realtimeMessages, setRealtimeMessages] = useState<any[]>([])
-  const chatSocketActiveRef = useRef(false);
-  const { selectedChat, setSelectedChat, showMessages, setShowMessages } = useChat()
-  const [chatAvailability, setChatAvailability] = useState<{
-    is_available: boolean;
-    can_voice: boolean;
-    can_video: boolean;
-    remaining_calls: number;
-    plan_name: string;
-    upgrade_required: boolean;
-  } | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-  const unreadCounts = useUnreadMessages((state) => state.unreadCounts);
-  const [clickedMessage, setClickedMessage] = useState<string | null>(null)
-  const clickedMessageTimerRef = useRef<NodeJS.Timeout | null>(null);
-  // reactions: { [messageUuid]: { [emoji]: string[] (usernames) } }
-  const [reactionsMap, setReactionsMap] = useState<Record<string, Record<string, string[]>>>({});
-  const markAsRead = useUnreadMessages((state) => state.markAsRead);
-  const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
-  (void setShowAttachmentMenu); // Fix unread warning
-  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const { typingByChat, setTypingUser, removeTypingUser } = useTypingUsers();
-  const [activePreview, setActivePreview] = useState<{ url: string; type: 'image' | 'video' } | null>(null);
-  const [showContactModal, setShowContactModal] = useState(false);
-  const { connections } = useSelector((state: RootState) => state.socialReducer);
-  const [messageText, setMessageText] = useState("")
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const attachmentOptions = [
-    { icon: <ImageIcon className="text-blue-400" />, label: "Fotos y videos", type: "image/video" },
-    { icon: <Camera className="text-pink-400" />, label: "Cámara", type: "camera" },
-    { icon: <FileText className="text-indigo-400" />, label: "Documento", type: "file" },
-    { icon: <Headphones className="text-orange-400" />, label: "Audio", type: "audio" },
-    { icon: <User className="text-cyan-400" />, label: "Contacto", type: "contact" },
-    { icon: <BarChart2 className="text-yellow-400" />, label: "Encuesta", type: "poll", enable: true },
-    { icon: <Calendar className="text-rose-400" />, label: "Evento", type: "event", enable: true },
-    { icon: <Smile className="text-emerald-400" />, label: "Nuevo sticker", type: "sticker", enable: true },
-  ]
+  const [scrollPosition, setScrollPosition] = useState(0)
+  const navigate = useNavigate()
 
-  const handleFileSelect = (type: string) => {
-    const input = fileInputRef.current;
-    if (!input) return;
+  const notifUnreadCount = useNotificationsStore((state) => state.unreadCount);
+  const { activeOutgoingCall, activeIncomingCall } = useCallStore();
+  const [isCallMinimized] = useState(false);
+  const [activeCallTime] = useState(0);
 
-    switch (type) {
-      case "image/video":
-      case "camera":
-        input.accept = "image/*,video/*";
-        if (type === "camera") input.capture = "environment";
-        else input.removeAttribute("capture");
-        input.click();
-        break;
-      case "file":
-        input.accept = ".pdf,.doc,.docx,.txt,.zip";
-        input.removeAttribute("capture");
-        input.click();
-        break;
-      case "audio":
-        input.accept = "audio/*";
-        input.removeAttribute("capture");
-        input.click();
-        break;
-      case "contact":
-        getSocialConnections()(dispatch);
-        setShowContactModal(true);
-        break;
-      case "poll":
-      case "event":
-      case "sticker":
-        handleSystemMessage(type);
-        break;
-      default:
-        input.accept = "*/*";
-        input.removeAttribute("capture");
-        input.click();
-    }
-
-    setShowAttachmentMenu(false);
-  };
-
-
-  const handleSendContact = (contact: any) => {
-    if (!backendMessages?.other_user?.id) return;
-
-    const contactInfo = {
-      id: contact.id,
-      username: contact.username,
-      avatar: contact.profile_picture,
-    };
-    const content = JSON.stringify(contactInfo);
-
-    const formData = new FormData();
-    formData.append("recipient_id", backendMessages.other_user.id.toString());
-    formData.append("message_type", "contact");
-    formData.append("content", content);
-
-    // Optimistic update: show contact card immediately without reloading
-    const tempId = `temp-${Date.now()}`;
-    const optimisticMsg = {
-      uuid: tempId,
-      content: content,
-      file: null,
-      sender_username: user.username,
-      sender_avatar: user.profile_picture,
-      created_at: new Date().toISOString(),
-      message_type: "contact" as const,
-    };
-    setRealtimeMessages(prev => [...prev, optimisticMsg]);
-
-    sendMessage(formData)(dispatch);
-    setShowContactModal(false);
-    setShowAttachmentMenu(false);
-  };
-
-  const handleSystemMessage = (type: string) => {
-    if (!backendMessages?.other_user?.id) return;
-
-    const tempId = `temp-${Date.now()}`;
-    const content = `[${type.toUpperCase()} enviado]`;
-    const optimisticMsg = {
-      uuid: tempId,
-      content: content,
-      sender_username: user.username,
-      sender_avatar: user.profile_picture,
-      created_at: new Date().toISOString(),
-      message_type: type as any,
-    };
-    setRealtimeMessages(prev => [...prev, optimisticMsg]);
-
-    const formData = new FormData();
-    formData.append("recipient_id", backendMessages.other_user.id.toString());
-    formData.append("message_type", type);
-    formData.append("content", content);
-
-    sendMessage(formData)(dispatch);
-  };
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !backendMessages?.other_user?.id) return;
-
-    const formData = new FormData();
-    formData.append("recipient_id", backendMessages.other_user.id.toString());
-    formData.append("file", file);
-
-    let messageType: "image" | "video" | "text" | "voice" | "gif" | "file" | "document" = "text";
-    if (file.type.startsWith("image/")) messageType = "image";
-    else if (file.type.startsWith("video/")) messageType = "video";
-    else if (file.type.startsWith("audio/")) messageType = "voice";
-    else if (file.type === "application/pdf" || file.type.includes("word") || file.type.includes("text/plain")) messageType = "document";
-    else messageType = "file";
-
-    formData.append("message_type", messageType);
-    formData.append("content", ""); // Optional for file messages
-
-    // Optimistic update (optional, but good for UX)
-    const tempId = `temp-${Date.now()}`;
-    const optimisticMsg = {
-      uuid: tempId,
-      content: "",
-      file: URL.createObjectURL(file), // Local preview
-      sender_username: user.username,
-      sender_avatar: user.profile_picture,
-      created_at: new Date().toISOString(),
-      message_type: messageType,
-    };
-    setRealtimeMessages(prev => [...prev, optimisticMsg]);
-
-    sendMessage(formData)(dispatch);
-  };
-
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordingTime, setRecordingTime] = useState(0);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
-
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
-      audioChunksRef.current = [];
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
-      mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        if (audioBlob.size > 1000) { // Avoid sending empty/too short recordings
-          handleVoiceUpload(audioBlob);
-        }
-        stream.getTracks().forEach(track => track.stop());
-      };
-
-      mediaRecorder.start();
-      setIsRecording(true);
-      setRecordingTime(0);
-      timerRef.current = setInterval(() => {
-        setRecordingTime(prev => prev + 1);
-      }, 1000);
-    } catch (err) {
-      console.error("Error accessing microphone:", err);
-      alert("No se pudo acceder al micrófono.");
-    }
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-      if (timerRef.current) clearInterval(timerRef.current);
-    }
-  };
-
-  const cancelRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.onstop = null; // Don't trigger upload
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-      if (timerRef.current) clearInterval(timerRef.current);
-    }
-  };
-
-  const handleVoiceUpload = async (blob: Blob) => {
-    if (!backendMessages?.other_user?.id) return;
-
-    const file = new File([blob], "voice_message.webm", { type: "audio/webm" });
-    const formData = new FormData();
-    formData.append("recipient_id", backendMessages.other_user.id.toString());
-    formData.append("file", file);
-    formData.append("message_type", "voice");
-    formData.append("content", "");
-
-    // Optimistic update
-    const tempId = `temp-${Date.now()}`;
-    const optimisticMsg = {
-      uuid: tempId,
-      content: "",
-      file: URL.createObjectURL(blob),
-      sender_username: user.username,
-      sender_avatar: user.profile_picture,
-      created_at: new Date().toISOString(),
-      message_type: "voice" as "voice",
-    };
-    setRealtimeMessages(prev => [...prev, optimisticMsg]);
-
-    sendMessage(formData)(dispatch);
-  };
-
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  const [emojiTarget, setEmojiTarget] = useState<string | null>(null)
-
-  const inputRef = useRef<HTMLInputElement>(null)
-  const dispatch = useDispatch()
-
-  const { chats: backendChats, loading } = useSelector((state: RootState) => state.listChatRoomsReducer)
-  const { messages: backendMessages, loading: messagesLoading } = useSelector(
-    (state: RootState) => state.chatMessagesReducer
-  )
-
-  const user = JSON.parse(localStorage.getItem("user") || "{}")
-  const currentBackendChat = backendChats?.chats.find(c => c.uuid === selectedChat) || null
-
-  useEffect(() => {
-    if (selectedChat && currentBackendChat?.other_user?.username) {
-      getAvailabilityStatus(currentBackendChat.other_user.username)().then((data: any) => {
-        setChatAvailability(data);
-      }).catch(console.error);
-    } else {
-      setChatAvailability(null);
-    }
-  }, [selectedChat, currentBackendChat]);
-  const sendAudioRef = useRef<HTMLAudioElement | null>(null);
-  const typingAudioRef = useRef<HTMLAudioElement | null>(null);
-
-  const unreadCountFromStore = useUnreadMessages((state) => state.unreadCounts);
-  const totalGlobal = useMemo(() => {
-    return Object.values(unreadCounts).reduce((acc, curr) => acc + curr, 0);
-  }, [unreadCounts]);
-  useEffect(() => {
-    // Si hay un chat seleccionado y tiene un UUID válido
-    if (selectedChat) {
-      markAsRead(selectedChat);
-    }
-  }, [selectedChat, markAsRead]);
-  useEffect(() => {
-    sendAudioRef.current = new Audio(sendMessageSound);
-    typingAudioRef.current = new Audio(typingSound);
-  }, []);
-  // ────────────────────────────────────────────────────────────────
-  // WebSocket - conexión estable por chat
-  // ────────────────────────────────────────────────────────────────
-  const wsUrl = useMemo(() => {
-    if (!selectedChat || !showMessages || messagesLoading || !backendMessages?.chat_uuid) {
-      return null
-    }
-    const token = localStorage.getItem("accessToken") || ""
-    return `${WS_URL}${backendMessages.chat_uuid}?token=${token}`
-  }, [selectedChat, showMessages, messagesLoading, backendMessages?.chat_uuid])
-
-  const shouldConnect = !!wsUrl && !!selectedChat
-  useEffect(() => {
-    chatSocketActiveRef.current = !!selectedChat;
-  }, [selectedChat]);
-
-  const handleWSMessage = useCallback((data: any) => {
-    switch (data.event) {
-      case "send_message": {
-        if (data.chat_uuid !== selectedChat) return;
-
-        // ⛔ Ignorar mensajes propios
-        if (data.message?.sender_username === user.username) return;
-
-        // 🔊 Sonido SOLO para el receptor
-        // if (sendAudioRef.current && data.message?.sender_username !== user.username) {
-        //   sendAudioRef.current.currentTime = 0;
-        //   sendAudioRef.current
-        //     .play()
-        //     .catch(err => console.warn("Audio bloqueado:", err));
-        // }
-
-
-        setRealtimeMessages(prev => {
-          if (prev.some(m => m.uuid === data.message?.uuid)) return prev;
-          return [...prev, data.message];
-        });
-
-        break;
-      }
-
-      case "typing": {
-
-        if (data.user_id === user.id) return;
-        typingAudioRef.current
-          ?.play()
-          .catch(() => { });
-
-        const chatUUID = data.chat_uuid;
-
-        if (data.is_typing) {
-          setTypingUser(
-            chatUUID,
-            data.user_id,
-            data.username ?? "Alguien"
-          );
-        } else {
-          removeTypingUser(
-            chatUUID,
-            data.user_id
-          );
-        }
-
-        break;
-      }
-
-      case "reaction": {
-        if (data.message_uuid && data.emoji) {
-          setReactionsMap(prev => {
-            const msgReactions = { ...(prev[data.message_uuid] || {}) };
-            let users = [...(msgReactions[data.emoji] || [])];
-
-            if (data.action === "removed") {
-              users = users.filter(u => u !== data.username);
-              if (users.length === 0) {
-                delete msgReactions[data.emoji];
-              } else {
-                msgReactions[data.emoji] = users;
-              }
-            } else {
-              if (!users.includes(data.username)) users.push(data.username);
-              msgReactions[data.emoji] = users;
-            }
-
-            return { ...prev, [data.message_uuid]: msgReactions };
-          });
-        }
-        break;
-      }
-
-      case "read_message": {
-        // manejar leído
-        break;
-      }
-
-      case "user_online": {
-        // manejar online
-        break;
-      }
-
-      default:
-        break;
-    }
-  }, [selectedChat, user.username]);
-
-  const socketRef = useWebSocket(wsUrl, handleWSMessage, shouldConnect)
-  const handleTyping = () => {
-    if (!wsUrl || !socketRef.current) return;
-
-    const socket = chatSocketActiveRef.current;
-    if (!socket) return;
-
-    setMessageText(inputRef.current?.value || "")
-    if (!selectedChat) return;
-    socketRef?.current?.send(JSON.stringify({
-      type: "typing",
-      is_typing: true,
-      receiver_id: backendMessages?.other_user?.id,
-      chat_uuid: backendMessages?.chat_uuid
-    }));
-
-
-    // reset timeout
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current);
-    }
-
-    typingTimeoutRef.current = setTimeout(() => {
-      socketRef?.current?.send(JSON.stringify({
-        type: "typing",
-        is_typing: false,
-        receiver_id: backendMessages?.other_user?.id
-
-      }));
-    }, 1500);
-  };
-  const getUnreadAcount = (chatUUID: string) => {
-    return unreadCountFromStore[chatUUID] || 0;
-  }
-
-  // Cargar chats iniciales cuando se abre la ventana de mensajes
-  useEffect(() => {
-    listChatRooms()(dispatch)
-  }, [showMessages, dispatch])
-
-  // Cargar mensajes del chat seleccionado
-  useEffect(() => {
-    if (selectedChat) {
-      loadChatMessages(selectedChat)(dispatch)
-    }
-  }, [selectedChat, dispatch])
-
-  // Sincronizar mensajes del backend cuando lleguen/cambien
-  useEffect(() => {
-    if (backendMessages?.messages && selectedChat) {
-      setRealtimeMessages(backendMessages.messages);
-      // Seed reactionsMap from persisted backend reactions
-      const seeded: Record<string, Record<string, string[]>> = {};
-      for (const msg of backendMessages.messages) {
-        if (msg.reactions && Object.keys(msg.reactions).length > 0) {
-          seeded[msg.uuid] = msg.reactions;
-        }
-      }
-      setReactionsMap(seeded);
-    }
-  }, [backendMessages?.messages, selectedChat])
-
-  // Resetear mensajes locales al cambiar de chat
-  useEffect(() => {
-    if (selectedChat) {
-      setRealtimeMessages([]);
-      setReactionsMap({});
-    }
-  }, [selectedChat])
-
-  // Scroll automático cuando llegan nuevos mensajes
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [realtimeMessages.length])
-
-  // Enfocar input al abrir chat
-  useEffect(() => {
-    if (selectedChat) {
-      setTimeout(() => inputRef.current?.focus(), 400)
-    }
-  }, [selectedChat])
-
-  // Scroll global (navbar)
   useEffect(() => {
     const handleScroll = () => setScrollPosition(window.scrollY)
     window.addEventListener("scroll", handleScroll)
     return () => window.removeEventListener("scroll", handleScroll)
   }, [])
 
-  // Enviar mensaje con optimista update
-  const handleSendMessage = (e: React.FormEvent) => {
-    e.preventDefault()
-    const input = inputRef.current
-    if (!input?.value.trim() || !backendMessages?.other_user?.id) return
-
-    const content = input.value.trim();
-    const tempId = `temp-${Date.now()}`
-    const optimisticMsg = {
-      uuid: tempId,
-      content: content,
-      sender_username: user.username,
-      sender_avatar: user.profile_picture,
-      created_at: new Date().toISOString(),
-      message_type: "text" as "text",
-    }
-
-    setRealtimeMessages(prev => [...prev, optimisticMsg])
-
-    const formData = new FormData();
-    formData.append("recipient_id", backendMessages.other_user.id.toString());
-    formData.append("content", content);
-    formData.append("message_type", "text");
-
-    sendMessage(formData)(dispatch)
-    input.value = ""
-    setMessageText("")
-  }
-  const sendReaction = (messageUuid: string, emoji: string) => {
-    if (!socketRef.current) return
-
-    socketRef.current.send(
-      JSON.stringify({
-        type: "reaction",
-        message_uuid: messageUuid,
-        emoji
-      })
-    )
-
-    console.log("****")
-    // Optimistic update for better UX
-    setReactionsMap(prev => {
-      const msgReactions = { ...(prev[messageUuid] || {}) };
-      let users = [...(msgReactions[emoji] || [])];
-
-      if (users.includes(user.username)) {
-        // Optimistic remove
-        users = users.filter(u => u !== user.username);
-        if (users.length === 0) delete msgReactions[emoji];
-        else msgReactions[emoji] = users;
-      } else {
-        // Optimistic add
-        users.push(user.username);
-        msgReactions[emoji] = users;
-      }
-      return { ...prev, [messageUuid]: msgReactions };
-    });
-
-    setEmojiTarget(null)
-  }
-
-  const typingContest = (chat: any) => {
-    const chatTypingUsers = typingByChat[chat.uuid];
-    if (!chatTypingUsers) return null;
-
-    const users = Object.values(chatTypingUsers);
-
-
-
-    return (
-      <motion.div className="flex items-center gap-2 text-sm text-gray-400 px-2">
-
-
-        <span className="text-green-500">
-          {users.length > 1 ? "están escribiendo…" : "está escribiendo…"}
-        </span>
-      </motion.div>
-    );
-  };
-
-
   return (
     <>
-      {/* NAVBAR ORIGINAL - SIN CAMBIOS */}
       <nav
-        className={`fixed w-full top-0 z-40 px-4 sm:px-6 transition-all duration-300 ${scrollPosition > 20 ? "bg-black backdrop-blur-lg" : "bg-black/80 backdrop-blur-2xl"
-          }`}
+        className={`fixed w-full top-0 z-50 px-2 sm:px-6 transition-all duration-300 ${scrollPosition > 20 ? "bg-black backdrop-blur-lg" : "bg-black/80 backdrop-blur-2xl"}`}
       >
-        <div className="flex justify-between items-center mx-auto py-5">
+        <AnimatePresence>
+          {isCallMinimized && (activeOutgoingCall || (activeIncomingCall && activeIncomingCall.status === 'active')) && (
+            <motion.div
+              initial={{ scaleX: 0 }}
+              animate={{ scaleX: 1 }}
+              exit={{ scaleX: 0 }}
+              className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-green-400 via-cyan-500 to-purple-600 origin-left z-50"
+            />
+          )}
+        </AnimatePresence>
+        <div className="flex justify-between items-center mx-auto py-1">
           <div className="flex items-center justify-center gap-5 sm:gap-6">
 
             <motion.button
-              className="relative" // Importante: el botón debe ser relative
-              whileHover={{ rotate: 15, scale: 1.1 }}
+              whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.9 }}
-              onClick={() => setShowMessages(true)}
+              className="relative text-gray-300 hover:text-cyan-400 transition-colors"
+              onClick={() => navigate("/ads")}
             >
-              {/* El SVG del avión de papel */}
-              <svg
-                fill="currentColor"
-                className="cursor-pointer h-7 w-10 "
-                viewBox="0 0 48 48"
-                xmlns="http://www.w3.org/2000/svg"
-                width="1em"
-                height="1em"
-              >
-                <path className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-pulse" d="M45.73 7A2 2 0 0 0 44 6H4a2 2 0 0 0-1.48 3.35l10.44 11.47a2 2 0 0 0 2.2.52l14.49-5.5c.17-.07.25-.04.28-.03.06.02.14.08.2.2.07.1.08.2.08.27 0 .04-.02.12-.16.23l-11.9 10.1a2 2 0 0 0-.62 2.12l4.56 14.51a2 2 0 0 0 3.64.4L45.73 9a2 2 0 0 0 0-2Z" />
-              </svg>
-
-              {/* El Badge con el número total global */}
-              {totalGlobal > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] bg-red-600 rounded-full flex items-center justify-center text-[10px] text-white font-bold border border-black px-1 shadow-lg animate-in zoom-in duration-300">
-                  {totalGlobal > 99 ? "99+" : totalGlobal}
-                </span>
-              )}
+              <Megaphone className="h-7 w-7" />
             </motion.button>
 
-            {/* <Link to="/" className="text-2xl font-bold text-white hover:text-purple-400 transition-colors">
-              Buzzy
-            </Link> */}
           </div>
 
           <div className="hidden md:flex flex-grow max-w-lg items-center bg-gray-800/60 backdrop-blur-md border border-gray-700/50 rounded-full px-4 py-2 mx-8 cursor-pointer hover:bg-gray-700/50 transition-all"
@@ -662,20 +69,38 @@ const Navbar: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-4 sm:gap-6">
+
+            {isCallMinimized && (activeOutgoingCall || (activeIncomingCall && activeIncomingCall.status === 'active')) && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="flex items-center gap-1.5 px-3 py-1 bg-white/10 hover:bg-white/20 rounded-full cursor-pointer transition-colors border border-white/5"
+              >
+                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                <span className="font-mono font-bold text-sm text-white">
+                  {Math.floor(activeCallTime / 60)}:{(activeCallTime % 60).toString().padStart(2, '0')}
+                </span>
+              </motion.div>
+            )}
+
             <motion.button
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.9 }}
               className="relative text-gray-300 hover:text-purple-400 transition-colors"
-              onClick={() => setShowNotifications(true)}
+              onClick={() => setShowNotifications(v => !v)}
             >
               <Bell className="w-10 h-7" />
-              <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-pulse" />
+              {notifUnreadCount > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-red-500 rounded-full text-[10px] font-bold text-white flex items-center justify-center px-1">
+                  {notifUnreadCount > 9 ? "9+" : notifUnreadCount}
+                </span>
+              )}
             </motion.button>
           </div>
         </div>
 
-        <div className="md:hidden px-4 pb-4 pt-1">
-          <div className="flex items-center bg-gray-800/60 backdrop-blur-md border border-gray-700/50 rounded-full px-4 py-2 cursor-pointer hover:bg-gray-700/50 transition-all"
+        <div className="md:hidden pt-1">
+          <div className="flex items-center bg-gray-800/60 backdrop-blur-md border border-gray-700/50 rounded-full px-2 py-1 cursor-pointer hover:bg-gray-700/50 transition-all"
             onClick={() => setShowSearch(true)}>
             <span className="text-gray-400 px-2">{search || "Buscar en Buzzy..."}</span>
             <Search className="w-5 h-5 text-gray-400 ml-auto mr-2" />
@@ -683,7 +108,6 @@ const Navbar: React.FC = () => {
         </div>
       </nav>
 
-      {/* MODALES DE BÚSQUEDA Y NOTIFICACIONES (igual que antes) */}
       <AnimatePresence>
         {showSearch && (
           <FluidSearch onClose={() => setShowSearch(false)} searchTerm={search} setSearchTerm={setSearch} />
@@ -1784,6 +1208,8 @@ const Navbar: React.FC = () => {
           contacts={connections}
           onSelect={handleSendContact}
         />
+
+      <NotificationPanel open={showNotifications} onClose={() => setShowNotifications(false)} />
 
       </LayoutGroup>
     </>

@@ -1,0 +1,8 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Buzzy</string>
+    <string name="title_activity_main">Buzzy</string>
+    <string name="package_name">com.buzzy.app</string>
+    <string name="custom_url_scheme">com.buzzy.app</string>
+    <string name="server_client_id">993295175092-6l5q4g5u401ieunl4pjp7lqj5psjpunj.apps.googleusercontent.com</string>
+</resources>

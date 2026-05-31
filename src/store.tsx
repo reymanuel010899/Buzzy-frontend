@@ -7,7 +7,10 @@ import rootReducer from "./redux/index"; // Tu raíz de reducers
 const persistConfig = {
   key: "root",
   storage,
-  whitelist: ["LoginReducer", "getMedia"],
+  // getMedia se excluye del persist — el cache del feed vive en IndexedDB (feedCacheDB.ts)
+  // y se carga via loadFeed() al montar. Tenerlo en redux-persist bloqueaba las llamadas
+  // al servidor porque el estado ya llegaba rehidratado y los endpoints no se volvían a llamar.
+  whitelist: ["LoginReducer", "uploadProgress", "bannerReducer"],
 };
 
 const persistedReducer = persistReducer(persistConfig, rootReducer);
@@ -15,7 +18,7 @@ const persistedReducer = persistReducer(persistConfig, rootReducer);
 // Crea el store con el reducer persistente
 const store = configureStore({
   reducer: persistedReducer,
-  devTools: true, // Mantén las herramientas de desarrollo
+  devTools: import.meta.env.DEV,
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({
       serializableCheck: false, // Desactiva el chequeo de serialización para redux-persist
@@ -25,7 +28,7 @@ const store = configureStore({
 // Crea el persistor
 export const persistor = persistStore(store);
 
-export type RootState = ReturnType<typeof store.getState>;
+export type RootState = ReturnType<typeof rootReducer>;
 export type AppDispatch = typeof store.dispatch;
 
 

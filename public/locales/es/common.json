@@ -1,0 +1,115 @@
+{
+  "app": {
+    "name": "Buzzy",
+    "tagline": "Comparte tus momentos"
+  },
+  "actions": {
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "confirm": "Confirmar",
+    "delete": "Eliminar",
+    "edit": "Editar",
+    "close": "Cerrar",
+    "back": "Atrás",
+    "next": "Siguiente",
+    "submit": "Enviar",
+    "loading": "Cargando...",
+    "retry": "Intentar de nuevo",
+    "search": "Buscar",
+    "filter": "Filtrar",
+    "share": "Compartir",
+    "copy": "Copiar enlace",
+    "copied": "¡Copiado!",
+    "more": "Más",
+    "less": "Menos",
+    "seeAll": "Ver todo",
+    "viewMore": "Ver más",
+    "send": "Enviar",
+    "upload": "Subir",
+    "uploading": "Subiendo...",
+    "download": "Descargar",
+    "continue": "Continuar"
+  },
+  "status": {
+    "online": "En línea",
+    "offline": "Desconectado",
+    "away": "Ausente",
+    "success": "Éxito",
+    "error": "Fallo",
+    "pending": "Pendiente"
+  },
+  "time": {
+    "justNow": "Ahora mismo",
+    "minutesAgo": "Hace {{count}} min",
+    "minutesAgo_plural": "Hace {{count}} min",
+    "hoursAgo": "Hace {{count}} hora",
+    "hoursAgo_plural": "Hace {{count}} horas",
+    "daysAgo": "Hace {{count}} día",
+    "daysAgo_plural": "Hace {{count}} días",
+    "weeksAgo": "Hace {{count}} semana",
+    "weeksAgo_plural": "Hace {{count}} semanas",
+    "monthsAgo": "Hace {{count}} mes",
+    "monthsAgo_plural": "Hace {{count}} meses"
+  },
+  "numbers": {
+    "followers": "{{count}} seguidor",
+    "followers_plural": "{{count}} seguidores",
+    "following": "{{count}} siguiendo",
+    "likes": "{{count}} me gusta",
+    "likes_plural": "{{count}} me gusta",
+    "comments": "{{count}} comentario",
+    "comments_plural": "{{count}} comentarios",
+    "views": "{{count}} vista",
+    "views_plural": "{{count}} vistas"
+  },
+  "language": {
+    "label": "Idioma",
+    "select": "Seleccionar idioma",
+    "changed": "Idioma actualizado"
+  },
+  "theme": {
+    "label": "Tema",
+    "light": "Claro",
+    "dark": "Oscuro",
+    "system": "Sistema"
+  },
+  "currency": {
+    "usd": "USD",
+    "tokens": "Fichas",
+    "balance": "Saldo: {{amount}}"
+  },
+  "messages": {
+    "title": "Mensajes",
+    "searchPlaceholder": "Buscar chat...",
+    "empty": "Aún no tienes mensajes",
+    "emptyHint": "Empieza una conversación buscando a alguien en Buzzy 🚀",
+    "findPeople": "Buscar personas",
+    "viewAll": "Ver todos los mensajes"
+  },
+  "search": {
+    "placeholder": "Buscar creadores, videos o temas"
+  },
+  "errors": {
+    "microphoneAccess": "No se pudo acceder al micrófono.",
+    "storyUpload": "Error al subir la historia. Inténtalo de nuevo."
+  },
+  "ads": {
+    "paymentCancelled": "Pago cancelado. Puedes intentar de nuevo cuando gustes.",
+    "paymentPending": "El pago aún no se ha procesado. Si ya pagaste, espera unos segundos e intenta recargar.",
+    "paymentError": "Error al verificar el pago.",
+    "relaunchSuccess": "¡Campaña relanzada con éxito!",
+    "relaunchError": "No se pudo relanzar la campaña.",
+    "stats": {
+      "totalReach": "Alcance Total",
+      "interactions": "Interacciones",
+      "totalSpend": "Gasto Total",
+      "activeCampaigns": "Campañas Activas"
+    },
+    "campaigns": {
+      "title": "Tus Campañas",
+      "viewAll": "Ver todas",
+      "globalPerformance": "Rendimiento Global Activo",
+      "completed": "% Completado"
+    }
+  }
+}

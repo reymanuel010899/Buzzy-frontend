@@ -220,7 +220,8 @@ body {
 
 /* Scrollbar styling */
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 4px;
+  height: 4px;
 }
 
 ::-webkit-scrollbar-track {
@@ -229,7 +230,7 @@ body {
 
 ::-webkit-scrollbar-thumb {
   background: linear-gradient(to bottom, #7000ff, #00f0ff);
-  border-radius: 3px;
+  border-radius: 2px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
@@ -508,3 +509,21 @@ body {
   width: 200%;
   animation: shine 3s infinite;
 }
+
+/* EqBars — CSS-only equalizer animation, zero JS overhead */
+@keyframes eq-bounce {
+  0%, 100% { transform: scaleY(0.4); }
+  50%       { transform: scaleY(1);   }
+}
+
+.eq-bar {
+  height: 16px;
+  transform-origin: bottom;
+  animation: eq-bounce 0.8s ease-in-out infinite;
+}
+
+.eq-bars .eq-bar:nth-child(1) { animation-delay: 0s; }
+.eq-bars .eq-bar:nth-child(2) { animation-delay: 0.1s; }
+.eq-bars .eq-bar:nth-child(3) { animation-delay: 0.2s; }
+.eq-bars .eq-bar:nth-child(4) { animation-delay: 0.15s; }
+.eq-bars .eq-bar:nth-child(5) { animation-delay: 0.05s; }

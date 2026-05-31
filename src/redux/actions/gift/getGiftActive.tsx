@@ -13,7 +13,7 @@ export const getOneActiveGift = (gift_uuid: string, story_uuid: string | null) =
   } catch (error) {
     dispatch({
       type: FAILED_GET_ONE_ACTIVE_GIFTS,
-      payload: error,
+      payload: (error as any)?.message ?? 'error',
     });
   }
 };

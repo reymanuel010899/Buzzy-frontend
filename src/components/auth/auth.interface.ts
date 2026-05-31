@@ -4,5 +4,7 @@ export interface IDataSignUp {
     email: string,
     password: string,
     repeat_password: string,
-
+    country: string,
+    country_code: string,
+    referral_code?: string,
 }

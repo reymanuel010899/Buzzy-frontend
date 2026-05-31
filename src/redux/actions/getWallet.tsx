@@ -11,10 +11,10 @@ export const getWallet = () => async (dispatch: any) => {
         payload: response.data,
       });
     }
-  } catch (error) {
+  } catch (error: any) {
     dispatch({
       type: FAILED_GET_WALLLET,
-      payload: error
+      payload: error?.message ?? 'error',
     });
   }
 };

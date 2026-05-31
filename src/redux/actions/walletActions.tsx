@@ -29,9 +29,9 @@ export const createDepositSession = (amount: number) => async (dispatch: any) =>
     }
 };
 
-export const withdrawFunds = (amount: number) => async (dispatch: any) => {
+export const withdrawFunds = (amount: number, bank_account_id?: string | number) => async (dispatch: any) => {
     try {
-        const response = await apiClient.post(`/api/withdraw-funds/`, { amount });
+        const response = await apiClient.post(`/api/wallet/withdraw-funds/`, { amount, bank_account_id });
         if (response.status === 200) {
             dispatch({
                 type: SUCCEES_WITHDRAW,

@@ -22,8 +22,10 @@ export function useWebSocket(
 
     ws.onopen = () => {
       console.log("✅ WebSocket conectado");
+      const deviceToken = localStorage.getItem("device_token");
       ws.send(JSON.stringify({
         type: "REGISTER",
+        device_token: deviceToken
       }));
     };
     ws.onmessage = (event) => {

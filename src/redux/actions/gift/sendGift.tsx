@@ -11,7 +11,7 @@ type SendGiftBody = {
 export const sendGift = (body: SendGiftBody) => async (dispatch: any) => {
   try {
     const response = await apiClient.post('/api/stories/send-story-gifted/', body);
-    if (response.status === 200) {
+    if (response.status === 200 || response.status === 201) {
       dispatch({
         type: SUCCEES_SEND_GIFT_STORY,
         payload: response.data,
@@ -25,7 +25,7 @@ export const sendGift = (body: SendGiftBody) => async (dispatch: any) => {
         });
       }
 
-      return response.data
+      return response.data;
     }
 
   } catch (err) {

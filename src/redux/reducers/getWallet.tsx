@@ -7,10 +7,12 @@ import { SUCCEES_GET_WALLET, FAILED_GET_WALLLET, SUCCEES_BUY_TOKENS, SUCCEES_WIT
 // Define la estructura de los datos que vienen con la acción SUCCEES
 interface SuccessPayload {
     user: IUser;
-    balance: number; // Asumo 'number', cámbialo a 'string' si es necesario
+    balance: number;
     tokens: number;
     pass_code: string;
     wallet_type: string;
+    token_value_usd: number;
+    gift_fee_pct: number;
 }
 
 // Interfaz para la Acción de Éxito
@@ -36,6 +38,8 @@ export interface GetWalletState {
     tokens: number | null;
     pass_code: string | null;
     wallet_type: string | null;
+    token_value_usd: number | null;
+    gift_fee_pct: number | null;
     error: any | null;
 }
 
@@ -47,6 +51,8 @@ const inicializerState: GetWalletState = {
     tokens: null,
     pass_code: null,
     wallet_type: null,
+    token_value_usd: null,
+    gift_fee_pct: null,
     error: null,
 }
 
@@ -71,11 +77,12 @@ const getWalletReducer = (
                 tokens: payloadData.tokens,
                 pass_code: payloadData.pass_code,
                 wallet_type: payloadData.wallet_type,
+                token_value_usd: payloadData.token_value_usd ?? state.token_value_usd,
+                gift_fee_pct: payloadData.gift_fee_pct ?? state.gift_fee_pct,
                 error: null
             };
         }
         case SUCCEES_GET_WALLET: {
-            // Hacemos cast a SuccessAction para acceder a .payload de forma segura
             const successPayload = (action as SuccessAction).payload;
 
             return {
@@ -85,6 +92,8 @@ const getWalletReducer = (
                 tokens: successPayload.tokens !== undefined ? successPayload.tokens : state.tokens,
                 pass_code: successPayload.pass_code || state.pass_code,
                 wallet_type: successPayload.wallet_type || state.wallet_type,
+                token_value_usd: successPayload.token_value_usd ?? state.token_value_usd,
+                gift_fee_pct: successPayload.gift_fee_pct ?? state.gift_fee_pct,
                 error: null
             };
         }

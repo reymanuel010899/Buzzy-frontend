@@ -1,6 +1,7 @@
 import { createContext, useState, useEffect, ReactNode } from "react";
 import { IAuthContext, IUser } from "../interfaces/auth";
-// import { IAuthContext, IUser } from "../interfaces/auth";
+import { fetchUserLanguage } from "@/services/languageService";
+import { changeLanguage } from "@/i18n/config";
 
 export const AuthContext = createContext<IAuthContext>({
   user: null,
@@ -28,6 +29,10 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     localStorage.setItem("accessToken", token);
     localStorage.setItem("user", JSON.stringify(userData));
     setUser(userData);
+    // Sync language preference from backend after login
+    fetchUserLanguage().then((lang) => {
+      if (lang) changeLanguage(lang);
+    });
   };
 
   const logout = () => {

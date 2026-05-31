@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Search, Send, User } from "lucide-react";
-import { getBaseUrl } from "../../redux/client/api-client";
+import { getMediaUrl } from "../../redux/client/api-client";
 
 interface ContactSelectionModalProps {
     isOpen: boolean;
@@ -67,7 +67,7 @@ const ContactSelectionModal: React.FC<ContactSelectionModalProps> = ({
                                             className="w-full flex items-center gap-3 p-3 rounded-2xl hover:bg-white/5 transition-colors group"
                                         >
                                             <img
-                                                src={contact.profile_picture?.startsWith('http') ? contact.profile_picture : `${getBaseUrl()}${contact.profile_picture}`}
+                                                src={contact.profile_picture?.startsWith('http') ? contact.profile_picture : getMediaUrl(contact.profile_picture)}
                                                 alt={contact.username}
                                                 className="w-12 h-12 rounded-full object-cover border border-white/10"
                                             />

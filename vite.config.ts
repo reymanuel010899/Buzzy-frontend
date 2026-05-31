@@ -8,12 +8,43 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, 'src'), // Aquí cambiamos a path.resolve
-      three: 'three', // Asegúrate de que Three.js se resuelva correctamente
+      '@': path.resolve(__dirname, 'src'),
+      three: 'three',
     },
-
   },
   plugins: [
     tailwindcss(),
   ],
+  build: {
+    sourcemap: false,
+    chunkSizeWarningLimit: 600,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-redux': ['redux', 'react-redux', '@reduxjs/toolkit'],
+          'vendor-motion': ['framer-motion'],
+          'vendor-i18n': ['react-i18next', 'i18next'],
+          'vendor-ui': ['lucide-react'],
+        },
+      },
+    },
+  },
+  server: {
+    host: true,
+    sourcemapIgnoreList: () => true,
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
+      '/media': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
+    },
+  },
+  css: {
+    devSourcemap: false,
+  },
 })

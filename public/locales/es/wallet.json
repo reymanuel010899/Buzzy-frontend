@@ -1,0 +1,103 @@
+{
+  "title": "Mi Wallet",
+  "balance": "Saldo",
+  "passcode": "Código: {{code}}",
+  "addFunds": "Agregar Fondos",
+  "withdrawAction": "Retirar",
+  "history": {
+    "title": "Historial",
+    "subtitle": "Mostrando las últimas {{limit}} transacciones",
+    "empty": "No hay transacciones",
+    "emptyHint": "Las transacciones aparecerán aquí cuando realices movimientos en tu wallet",
+    "loadMore": "Cargar más",
+    "filter": {
+      "all": "Todos",
+      "income": "Ingresos",
+      "expense": "Gastos"
+    },
+    "status": {
+      "pending": "Pendiente",
+      "failed": "Fallido",
+      "completed": "Completado"
+    },
+    "pagination": {
+      "prev": "Anterior",
+      "next": "Siguiente",
+      "pageInfo": "Página {{current}} de {{total}}"
+    }
+  },
+  "modal": {
+    "totalBalance": "Tu Balance Total",
+    "deposit": "Depositar",
+    "withdrawTab": "Retirar",
+    "customAmount": "Monto Personalizado",
+    "continuePayment": "Continuar a Pago",
+    "withdrawAmount": "Monto a Retirar",
+    "destinationAccount": "Cuenta de Destino",
+    "noAccount": "No hay cuenta configurada",
+    "noAccountHint": "Debes agregar una cuenta bancaria antes de retirar.",
+    "configureAccount": "Configurar Cuenta",
+    "requestWithdraw": "Solicitar Retiro",
+    "stripeSecurity": "Seguridad Stripe",
+    "withdrawTime": "Retiros en 24-48h",
+    "minDeposit": "Mínimo $1.00",
+    "amountPlaceholder": "0,00"
+  },
+  "errors": {
+    "depositSession": "Error al crear la sesión de depósito",
+    "insufficientFunds": "Saldo insuficiente",
+    "invalidAmount": "Monto inválido",
+    "withdrawProcessing": "Error al procesar el retiro"
+  },
+  "withdraw": {
+    "errorTitle": "¡Ocurrió un Error!",
+    "backToWallet": "Volver a mi Wallet",
+    "contactSupport": "¿Necesitas ayuda? Contacta a soporte"
+  },
+  "bankAccount": {
+    "title": "Cuentas Bancarias",
+    "bankName": "Banco",
+    "bankNamePlaceholder": "Ej: Banco Popular",
+    "holderName": "Nombre del Titular",
+    "holderNamePlaceholder": "Nombre completo",
+    "accountNumber": "Número de Cuenta / IBAN",
+    "accountNumberPlaceholder": "Ingresa los dígitos",
+    "addAccount": "Agregar cuenta",
+    "deleteConfirm": "¿Estás seguro de eliminar esta cuenta?",
+    "deleteLastError": "No puedes eliminar tu única cuenta bancaria.",
+    "addError": "Error al agregar la cuenta. Verifica los datos.",
+    "primary": "Principal",
+    "active": "Activa",
+    "pending": "Pendiente de verificación"
+  },
+  "success": {
+    "title": "¡Cuenta agregada!",
+    "message": "Tu cuenta bancaria fue agregada correctamente. Ahora podrás recibir pagos y retirar tus ganancias.",
+    "goToWallet": "Ir a mi Wallet",
+    "reviewTitle": "Cuenta en revisión",
+    "reviewMessage": "Tu cuenta está siendo verificada. Esto puede tardar hasta 1 hora.",
+    "backToWallet": "Volver al Wallet"
+  },
+  "cancel": {
+    "title": "Verificación Fallida",
+    "message": "Has cancelado el proceso de verificación de tu cuenta de pagos. Para poder recibir pagos y retirar tus ganancias, debes completar la configuración de tu cuenta bancaria.",
+    "backToWallet": "Volver a mi Wallet",
+    "contactSupport": "¿Necesitas ayuda? Contacta a soporte"
+  },
+  "depositSuccess": {
+    "verifyError": "No pudimos verificar los detalles de tu recarga, pero tus fondos deberían estar disponibles pronto."
+  },
+  "subscriptionSuccess": {
+    "verifyError": "No pudimos verificar los detalles de tu compra, pero tu suscripción debería estar activa pronto."
+  },
+  "withdrawSuccess": {
+    "title": "¡Retiro en Proceso!",
+    "description": "El dinero estará disponible en tu cuenta de destino en un plazo de 2 a 5 días laborables.",
+    "cta": "Entendido"
+  },
+  "withdrawFailure": {
+    "title": "Ocurrió un error",
+    "ctaBack": "Volver a mi Wallet",
+    "contactSupport": "¿Necesitas ayuda? Contacta a soporte"
+  }
+}

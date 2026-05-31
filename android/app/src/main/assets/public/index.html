@@ -4,11 +4,13 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- <script src="https://cdn.tailwindcss.com"></script> -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
     <title>Vite + React + TS</title>
+    <!-- Script that is injected at runtime by Docker startup script -->
+    <script src="/env-config.js"></script>
 
       <style>
         @keyframes pulse-glow {
@@ -47,8 +49,13 @@
       }
     }
     </script>
-    <script type="module" crossorigin src="/assets/index-ByqsDKV4.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-CuWmdID9.css">
+    <script type="module" crossorigin src="/assets/index-BKgQ-cNz.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/vendor-react-BYGpdNVQ.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-motion-jslD31bW.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-redux-DQ7j0L8l.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-i18n-C6mm_IT6.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-ui-Do8uJI-1.js">
+    <link rel="stylesheet" crossorigin href="/assets/index-D7Lbeiss.css">
   </head>
   <body>
     <div id="root"></div>

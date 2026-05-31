@@ -39,7 +39,7 @@ const activeStories = (
         case FAILED_ACTIVE_STORIES:
             return {
                 ...state,
-                stories: null,
+                stories: state.stories, // conservar cache si ya había
                 error: action.payload,
             };
         default:

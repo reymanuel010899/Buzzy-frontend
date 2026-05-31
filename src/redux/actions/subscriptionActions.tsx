@@ -25,10 +25,11 @@ export const getSubscriptionPlans = () => async (dispatch: any) => {
     }
 };
 
-export const createCheckoutSession = (planId: number) => async (dispatch: any) => {
+export const createCheckoutSession = (planId: number, subscribedToId: number) => async (dispatch: any) => {
     try {
         const response = await apiClient.post(`/api/subscriptions/create-checkout-session/`, {
-            plan_id: planId
+            plan_id: planId,
+            subscribed_to_id: subscribedToId
         });
         if (response.status === 200) {
             dispatch({
@@ -50,9 +51,40 @@ export const createCheckoutSession = (planId: number) => async (dispatch: any) =
     }
 };
 
-export const startCall = () => async () => {
+export const startCall = (subscribedToId: number, callType: 'voice' | 'video' = 'voice') => async () => {
     try {
-        const response = await apiClient.post(`/api/subscriptions/start-call/`);
+        const response = await apiClient.post(`/api/subscriptions/calls/initiate/`, {
+            subscribed_to_id: subscribedToId,
+            call_type: callType,
+        });
+        if (response.status === 200) {
+            return response.data;
+        }
+    } catch (error: any) {
+        throw error.response?.data?.error || error.message;
+    }
+};
+
+export const acceptCall = (callId: string) => async () => {
+    try {
+        const response = await apiClient.post(`/api/subscriptions/calls/accept/`, {
+            call_id: callId,
+        });
+        if (response.status === 200) {
+            return response.data;
+        }
+    } catch (error: any) {
+        throw error.response?.data?.error || error.message;
+    }
+};
+
+export const endCall = (callId: string, consumedSeconds?: number, reason: string = 'ended') => async () => {
+    try {
+        const response = await apiClient.post(`/api/subscriptions/calls/end/`, {
+            call_id: callId,
+            consumed_seconds: consumedSeconds,
+            reason,
+        });
         if (response.status === 200) {
             return response.data;
         }

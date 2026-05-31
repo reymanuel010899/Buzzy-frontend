@@ -32,7 +32,11 @@ import subscriptionReducer from "./reducers/subscriptionReducer";
 import availabilityReducer from "./reducers/availabilityReducer";
 import socialAccountsReducer from "./reducers/socialAccountsReducer";
 import bankReducer from "./reducers/bankReducer";
+import { transactionReducer } from "./reducers/transactionReducer";
 import updateProfileReducer from "./reducers/updateProfileReducer";
+import socialConnections from "./reducers/socialConnectionsReducer";
+import uploadProgressReducer from "./reducers/uploadProgressReducer";
+import bannerReducer from "./reducers/bannerReducer";
 
 export default combineReducers({
     register,
@@ -69,4 +73,8 @@ export default combineReducers({
     socialAccountsReducer,
     bankReducer,
     updateProfileReducer,
+    socialConnections,
+    uploadProgress: uploadProgressReducer,
+    transactionReducer,
+    bannerReducer,
 })

@@ -1,6 +1,5 @@
 import axios from "axios";
-import { SUCCEES_LOGIN, FAILED_LOGIN } from "../type";
-
+import { SUCCEES_LOGIN, FAILED_LOGIN, LOGOUT_USER, UPDATE_USER } from "../type";
 import type { AppDispatch } from "../../store";
 import { apiClient, getBaseUrl } from "../client/api-client";
 export interface FetchWithAuthProps {
@@ -9,7 +8,7 @@ export interface FetchWithAuthProps {
 }
 
 // Función de login
-export const login = (formData: FetchWithAuthProps) => async (dispatch: AppDispatch) => {
+export const login = (formData: FetchWithAuthProps) => async (dispatch: AppDispatch): Promise<void> => {
   try {
     // Solicitud de login SIN Authorization header (login fresco)
     const response = await apiClient.post(
@@ -23,12 +22,7 @@ export const login = (formData: FetchWithAuthProps) => async (dispatch: AppDispa
     );
 
     if (response.status === 200) {
-      // Guardar tokens y datos del usuario
-      localStorage.setItem("refreshToken", response.data.refresh);
-      localStorage.setItem("accessToken", response.data.access);
-      localStorage.setItem("isAuthenticated", "true");
-      localStorage.setItem("user", JSON.stringify(response.data.user));
-
+      persistAuthData(response.data);
       dispatch({
         type: SUCCEES_LOGIN,
         payload: response.data,
@@ -38,10 +32,80 @@ export const login = (formData: FetchWithAuthProps) => async (dispatch: AppDispa
       dispatch({ type: FAILED_LOGIN, payload: null });
     }
   } catch (error: unknown) {
-    //  debugger
-    handleLoginError(error, formData, dispatch);
+    return handleLoginError(error, formData, dispatch);
   }
 };
+
+// Función de Logout
+export const logout = () => (dispatch: AppDispatch) => {
+  clearAuthData();
+  dispatch({ type: LOGOUT_USER });
+  window.location.replace("/sign-in");
+};
+
+// Función de login con Google
+export const googleLogin = (accessToken: string, photoUrl?: string, countryCode?: string, countryName?: string) => async (dispatch: AppDispatch) => {
+  try {
+    const response = await apiClient.post(
+      "/api/google/login/",
+      {
+        access_token: accessToken,
+        photo_url: photoUrl || null,
+        country_code: countryCode || 'US',
+        country_name: countryName || 'United States'
+      },
+      { headers: { "Content-Type": "application/json" } }
+    );
+
+    if (response.status === 200) {
+      persistAuthData(response.data);
+      dispatch({
+        type: SUCCEES_LOGIN,
+        payload: response.data,
+      });
+    } else {
+      clearAuthData();
+      dispatch({ type: FAILED_LOGIN, payload: null });
+    }
+  } catch (error: unknown) {
+    clearAuthData();
+    dispatch({ type: FAILED_LOGIN, payload: null });
+    throw error; // propagate so caller can inspect status/code
+  }
+};
+
+// Función de registro con Google
+export const googleRegister = (accessToken: string, photoUrl?: string, countryCode?: string, countryName?: string, referralCode?: string) => async (dispatch: AppDispatch) => {
+  try {
+    const response = await apiClient.post(
+      "/api/google/register/",
+      {
+        access_token: accessToken,
+        photo_url: photoUrl || null,
+        country_code: countryCode || "US",
+        country_name: countryName || "United States",
+        ...(referralCode ? { referral_code: referralCode } : {}),
+      },
+      { headers: { "Content-Type": "application/json" } }
+    );
+
+    if (response.status === 201) {
+      persistAuthData(response.data);
+      dispatch({
+        type: SUCCEES_LOGIN,
+        payload: response.data,
+      });
+    } else {
+      clearAuthData();
+      dispatch({ type: FAILED_LOGIN, payload: null });
+    }
+  } catch (error: unknown) {
+    clearAuthData();
+    dispatch({ type: FAILED_LOGIN, payload: null });
+    throw error;
+  }
+};
+
 
 
 const clearAuthData = () => {
@@ -49,9 +113,19 @@ const clearAuthData = () => {
   localStorage.removeItem("accessToken");
   localStorage.removeItem("isAuthenticated");
   localStorage.removeItem("user");
+  localStorage.removeItem("seen_initial");
+  // Clear app icon badge on logout
+  import("@capawesome/capacitor-badge").then(({ Badge }) => Badge.set({ count: 0 }).catch(() => {}));
 };
 
-const handleLoginError = async (error: unknown, formData: FetchWithAuthProps, dispatch: AppDispatch) => {
+const persistAuthData = (response: { refresh: string; access: string; user: unknown }) => {
+  localStorage.setItem("refreshToken", response.refresh);
+  localStorage.setItem("accessToken", response.access);
+  localStorage.setItem("isAuthenticated", "true");
+  localStorage.setItem("user", JSON.stringify(response.user));
+};
+
+const handleLoginError = async (error: unknown, formData: FetchWithAuthProps, dispatch: AppDispatch): Promise<void> => {
   if (axios.isAxiosError(error) && error.response?.status === 401) {
     const refreshToken = localStorage.getItem("refreshToken");
 
@@ -70,14 +144,47 @@ const handleLoginError = async (error: unknown, formData: FetchWithAuthProps, di
         }
       } catch (refreshError) {
         console.error("Error refreshing token:", refreshError);
-        window.location.href = "/sign-in";
+        if (window.location.pathname !== "/sign-in") {
+          window.location.href = "/sign-in";
+        }
       }
     } else {
       console.error("No refresh token available");
       dispatch({ type: FAILED_LOGIN, payload: null });
+      if (window.location.pathname !== "/sign-in") {
+        window.location.href = "/sign-in";
+      }
     }
   } else {
     console.error("Error in login:", error);
     dispatch({ type: FAILED_LOGIN, payload: null });
+  }
+  throw error;
+};
+
+/**
+ * Refresca el perfil del usuario autenticado desde la API al iniciar la app.
+ * Evita que se muestren imágenes rotas o datos stale del localStorage.
+ * Si no hay internet, usa silenciosamente los datos del localStorage.
+ */
+export const refreshSession = () => async (dispatch: AppDispatch): Promise<void> => {
+  try {
+    const stored = localStorage.getItem("user");
+    if (!stored) return;
+
+    const storedUser = JSON.parse(stored);
+    const username = storedUser?.username;
+    if (!username) return;
+
+    const response = await apiClient.get(`/api/get-user/${username}/`);
+    if (response.status === 200) {
+      const freshUser = response.data;
+      // Actualizar Redux con datos frescos
+      dispatch({ type: UPDATE_USER, payload: { user: freshUser } });
+      // Sincronizar localStorage para la próxima sesión offline
+      localStorage.setItem("user", JSON.stringify({ ...storedUser, ...freshUser }));
+    }
+  } catch {
+    // Sin internet o token expirado: los datos del localStorage siguen en Redux, no hacer nada
   }
 };
