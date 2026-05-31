@@ -136,8 +136,13 @@ export default function NotificationPanel({ open, onClose }: Props) {
 
   const handleClick = (n: BuzzyNotification) => {
     if (!n.is_read) markRead([n.id])
-    if (n.video_uuid) { navigate(`/video/${n.video_uuid}`); onClose() }
-    else if (n.actor?.username) { navigate(`/profile/${n.actor.username}`); onClose() }
+    if (n.video_uuid && n.actor?.username) {
+      navigate(`/profile/${n.actor.username}`, { state: { targetVideoUuid: n.video_uuid } })
+      onClose()
+    } else if (n.actor?.username) {
+      navigate(`/profile/${n.actor.username}`)
+      onClose()
+    }
   }
 
   const mainList = buildMainList(notifications)

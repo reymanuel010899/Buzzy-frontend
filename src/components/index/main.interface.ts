@@ -32,6 +32,7 @@ export interface Video {
   volume_original?: number;
   volume_music?: number;
   audio_trim_start?: number;
+  audio_trim_end?: number | null;
 }
 
 export interface StoryUser {
@@ -62,10 +63,14 @@ export interface StoryTextLayer {
 
 export interface StoryStickerLayer {
   id: string;
-  emoji: string;
+  kind?: "emoji" | "location" | "image";
+  emoji?: string;
+  text?: string;
+  src?: string;
   x: number;
   y: number;
   size: number;
+  rotation?: number;
 }
 
 export interface Story {
@@ -77,6 +82,7 @@ export interface Story {
   is_active: boolean;
   created_at: string;
   user: StoryUser;
+  location?: string | null;
   audio_track_url?: string | null;
   audio_track_title?: string | null;
   audio_track_artist?: string | null;

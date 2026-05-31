@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "993295175092-71dr115h9fkh50j2u9mhvof60frtonhq.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.buzzy.app",
+            "certificate_hash": "32bce87d59d57147e64f5a17941e2e54a8101286"
+          }
+        },
+        {
           "client_id": "993295175092-6l5q4g5u401ieunl4pjp7lqj5psjpunj.apps.googleusercontent.com",
           "client_type": 3
         }

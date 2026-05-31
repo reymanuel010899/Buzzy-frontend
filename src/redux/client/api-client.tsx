@@ -2,9 +2,40 @@ import axios from "axios";
 import i18n from "@/i18n/config";
 import { router } from "../../router/index";
 
+declare global {
+  interface Window {
+    __RUNTIME_CONFIG__?: {
+      VITE_DOMAIN_SERVER?: string;
+    };
+  }
+}
+
+const DEFAULT_BASE_URL = "http://127.0.0.1:8000";
+
+const normalizeBaseUrl = (value: unknown): string | null => {
+  if (typeof value !== "string") return null;
+
+  const rawUrl = value.trim();
+  if (!rawUrl) return null;
+
+  const url = /^https?:\/\//i.test(rawUrl) ? rawUrl : `http://${rawUrl}`;
+
+  try {
+    const parsed = new URL(url);
+    return parsed.origin;
+  } catch {
+    return null;
+  }
+};
+
 export const getBaseUrl = (): string => {
-  const url = import.meta.env.VITE_DOMAIN_SERVER || "http://127.0.0.1:8000";
-  return url.endsWith("/") ? url.slice(0, -1) : url;
+  const viteUrl = normalizeBaseUrl(import.meta.env.VITE_DOMAIN_SERVER);
+  if (viteUrl) return viteUrl;
+
+  const runtimeUrl = normalizeBaseUrl(
+    typeof window !== "undefined" ? window.__RUNTIME_CONFIG__?.VITE_DOMAIN_SERVER : undefined
+  );
+  return runtimeUrl || DEFAULT_BASE_URL;
 };
 
 export const BASE_URL = getBaseUrl();

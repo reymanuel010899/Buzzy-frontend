@@ -49,19 +49,26 @@ const getMedia = (
 ): GetMediaState => {
 
     switch (action.type) {
-        case SUCCEES_MEDIA:
-            // Usamos action.payload directamente ya que lo tipamos como Video[]
+        case SUCCEES_MEDIA: {
+            const payload = action.payload as Video[];
+            const seen = new Set<number>();
+            const deduped = payload.filter((v) => seen.has(v.id) ? false : (seen.add(v.id), true));
             return {
                 ...state,
-                media: action.payload as Video[], // TypeScript ahora lo entiende
+                media: deduped,
                 error: null,
             };
-        case APPEND_MEDIA:
+        }
+        case APPEND_MEDIA: {
+            const existing = state.media ?? [];
+            const existingIds = new Set(existing.map((v) => v.id));
+            const fresh = (action.payload as Video[]).filter((v) => !existingIds.has(v.id));
             return {
                 ...state,
-                media: state.media ? [...state.media, ...(action.payload as Video[])] : (action.payload as Video[]),
+                media: fresh.length > 0 ? [...existing, ...fresh] : existing,
                 error: null,
             };
+        }
         case RESET_MEDIA:
             return {
                 ...state,
@@ -72,8 +79,9 @@ const getMedia = (
             return {
                 ...state,
                 error: action.payload,
-                // Conservar los videos existentes — no borrar el feed del usuario por un error de red
-                media: state.media,
+                // Sin internet: conservar los videos del cache — no mostrar pantalla vacía
+                // Si ya había cache (APPEND_MEDIA corrió antes), lo mantenemos visible
+                media: state.media ?? [],
             };
         default:
             return { ...state };

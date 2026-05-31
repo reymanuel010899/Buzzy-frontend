@@ -13,7 +13,7 @@ export const getRecivedGiftByUser = (story_id: string | null) => async (dispatch
   } catch (error) {
     dispatch({
       type: FAILED_RECEVED_GIFTS_BY_USER,
-      payload: error,
+      payload: (error as any)?.message ?? 'error',
     });
   }
 };

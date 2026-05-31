@@ -113,7 +113,7 @@ const SocialConnectionsModal: React.FC<SocialConnectionsModalProps> = ({
                         initial={{ scale: 0.9, opacity: 0, y: 20 }}
                         animate={{ scale: 1, opacity: 1, y: 0 }}
                         exit={{ scale: 0.9, opacity: 0, y: 20 }}
-                        className="bg-[#0c0e1a] border border-white/10 rounded-3xl w-full max-w-md h-[600px] flex flex-col overflow-hidden shadow-2xl relative"
+                        className="bg-black border border-white/10 rounded-3xl w-full max-w-md h-[600px] flex flex-col overflow-hidden shadow-2xl relative"
                         onClick={(e) => e.stopPropagation()}
                     >
                         {/* Header */}

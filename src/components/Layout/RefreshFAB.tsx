@@ -63,7 +63,7 @@ const RefreshFAB: React.FC = () => {
           whileTap={{ scale: 0.88 }}
           onClick={handleRefresh}
           aria-label="Refrescar página"
-          className="fixed bottom-20 right-3 z-[9000] w-8 h-8 rounded-full bg-white/10 backdrop-blur-md border border-white/15 flex items-center justify-center shadow-md shadow-black/30 hover:bg-white/20 transition-colors"
+          className="fixed bottom-15 right-3 z-[9000] w-8 h-8 rounded-full bg-white/10 backdrop-blur-md border border-white/15 flex items-center justify-center shadow-md shadow-black/30 hover:bg-white/20 transition-colors"
         >
           <motion.div
             animate={spinning ? { rotate: 360 } : { rotate: 0 }}

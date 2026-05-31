@@ -1,6 +1,5 @@
-import axios from "axios";
 import { AppDispatch } from "../../store";
-import { apiClient, getBaseUrl } from "../client/api-client";
+import { apiClient } from "../client/api-client";
 
 // Types
 export const SEARCH_START = "SEARCH_START";
@@ -10,32 +9,35 @@ export const SEARCH_FAIL = "SEARCH_FAIL";
 export const TRENDING_SUCCESS = "TRENDING_SUCCESS";
 export const RECENT_SEARCH_SUCCESS = "RECENT_SEARCH_SUCCESS";
 
-const getHeaders = () => ({
-    headers: {
-        Authorization: `Bearer ${localStorage.getItem("accessToken")}`,
-        "Content-Type": "application/json",
-    },
-});
+const asSearchList = (data: any) => {
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data?.results)) return data.results;
+    if (Array.isArray(data?.data)) return data.data;
+    return [];
+};
 
 export const globalSearch = (query: string) => async (dispatch: AppDispatch) => {
     dispatch({ type: SEARCH_START });
     try {
-        console.log(getBaseUrl(), "*****")
         const res = await apiClient.get(`/api/search/global/?q=${encodeURIComponent(query)}`);
-        console.log("/////////---------//////////", res)
-        dispatch({ type: SEARCH_SUCCESS, payload: res.data });
-        // Refetch recent searches to update the list
+        dispatch({
+            type: SEARCH_SUCCESS,
+            payload: {
+                users: Array.isArray(res.data?.users) ? res.data.users : [],
+                videos: Array.isArray(res.data?.videos) ? res.data.videos : [],
+            },
+        });
         dispatch(getRecentSearch());
     } catch (err) {
-        console.log(err, "****")
+        console.error("Error en búsqueda:", err);
         dispatch({ type: SEARCH_FAIL });
     }
 };
 
 export const getTrending = () => async (dispatch: AppDispatch) => {
     try {
-        const res = await axios.get(`${getBaseUrl()}api/search/trending/`, getHeaders());
-        dispatch({ type: TRENDING_SUCCESS, payload: res.data });
+        const res = await apiClient.get(`/api/search/trending/`);
+        dispatch({ type: TRENDING_SUCCESS, payload: asSearchList(res.data) });
     } catch (err) {
         console.error("Error fetching trending:", err);
     }
@@ -43,8 +45,8 @@ export const getTrending = () => async (dispatch: AppDispatch) => {
 
 export const getRecentSearch = () => async (dispatch: AppDispatch) => {
     try {
-        const res = await axios.get(`${getBaseUrl()}api/search/recent/`, getHeaders());
-        dispatch({ type: RECENT_SEARCH_SUCCESS, payload: res.data });
+        const res = await apiClient.get(`/api/search/recent/`);
+        dispatch({ type: RECENT_SEARCH_SUCCESS, payload: asSearchList(res.data) });
     } catch (err) {
         console.error("Error fetching recent search:", err);
     }
@@ -52,10 +54,7 @@ export const getRecentSearch = () => async (dispatch: AppDispatch) => {
 
 export const deleteRecentSearch = (term?: string) => async (dispatch: AppDispatch) => {
     try {
-        await axios.delete(`${getBaseUrl()}api/search/recent/`, {
-            ...getHeaders(),
-            data: { term },
-        });
+        await apiClient.delete(`/api/search/recent/`, { data: { term } });
         dispatch(getRecentSearch());
     } catch (err) {
         console.error("Error deleting recent search:", err);

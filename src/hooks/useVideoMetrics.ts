@@ -31,21 +31,21 @@ export function useVideoMetrics() {
     const sendEvent = useCallback(async (videoId: string, eventType: EventType) => {
         const events = firedEvents.current.get(videoId) ?? new Set<EventType>();
 
-        // Guard: fire each event only once per session per video
         if (events.has(eventType)) return;
+
+        const baseUrl = getBaseUrl();
+        if (!baseUrl || !baseUrl.startsWith('http')) return;
 
         events.add(eventType);
         firedEvents.current.set(videoId, events);
 
         try {
             await axios.post(
-                `${getBaseUrl()}api/videos/track-event/`,
+                `${baseUrl.replace(/\/+$/, '')}/api/videos/track-event/`,
                 { video_id: videoId, event_type: eventType },
                 { headers: { Authorization: `Bearer ${getToken()}` } }
             );
-        } catch (err) {
-            console.error(`[VideoMetrics] Failed to send ${eventType} for video ${videoId}:`, err);
-            // Roll back so a transient error doesn't permanently block the event
+        } catch {
             events.delete(eventType);
         }
     }, []);

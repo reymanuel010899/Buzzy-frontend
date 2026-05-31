@@ -2,11 +2,21 @@
 
 import React, { useRef, useState, useEffect, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { X, Type, ChevronLeft, ChevronRight, Check, Loader2, Music2, VolumeX, Volume2 } from "lucide-react"
+import { X, Type, ChevronLeft, ChevronRight, Check, Loader2, Music2, VolumeX, Volume2, MapPin, Smile, Sparkles, RotateCw, Images } from "lucide-react"
+
+const MY_STICKERS_KEY = "buzzy_my_stickers"
+interface SavedSticker { id: string; src: string; name: string }
+function loadMyStickers(): SavedSticker[] {
+  try { return JSON.parse(localStorage.getItem(MY_STICKERS_KEY) || "[]") } catch { return [] }
+}
+function saveMyStickers(list: SavedSticker[]) {
+  localStorage.setItem(MY_STICKERS_KEY, JSON.stringify(list))
+}
+import { Autocomplete, useLoadScript } from "@react-google-maps/api"
 import { Howler } from "howler"
 import MusicSelectorModal from "../CreateVideo/components/MusicSelectorModal"
 import type { MusicSelectorResult } from "../CreateVideo/components/MusicSelectorModal"
-import { useVideoAudio } from "../../hooks/useVideoAudio"
+import { useVideoAudio, preloadTracks } from "../../hooks/useVideoAudio"
 import { useAudioTracks } from "../../hooks/useAudioTracks"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -21,13 +31,34 @@ interface TextLayer {
   bold: boolean
 }
 
-interface StickerLayer {
-  id: string
-  emoji: string
-  x: number
-  y: number
-  size: number
-}
+type StickerLayer =
+  | {
+      id: string
+      kind: "emoji"
+      emoji: string
+      x: number
+      y: number
+      size: number
+      rotation: number
+    }
+  | {
+      id: string
+      kind: "location"
+      text: string
+      x: number
+      y: number
+      size: number
+      rotation: number
+    }
+  | {
+      id: string
+      kind: "image"
+      src: string
+      x: number
+      y: number
+      size: number
+      rotation: number
+    }
 
 interface StoryEditorProps {
   file: File
@@ -38,6 +69,8 @@ interface StoryEditorProps {
     filterCss?: string,
     textLayers?: TextLayer[],
     stickerLayers?: StickerLayer[],
+    location?: string,
+    stickerFiles?: { id: string; file: File }[],
   ) => void
   onClose: () => void
   isUploading: boolean
@@ -73,20 +106,58 @@ const STICKER_ROWS = [
   ["🎵", "🎶", "📸", "🎬", "🏆", "💎", "🚀", "🌙"],
 ]
 
-const DEFAULT_FILTER_INDEX = 9
+const FEATURED_STICKERS = [
+  { label: "Brillo", kind: "emoji" as const, emoji: "✨", description: "Resalta un momento" },
+  { label: "Fuego", kind: "emoji" as const, emoji: "🔥", description: "Dale energía" },
+  { label: "Corazón", kind: "emoji" as const, emoji: "❤️", description: "Un toque romántico" },
+  { label: "Música", kind: "emoji" as const, emoji: "🎵", description: "Ideal para clips" },
+  { label: "Ubicación", kind: "location" as const, description: "Pégala sobre la historia" },
+  { label: "Mención", kind: "emoji" as const, emoji: "@", description: "Etiqueta a alguien" },
+]
+
+const LOCATION_SUGGESTIONS = [
+  "Ciudad de México",
+  "Miami, FL",
+  "Madrid",
+  "Nueva York",
+  "Bogotá",
+  "Buenos Aires",
+]
+
+const GOOGLE_LIBRARIES: ("places")[] = ["places"]
+
+const DEFAULT_FILTER_INDEX = 0
 
 function uid() {
   return Math.random().toString(36).slice(2)
+}
+
+function getShortLocationLabel(label: string) {
+  const trimmed = label.trim()
+  if (!trimmed) return trimmed
+  const mainPart = trimmed.split(",")[0]?.trim() || trimmed
+  if (mainPart.length <= 22) return mainPart
+  return `${mainPart.slice(0, 21).trimEnd()}…`
+}
+
+function getLocationStickerTone(label: string) {
+  const value = label.toLowerCase()
+  if (value.includes("playa") || value.includes("beach")) return "from-cyan-400 via-sky-500 to-indigo-500"
+  if (value.includes("santo domingo") || value.includes("dominicana")) return "from-fuchsia-500 via-pink-500 to-orange-400"
+  if (value.includes("nueva york") || value.includes("new york")) return "from-violet-500 via-fuchsia-500 to-pink-500"
+  if (value.includes("madrid") || value.includes("barcelona")) return "from-amber-500 via-orange-500 to-rose-500"
+  return "from-pink-500 via-fuchsia-500 to-orange-400"
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function StoryEditor({ file, onPublish, onClose, isUploading }: StoryEditorProps) {
   const isVideo = file.type.startsWith("video/")
-  const mediaSrc = URL.createObjectURL(file)
+  const [mediaSrc, setMediaSrc] = useState("")
 
   const [filterIdx, setFilterIdx] = useState(DEFAULT_FILTER_INDEX)
   const [tool, setTool] = useState<"none" | "text" | "sticker">("none")
+  const [stickerTab, setStickerTab] = useState<"featured" | "emoji" | "location" | "my">("featured")
 
   // Text layers
   const [textLayers, setTextLayers] = useState<TextLayer[]>([])
@@ -96,6 +167,11 @@ export default function StoryEditor({ file, onPublish, onClose, isUploading }: S
 
   // Sticker layers
   const [stickerLayers, setStickerLayers] = useState<StickerLayer[]>([])
+  const [selectedStickerId, setSelectedStickerId] = useState<string | null>(null)
+
+  // My stickers list (saved in localStorage) + files to upload on publish
+  const [myStickers, setMyStickers] = useState<SavedSticker[]>(() => loadMyStickers())
+  const [pendingStickerFiles, setPendingStickerFiles] = useState<{ id: string; file: File }[]>([])
 
   // Video audio
   const [videoMuted, setVideoMuted] = useState(false)
@@ -107,6 +183,16 @@ export default function StoryEditor({ file, onPublish, onClose, isUploading }: S
   const [favorites, _setFavorites] = useState<string[]>([])
   const [appliedMusic, setAppliedMusic] = useState<MusicSelectorResult | null>(null)
 
+  const [location, setLocation] = useState("")
+  const [locationDraft, setLocationDraft] = useState("")
+  const [locationAutocomplete, setLocationAutocomplete] = useState<google.maps.places.Autocomplete | null>(null)
+  const stickerFileInputRef = useRef<HTMLInputElement>(null)
+  const locationInputRef = useRef<HTMLInputElement>(null)
+  const { isLoaded: isMapsLoaded } = useLoadScript({
+    googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "",
+    libraries: GOOGLE_LIBRARIES,
+  })
+
   const videoRef = useRef<HTMLVideoElement>(null)
   const [videoDuration, setVideoDuration] = useState(15)
   const audioControls = useVideoAudio({ videoRef })
@@ -114,11 +200,16 @@ export default function StoryEditor({ file, onPublish, onClose, isUploading }: S
 
   // Drag state
   const dragging = useRef<{ id: string; type: "text" | "sticker"; startX: number; startY: number; origX: number; origY: number } | null>(null)
+  const rotationDragging = useRef<{ id: string; startAngle: number; startRotation: number; centerX: number; centerY: number } | null>(null)
   const canvasRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => () => {
-    URL.revokeObjectURL(mediaSrc)
-  }, [mediaSrc])
+  useEffect(() => {
+    const nextSrc = URL.createObjectURL(file)
+    setMediaSrc(nextSrc)
+    return () => {
+      URL.revokeObjectURL(nextSrc)
+    }
+  }, [file])
 
   useEffect(() => {
     if (videoRef.current) {
@@ -136,6 +227,7 @@ export default function StoryEditor({ file, onPublish, onClose, isUploading }: S
 
   const onPointerDown = useCallback((e: React.PointerEvent, id: string, type: "text" | "sticker") => {
     e.stopPropagation()
+    if (type === "sticker") setSelectedStickerId(id)
     const layer = type === "text"
       ? textLayers.find(l => l.id === id)
       : stickerLayers.find(l => l.id === id)
@@ -145,6 +237,15 @@ export default function StoryEditor({ file, onPublish, onClose, isUploading }: S
   }, [textLayers, stickerLayers])
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
+    if (rotationDragging.current && canvasRef.current) {
+      const { id, startAngle, startRotation, centerX, centerY } = rotationDragging.current
+      const currentAngle = Math.atan2(e.clientY - centerY, e.clientX - centerX) * (180 / Math.PI)
+      const nextRotation = startRotation + (currentAngle - startAngle)
+      setStickerLayers(prev => prev.map(layer => (
+        layer.id === id ? { ...layer, rotation: nextRotation } : layer
+      )))
+      return
+    }
     if (!dragging.current || !canvasRef.current) return
     const rect = canvasRef.current.getBoundingClientRect()
     const dx = (e.clientX - dragging.current.startX) / rect.width * 100
@@ -159,7 +260,10 @@ export default function StoryEditor({ file, onPublish, onClose, isUploading }: S
     }
   }, [])
 
-  const onPointerUp = useCallback(() => { dragging.current = null }, [])
+  const onPointerUp = useCallback(() => {
+    dragging.current = null
+    rotationDragging.current = null
+  }, [])
 
   // ── Add text ─────────────────────────────────────────────────────────────────
 
@@ -183,11 +287,105 @@ export default function StoryEditor({ file, onPublish, onClose, isUploading }: S
   // ── Add sticker ──────────────────────────────────────────────────────────────
 
   const addSticker = (emoji: string) => {
-    setStickerLayers(prev => [...prev, { id: uid(), emoji, x: 40, y: 40, size: 48 }])
+    const id = uid()
+    setStickerLayers(prev => [...prev, { id, kind: "emoji", emoji, x: 40, y: 40, size: 48, rotation: 0 }])
+    setSelectedStickerId(id)
+    setTool("none")
+  }
+
+  const addLocationSticker = (label: string) => {
+    const trimmed = label.trim()
+    if (!trimmed) return
+    setLocation(trimmed)
+    setLocationDraft(trimmed)
+    const id = uid()
+    setStickerLayers(prev => [
+      ...prev.filter(layer => layer.kind !== "location"),
+      { id, kind: "location", text: trimmed, x: 50, y: 78, size: 18, rotation: 0 },
+    ])
+    setSelectedStickerId(id)
+    setStickerTab("location")
+    setTool("none")
+  }
+
+  const onLoadLocationAutocomplete = (autocomplete: google.maps.places.Autocomplete) => {
+    setLocationAutocomplete(autocomplete)
+  }
+
+  const onPlaceChanged = () => {
+    if (!locationAutocomplete) return
+    const place = locationAutocomplete.getPlace()
+    const placeName = place.formatted_address || place.name
+    if (!placeName) return
+    setLocationDraft(placeName)
+    addLocationSticker(placeName)
+  }
+
+  const addImageStickerFromFile = (file: File) => {
+    if (!file.type.startsWith("image/")) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      const src = String(reader.result || "")
+      if (!src) return
+      const id = uid()
+      // Save to my stickers list
+      const saved: SavedSticker = { id, src, name: file.name }
+      setMyStickers(prev => {
+        const next = [saved, ...prev].slice(0, 30)
+        saveMyStickers(next)
+        return next
+      })
+      // Track file for server upload on publish (avoid sending large base64)
+      setPendingStickerFiles(prev => [...prev, { id, file }])
+      setStickerLayers(prev => [
+        ...prev,
+        { id, kind: "image", src, x: 50, y: 42, size: 72, rotation: 0 },
+      ])
+      setSelectedStickerId(id)
+      setStickerTab("my")
+      setTool("none")
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const addStickerFromSaved = (saved: SavedSticker) => {
+    const id = uid()
+    setStickerLayers(prev => [
+      ...prev,
+      { id, kind: "image", src: saved.src, x: 50, y: 42, size: 72, rotation: 0 },
+    ])
+    setSelectedStickerId(id)
     setTool("none")
   }
 
   const currentFilter = FILTERS[filterIdx].css
+
+  const updateSelectedSticker = (patch: { size?: number; rotation?: number }) => {
+    if (!selectedStickerId) return
+    setStickerLayers(prev => prev.map(layer => (
+      layer.id === selectedStickerId ? { ...layer, ...patch } : layer
+    )))
+  }
+
+  const startStickerRotation = (e: React.PointerEvent, layer: StickerLayer) => {
+    e.stopPropagation()
+    e.preventDefault()
+    if (!canvasRef.current) return
+    const rect = canvasRef.current.getBoundingClientRect()
+    const centerX = rect.left + (layer.x / 100) * rect.width
+    const centerY = rect.top + (layer.y / 100) * rect.height
+    const startAngle = Math.atan2(e.clientY - centerY, e.clientX - centerX) * (180 / Math.PI)
+    rotationDragging.current = {
+      id: layer.id,
+      startAngle,
+      startRotation: "rotation" in layer ? layer.rotation : 0,
+      centerX,
+      centerY,
+    }
+    dragging.current = null
+    setSelectedStickerId(layer.id)
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+  }
 
   useEffect(() => {
     filterItemRefs.current[filterIdx]?.scrollIntoView({
@@ -211,12 +409,15 @@ export default function StoryEditor({ file, onPublish, onClose, isUploading }: S
           className="relative flex-1 overflow-hidden select-none"
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
+          onClick={e => {
+            if (e.target === e.currentTarget) setSelectedStickerId(null)
+          }}
         >
           {/* Media */}
           {isVideo ? (
             <video
               ref={videoRef}
-              src={mediaSrc}
+              src={mediaSrc || undefined}
               autoPlay
               loop
               muted={videoMuted}
@@ -229,7 +430,7 @@ export default function StoryEditor({ file, onPublish, onClose, isUploading }: S
               }}
             />
           ) : (
-            <img src={mediaSrc} alt=""
+            <img src={mediaSrc || undefined} alt=""
               className="absolute inset-0 w-full h-full object-contain bg-black"
               style={{ filter: currentFilter, objectPosition: "center center" }}
             />
@@ -255,15 +456,103 @@ export default function StoryEditor({ file, onPublish, onClose, isUploading }: S
           ))}
 
           {/* Sticker layers */}
-          {stickerLayers.map(layer => (
-            <div key={layer.id}
-              className="absolute cursor-grab active:cursor-grabbing touch-none"
-              style={{ left: `${layer.x}%`, top: `${layer.y}%`, transform: "translate(-50%, -50%)", fontSize: layer.size }}
-              onPointerDown={e => onPointerDown(e, layer.id, "sticker")}
-            >
-              {layer.emoji}
-            </div>
-          ))}
+          {stickerLayers.map(layer => {
+            const isSelected = selectedStickerId === layer.id
+            const rotation = "rotation" in layer ? layer.rotation : 0
+            return (
+              <div
+                key={layer.id}
+                className="absolute cursor-grab active:cursor-grabbing touch-none"
+                style={{
+                  left: `${layer.x}%`,
+                  top: `${layer.y}%`,
+                  transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
+                  zIndex: isSelected ? 20 : 8,
+                }}
+                onPointerDown={e => onPointerDown(e, layer.id, "sticker")}
+                onClick={() => setSelectedStickerId(layer.id)}
+              >
+                {layer.kind === "emoji" ? (
+                  <span style={{ fontSize: layer.size }} className="select-none drop-shadow-[0_2px_8px_rgba(0,0,0,0.6)]">
+                    {layer.emoji}
+                  </span>
+                ) : layer.kind === "location" ? (
+                  <div
+                    className="inline-flex max-w-[250px] items-center gap-2 rounded-[22px] border border-white/15 bg-[rgba(10,10,16,0.75)] px-3 py-2 shadow-[0_18px_40px_rgba(0,0,0,0.35)] backdrop-blur-xl"
+                    title={layer.text}
+                  >
+                    <div className={`relative flex h-10 w-10 items-center justify-center rounded-[14px] bg-gradient-to-br ${getLocationStickerTone(layer.text)} text-white shadow-[0_10px_25px_rgba(0,0,0,0.35)]`}>
+                      <MapPin size={15} />
+                      <span className="absolute -right-1 -bottom-1 h-3 w-3 rounded-full bg-white/90 ring-2 ring-black/35" />
+                    </div>
+                    <div className="min-w-0 flex flex-col">
+                      <span className="text-[9px] font-black uppercase tracking-[0.35em] text-white/55">
+                        Ubicación
+                      </span>
+                      <span
+                        className="select-none overflow-hidden text-ellipsis whitespace-nowrap font-black uppercase tracking-wide text-white"
+                        style={{ fontSize: Math.max(11, Math.min(layer.size, 15)) }}
+                      >
+                        {getShortLocationLabel(layer.text)}
+                      </span>
+                    </div>
+                    <div className="ml-1 flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-white/8 text-white/70">
+                      <span className="text-[10px] font-black">›</span>
+                    </div>
+                  </div>
+                ) : (
+                  <img
+                    src={layer.src}
+                    alt="Sticker"
+                    className="select-none drop-shadow-[0_2px_12px_rgba(0,0,0,0.45)]"
+                    style={{ width: layer.size * 1.4, height: "auto" }}
+                    draggable={false}
+                  />
+                )}
+
+                {isSelected && (
+                  <div className="absolute left-1/2 top-full mt-2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/10 bg-black/80 px-2 py-1 backdrop-blur-md shadow-lg">
+                    <button
+                      type="button"
+                      onPointerDown={e => e.stopPropagation()}
+                      onClick={e => {
+                        e.stopPropagation()
+                        updateSelectedSticker({ size: Math.max(18, Math.round(layer.size * 0.88)) })
+                      }}
+                      className="h-7 w-7 rounded-full bg-white/10 text-white text-sm font-black"
+                      aria-label="Disminuir sticker"
+                    >
+                      −
+                    </button>
+                    <button
+                      type="button"
+                      onPointerDown={e => e.stopPropagation()}
+                      onClick={e => {
+                        e.stopPropagation()
+                        updateSelectedSticker({ size: Math.min(220, Math.round(layer.size * 1.12)) })
+                      }}
+                      className="h-7 w-7 rounded-full bg-white/10 text-white text-sm font-black"
+                      aria-label="Aumentar sticker"
+                      >
+                      +
+                    </button>
+                  </div>
+                )}
+
+                {isSelected && (
+                  <button
+                    type="button"
+                    onPointerDown={e => startStickerRotation(e, layer)}
+                    className="absolute left-1/2 -top-11 flex -translate-x-1/2 items-center gap-1 rounded-full border border-pink-400/30 bg-black/85 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-pink-200 backdrop-blur-md shadow-lg"
+                    aria-label="Arrastrar para rotar libremente"
+                  >
+                    <RotateCw size={12} />
+                    Gira
+                  </button>
+                )}
+              </div>
+            )
+          })}
 
           {/* ── Top bar ── */}
           <div className="absolute top-0 inset-x-0 flex items-center justify-between px-4 pt-10 pb-2">
@@ -276,7 +565,7 @@ export default function StoryEditor({ file, onPublish, onClose, isUploading }: S
             {/* Music button — center */}
             <div
               role="button"
-              onClick={() => setShowMusicModal(true)}
+              onClick={() => { preloadTracks(apiTracks, 4); setShowMusicModal(true) }}
               className={`flex items-center gap-2 px-4 py-2 rounded-full cursor-pointer backdrop-blur-sm border transition-all ${appliedMusic
                 ? "bg-cyan-500/20 border-cyan-400/50 text-cyan-300"
                 : "bg-black/40 border-white/20 text-white"
@@ -326,7 +615,7 @@ export default function StoryEditor({ file, onPublish, onClose, isUploading }: S
         </div>
 
         {/* ── Filter strip ── */}
-        <div className="relative border-t border-white/5 bg-black/95">
+        <div className="relative z-10 border-t border-white/5 bg-black/95">
           <button
             type="button"
             onClick={() => setFilterIdx(i => (i - 1 + FILTERS.length) % FILTERS.length)}
@@ -365,8 +654,8 @@ export default function StoryEditor({ file, onPublish, onClose, isUploading }: S
                   }}
                 >
                   {isVideo
-                    ? <video src={mediaSrc} className="h-full w-full object-cover" style={{ filter: f.css }} muted playsInline />
-                    : <img src={mediaSrc} className="h-full w-full object-cover" style={{ filter: f.css }} alt={f.name} />
+                    ? <video src={mediaSrc || undefined} className="h-full w-full object-cover" style={{ filter: f.css }} muted playsInline />
+                    : <img src={mediaSrc || undefined} className="h-full w-full object-cover" style={{ filter: f.css }} alt={f.name} />
                   }
                 </div>
                 <span className={`text-[10px] font-semibold tracking-tight truncate text-center w-full ${filterIdx === i ? "text-white" : "text-white/75"}`}>{f.name}</span>
@@ -392,9 +681,9 @@ export default function StoryEditor({ file, onPublish, onClose, isUploading }: S
 
           <motion.button
             whileTap={{ scale: 0.96 }}
-            onClick={() => onPublish(file, "", appliedMusic ?? undefined, currentFilter, textLayers, stickerLayers)}
+            onClick={() => onPublish(file, "", appliedMusic ?? undefined, currentFilter, textLayers, stickerLayers, location || undefined, pendingStickerFiles)}
             disabled={isUploading}
-            className="flex items-center gap-2 h-12 px-7 rounded-full font-bold text-white text-sm bg-white/15 border border-white/20 backdrop-blur-sm disabled:opacity-50"
+            className="flex items-center gap-2 h-12 px-7 rounded-full font-bold text-white text-sm bg-gradient-to-r from-pink-500 to-orange-400 shadow-lg shadow-pink-500/30 disabled:opacity-50"
           >
             {isUploading
               ? <><Loader2 size={18} className="animate-spin" /> Publicando...</>
@@ -433,24 +722,269 @@ export default function StoryEditor({ file, onPublish, onClose, isUploading }: S
         {/* ── Sticker panel ── */}
         <AnimatePresence>
           {tool === "sticker" && (
-            <motion.div initial={{ y: 80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 80, opacity: 0 }}
-              className="absolute bottom-36 inset-x-0 px-4 bg-black/85 backdrop-blur-md rounded-t-2xl pb-4 pt-3">
-              <div className="flex justify-center mb-2">
-                <div className="h-1 w-10 rounded-full bg-white/20" />
-              </div>
-              {STICKER_ROWS.map((row, ri) => (
-                <div key={ri} className="flex justify-center gap-3 mb-2">
-                  {row.map(emoji => (
-                    <button key={emoji} onClick={() => addSticker(emoji)}
-                      className="text-2xl hover:scale-125 transition-transform active:scale-95">
-                      {emoji}
+            <motion.div
+              initial={{ y: 80, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 80, opacity: 0 }}
+              className="absolute bottom-28 inset-x-0 z-30 px-4"
+            >
+              <div className="flex h-[62vh] min-h-[420px] max-h-[540px] flex-col overflow-hidden rounded-[28px] border border-white/10 bg-[#07070d]/95 backdrop-blur-2xl shadow-[0_18px_70px_rgba(0,0,0,0.55)]">
+                <div className="flex items-center justify-between px-4 pt-4">
+                  <div>
+                    <h3 className="text-white text-sm font-semibold">Stickers</h3>
+                    <p className="text-white/35 text-[11px]">Agrega emojis, ubicación y tus stickers propios</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => stickerFileInputRef.current?.click()}
+                      className="h-8 px-3 rounded-full bg-white/8 border border-white/10 flex items-center gap-1.5 text-white/80 text-[11px] font-semibold hover:bg-white/12 transition-colors"
+                    >
+                      <span className="text-xs">＋</span>
+                      Subir
                     </button>
-                  ))}
+                    <button
+                      onClick={() => setTool("none")}
+                      className="h-8 w-8 rounded-full bg-white/8 border border-white/10 flex items-center justify-center text-white/60"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
                 </div>
-              ))}
+
+                <div className="grid grid-cols-4 gap-1.5 px-4 mt-8 pt-5">
+                  {[
+                    { id: "featured", label: "Destacados", icon: Sparkles },
+                    { id: "emoji", label: "Emoji", icon: Smile },
+                    { id: "my", label: "Mis Stickers", icon: Images },
+                    { id: "location", label: "Ubicación", icon: MapPin },
+                  ].map(tab => {
+                    const Icon = tab.icon
+                    const active = stickerTab === tab.id
+                    return (
+                      <button
+                        key={tab.id}
+                        onClick={() => {
+                          setStickerTab(tab.id as typeof stickerTab)
+                          if (tab.id === "location") {
+                            setLocationDraft(location || locationDraft)
+                          }
+                        }}
+                        className={`h-8 w-full min-w-0 px-3 flex items-center justify-center gap-1.5 rounded-full border text-[11px] font-semibold transition-all leading-none ${
+                          active
+                            ? "bg-white text-black border-white"
+                            : "bg-white/5 text-white/70 border-white/10"
+                        }`}
+                      >
+                        <Icon size={12} />
+                        <span>{tab.label}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+
+                <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-4 mt-4">
+                  {stickerTab === "featured" && (
+                    <div className="grid grid-cols-2 gap-2">
+                      {FEATURED_STICKERS.map(item => (
+                        item.kind === "location" ? (
+                          <button
+                            key={item.label}
+                            onClick={() => {
+                              setStickerTab("location")
+                              setLocationDraft(location || locationDraft)
+                            }}
+                            className="group rounded-2xl border border-pink-400/20 bg-gradient-to-br from-pink-500/15 via-white/5 to-orange-400/10 p-2.5 text-left transition-all hover:border-pink-300/40 hover:bg-pink-500/18"
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-white/10 border border-white/10">
+                                <MapPin size={15} className="text-pink-300" />
+                              </div>
+                              <span className="text-[10px] text-pink-300/80 font-semibold">Sticker</span>
+                            </div>
+                            <p className="mt-2.5 text-white text-[13px] font-semibold">{item.label}</p>
+                            <p className="text-white/35 text-[10px] mt-1">{item.description}</p>
+                          </button>
+                        ) : (
+                          <button
+                            key={item.label}
+                            onClick={() => item.emoji && addSticker(item.emoji)}
+                            className="group rounded-2xl border border-white/10 bg-white/5 p-2.5 text-left transition-all hover:border-cyan-400/30 hover:bg-cyan-400/10"
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="text-xl">{item.emoji}</span>
+                              <span className="text-[10px] text-white/30 font-semibold">Añadir</span>
+                            </div>
+                            <p className="mt-2.5 text-white text-[13px] font-semibold">{item.label}</p>
+                            <p className="text-white/35 text-[10px] mt-1">{item.description}</p>
+                          </button>
+                        )
+                      ))}
+                    </div>
+                  )}
+
+                  {stickerTab === "emoji" && (
+                    <div className="space-y-3">
+                      {STICKER_ROWS.map((row, ri) => (
+                        <div key={ri} className="grid grid-cols-8 gap-1.5">
+                          {row.map(emoji => (
+                            <button
+                              key={emoji}
+                              onClick={() => addSticker(emoji)}
+                              className="aspect-square rounded-2xl bg-white/5 border border-white/10 text-xl flex items-center justify-center transition-all active:scale-95 hover:bg-white/10"
+                            >
+                              {emoji}
+                            </button>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {stickerTab === "my" && (
+                    <div className="space-y-3">
+                      {myStickers.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center gap-3 py-10 text-center">
+                          <Images size={32} className="text-white/20" />
+                          <p className="text-white/40 text-sm font-semibold">No tienes stickers guardados</p>
+                          <p className="text-white/25 text-xs">Sube una imagen con el botón "Subir" y se guardará aquí</p>
+                          <button
+                            onClick={() => stickerFileInputRef.current?.click()}
+                            className="px-4 py-2 rounded-full bg-white/8 border border-white/10 text-white/70 text-xs font-semibold hover:bg-white/12"
+                          >
+                            Subir sticker
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-4 gap-2">
+                          {myStickers.map(s => (
+                            <button
+                              key={s.id}
+                              onClick={() => addStickerFromSaved(s)}
+                              className="aspect-square rounded-2xl bg-white/5 border border-white/10 overflow-hidden flex items-center justify-center hover:border-cyan-400/40 hover:bg-cyan-400/8 transition-all active:scale-95"
+                            >
+                              <img src={s.src} alt={s.name} className="w-full h-full object-contain p-1" draggable={false} />
+                            </button>
+                          ))}
+                          <button
+                            onClick={() => stickerFileInputRef.current?.click()}
+                            className="aspect-square rounded-2xl border-2 border-dashed border-white/15 flex items-center justify-center text-white/30 hover:border-white/30 hover:text-white/50 transition-all"
+                          >
+                            <span className="text-2xl font-light">＋</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {stickerTab === "location" && (
+                    <div className="space-y-3">
+                      <div className="rounded-3xl border border-pink-400/20 bg-gradient-to-br from-pink-500/18 via-white/6 to-orange-400/12 p-3.5">
+                        <div className="flex items-center gap-3">
+                          <div className="h-10 w-10 rounded-2xl bg-white/15 border border-white/15 flex items-center justify-center">
+                            <MapPin size={17} className="text-pink-300" />
+                          </div>
+                          <div>
+                            <p className="text-white text-[13px] font-semibold">Sticker de ubicación</p>
+                            <p className="text-white/45 text-[11px]">Se verá encima de la historia, como en Instagram o TikTok</p>
+                          </div>
+                        </div>
+                        <div className="relative mt-3">
+                          <MapPin size={15} className="absolute left-4 top-1/2 -translate-y-1/2 text-pink-300/80 pointer-events-none" />
+                          {isMapsLoaded ? (
+                            <Autocomplete
+                              onLoad={onLoadLocationAutocomplete}
+                              onPlaceChanged={onPlaceChanged}
+                            >
+                              <input
+                                ref={locationInputRef}
+                                autoFocus
+                                value={locationDraft}
+                                onChange={e => setLocationDraft(e.target.value)}
+                                placeholder="Busca una ubicación"
+                                className="w-full rounded-2xl bg-black/30 border border-white/10 pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-white/28 focus:outline-none focus:border-pink-400/40"
+                                onKeyDown={e => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault()
+                                    addLocationSticker(locationDraft)
+                                  }
+                                }}
+                              />
+                            </Autocomplete>
+                          ) : (
+                            <input
+                              ref={locationInputRef}
+                              autoFocus
+                              value={locationDraft}
+                              onChange={e => setLocationDraft(e.target.value)}
+                              placeholder="Busca una ubicación"
+                              className="w-full rounded-2xl bg-black/30 border border-white/10 pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-white/28 focus:outline-none focus:border-pink-400/40"
+                              onKeyDown={e => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault()
+                                  addLocationSticker(locationDraft)
+                                }
+                              }}
+                            />
+                          )}
+                        </div>
+                        <p className="mt-2 text-[10px] text-white/30">
+                          {isMapsLoaded ? "Powered by Google" : "Cargando sugerencias de Google..."}
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        {LOCATION_SUGGESTIONS.map(s => (
+                          <button
+                            key={s}
+                            onClick={() => addLocationSticker(s)}
+                            className="px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-white/70 text-[11px] hover:bg-pink-500/15 hover:text-pink-200 hover:border-pink-400/30 transition-all"
+                          >
+                            {s}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="flex gap-2.5">
+                        {location && (
+                          <button
+                            onClick={() => {
+                              setLocation("")
+                              setLocationDraft("")
+                              setStickerLayers(prev => prev.filter(layer => layer.kind !== "location"))
+                            }}
+                            className="flex-1 py-2.5 rounded-2xl bg-white/6 border border-white/10 text-white/55 text-xs font-semibold"
+                          >
+                            Quitar ubicación
+                          </button>
+                        )}
+                        <button
+                          onClick={() => addLocationSticker(locationDraft)}
+                          className="flex-1 py-2.5 rounded-2xl bg-gradient-to-r from-pink-500 to-orange-400 text-white text-xs font-bold shadow-lg shadow-pink-500/25"
+                        >
+                          Agregar sticker
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
+
+        <input
+          ref={stickerFileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={e => {
+            const file = e.target.files?.[0]
+            if (file) {
+              addImageStickerFromFile(file)
+            }
+            e.currentTarget.value = ""
+          }}
+        />
 
         {/* ── Inline text editor ── */}
         <AnimatePresence>
@@ -493,40 +1027,42 @@ export default function StoryEditor({ file, onPublish, onClose, isUploading }: S
       </motion.div>
 
       {/* ── Music Modal ── */}
-      <AnimatePresence>
-        {showMusicModal && (
-          <MusicSelectorModal
-            isOpen={showMusicModal}
-            onClose={() => setShowMusicModal(false)}
-            onApply={(res) => {
-              audioControls.applyTrack(res.track, res.trim_start, res.trim_end, res.volume_original, res.volume_music)
-              setAppliedMusic(res)
-              setShowMusicModal(false)
-              if (videoRef.current) {
-                videoRef.current.currentTime = 0
-                videoRef.current.play().catch(() => { })
-              }
-            }}
-            onSelectAndPlay={(track, trimStart, trimEnd) => audioControls.togglePlayTrack(track, trimStart, trimEnd)}
-            videoDuration={videoDuration}
-            selectedTrack={audioControls.selectedTrack}
-            previewTrackId={audioControls.previewTrackId}
-            volumeOriginal={audioControls.volumeOriginal}
-            volumeMusic={audioControls.volumeMusic}
-            favorites={favorites}
-            onToggleFavorite={audioControls.toggleFavorite}
-            onClearTrack={() => {
-              audioControls.stopAll()
-              audioControls.clearTrack()
-              setAppliedMusic(null)
-            }}
-            onSetVolumeOriginal={audioControls.setVolumeOriginal}
-            onSetVolumeMusic={audioControls.setVolumeMusic}
-            onSeekPreview={audioControls.seekPreview}
-            tracks={apiTracks}
-          />
-        )}
-      </AnimatePresence>
+      <MusicSelectorModal
+        isOpen={showMusicModal}
+        onClose={() => {
+          audioControls.stopAll()
+          audioControls.clearTrack()
+          setAppliedMusic(null)
+          setShowMusicModal(false)
+        }}
+        onApply={(res) => {
+          audioControls.stopAll()
+          audioControls.applyTrack(res.track, res.trim_start, res.trim_end, res.volume_original, res.volume_music)
+          setAppliedMusic(res)
+          setShowMusicModal(false)
+          if (videoRef.current) {
+            videoRef.current.currentTime = 0
+            videoRef.current.play().catch(() => { })
+          }
+        }}
+        onSelectAndPlay={(track, trimStart, trimEnd) => audioControls.togglePlayTrack(track, trimStart, trimEnd)}
+        videoDuration={videoDuration}
+        selectedTrack={audioControls.selectedTrack}
+        previewTrackId={audioControls.previewTrackId}
+        volumeOriginal={audioControls.volumeOriginal}
+        volumeMusic={audioControls.volumeMusic}
+        favorites={favorites}
+        onToggleFavorite={audioControls.toggleFavorite}
+        onClearTrack={() => {
+          audioControls.stopAll()
+          audioControls.clearTrack()
+          setAppliedMusic(null)
+        }}
+        onSetVolumeOriginal={audioControls.setVolumeOriginal}
+        onSetVolumeMusic={audioControls.setVolumeMusic}
+        onSeekPreview={audioControls.seekPreview}
+        tracks={apiTracks}
+      />
     </>
   )
 }

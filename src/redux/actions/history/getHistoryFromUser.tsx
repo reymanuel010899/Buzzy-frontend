@@ -15,7 +15,7 @@ export const getUserStories = (userId: number) => async (dispatch: any) => {
   } catch (error) {
     dispatch({
       type: FAILED_USER_STORIES,
-      payload: error,
+      payload: (error as any)?.message ?? 'error',
     });
   }
 };

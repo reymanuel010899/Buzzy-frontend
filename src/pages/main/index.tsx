@@ -1,10 +1,11 @@
 import Layout from "../../components/Layout/Layout"
 import StreamingUI from "../../components/index/index"
 import { connect, ConnectedProps, useDispatch, useSelector } from 'react-redux';
-import { RootState } from "../../store"
+import { AppDispatch, RootState } from "../../store"
 import { useEffect, useRef, useState } from "react";
 import { getMedia, getRecommendedFeed } from "../../redux/actions/getMedia";
 import { getComment } from '../../redux/actions/getComment';
+import { refreshSession } from "../../redux/actions/Login";
 import { Video } from "../../components/index/main.interface";
 import WelcomeOnboardingModal from "../../components/onboarding/WelcomeOnboardingModal";
 import { UPDATE_USER } from "../../redux/type";
@@ -25,7 +26,7 @@ interface MainProps extends PropsFromRedux {
 const Main = ({ media, getMedia, getComment }: MainProps) => {
     const loginUser = useSelector((state: RootState) => (state.LoginReducer as unknown as { user: { onboarding_completed?: boolean; has_seen_videos?: boolean } | null })?.user ?? null);
     const hasCalled = useRef(false);
-    const dispatch = useDispatch();
+    const dispatch = useDispatch<AppDispatch>();
 
     const needsOnboarding = loginUser && !loginUser.onboarding_completed;
     const [showOnboarding, setShowOnboarding] = useState<boolean>(!!needsOnboarding);
@@ -44,14 +45,18 @@ const Main = ({ media, getMedia, getComment }: MainProps) => {
     };
 
     useEffect(() => {
-        if (!hasCalled.current) {
-            const hasSeenInitial = localStorage.getItem("seen_initial");
-            if (!loginUser?.has_seen_videos && !hasSeenInitial) {
-                getMedia();
-            } else {
-                getRecommendedFeed()(dispatch);
-            }
-            hasCalled.current = true;
+        if (hasCalled.current) return;
+        hasCalled.current = true;
+
+        // Refrescar perfil del usuario en background para evitar fotos rotas/stale
+        (dispatch as AppDispatch)(refreshSession());
+
+        const hasSeenInitial = localStorage.getItem("seen_initial");
+        // Sin getMedia persisted en redux, el estado siempre arranca vacío — siempre llamar al servidor
+        if (!hasSeenInitial) {
+            getMedia();
+        } else {
+            getRecommendedFeed()(dispatch);
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);

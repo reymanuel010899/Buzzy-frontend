@@ -12,7 +12,7 @@ export const viewStory = (data: any) => async (dispatch: any) => {
   } catch (error) {
     dispatch({
       type: FAILED_VIEW_STORY,
-      payload: error,
+      payload: (error as any)?.message ?? 'error',
     });
   }
 };

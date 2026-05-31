@@ -17,7 +17,7 @@ export const getBankAccounts = () => async (dispatch: any) => {
     } catch (error) {
         dispatch({
             type: FAILED_GET_BANK_ACCOUNTS,
-            payload: error
+            payload: (error as any)?.message ?? 'error'
         });
     }
 };
@@ -35,7 +35,7 @@ export const addBankAccount = (data: any) => async (dispatch: any) => {
     } catch (error) {
         dispatch({
             type: FAILED_ADD_BANK_ACCOUNT,
-            payload: error
+            payload: (error as any)?.message ?? 'error'
         });
         return false;
     }
@@ -54,7 +54,7 @@ export const deleteBankAccount = (id: number) => async (dispatch: any) => {
     } catch (error) {
         dispatch({
             type: FAILED_DELETE_BANK_ACCOUNT,
-            payload: error
+            payload: (error as any)?.message ?? 'error'
         });
         return false;
     }

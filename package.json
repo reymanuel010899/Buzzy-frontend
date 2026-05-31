@@ -20,6 +20,7 @@
     "@capacitor/haptics": "^6.0.3",
     "@capacitor/push-notifications": "^6.0.5",
     "@capawesome/capacitor-badge": "^8.0.2",
+    "@capawesome/capacitor-file-picker": "^6.2.0",
     "@codetrix-studio/capacitor-google-auth": "^3.4.0-rc.4",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.0",

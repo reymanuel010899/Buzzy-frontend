@@ -2,6 +2,14 @@ import { useState, useRef, useCallback, useEffect } from "react";
 
 const THRESHOLD = 80;
 
+function isOnline(): boolean {
+  return navigator.onLine;
+}
+
+function dispatchOfflineToast() {
+  window.dispatchEvent(new CustomEvent("buzzy:offline-toast"));
+}
+
 interface UsePullToRefreshOptions {
   onRefresh: () => void | Promise<void>;
   checkScrollTop?: () => boolean;
@@ -35,6 +43,14 @@ export const usePullToRefresh = ({ onRefresh, checkScrollTop, global: isGlobal =
 
   const handleEnd = useCallback(async () => {
     if (deltaRef.current >= THRESHOLD) {
+      if (!isOnline()) {
+        // Sin internet: cancelar silenciosamente y avisar
+        dispatchOfflineToast();
+        setPullProgress(0);
+        startYRef.current = null;
+        deltaRef.current = 0;
+        return;
+      }
       setIsPulling(true);
       setPullProgress(0);
       try {

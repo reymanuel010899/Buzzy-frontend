@@ -7,7 +7,7 @@ export const getVideoGiftsReceived = () => async (dispatch: any) => {
     dispatch({ type: "SUCCEES_VIDEO_GIFTS_RECEIVED", payload: response.data });
     return response.data;
   } catch (error) {
-    dispatch({ type: "FAILED_VIDEO_GIFTS_RECEIVED", payload: error });
+    dispatch({ type: "FAILED_VIDEO_GIFTS_RECEIVED", payload: (error as any)?.message ?? 'error' });
   }
 };
 

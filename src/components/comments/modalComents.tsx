@@ -27,6 +27,8 @@ type Props = {
     commentText: string
     setCommentText: React.Dispatch<React.SetStateAction<string>>
     handlePostComment: (parentUuid?: string, audioBlob?: Blob, audioDuration?: number, imageFile?: File) => void
+    isOffline?: boolean
+    onRetry?: () => void
 }
 
 // ── Audio comment player (for received comments) ──────────────────────────────
@@ -110,6 +112,8 @@ export const ShowComments = ({
     commentText,
     setCommentText,
     handlePostComment,
+    isOffline = false,
+    onRetry,
 }: Props) => {
     const navigate = useNavigate()
     const { t } = useTranslation(['videos', 'common'])
@@ -333,7 +337,7 @@ export const ShowComments = ({
         const visualDepth = Math.min(depth, MAX_REPLY_DEPTH)
         const canReply = visualDepth < MAX_REPLY_DEPTH
 
-        let itemClasses = `py-4 px-3 rounded-2xl transition-all duration-300 mb-3 ${visualDepth > 0 ? "border-l border-white/10 pl-4 mt-1" : "border border-white/10 bg-white/5"}`
+        let itemClasses = `py-1 px-3 rounded-2xl transition-all duration-300 mb-3 ${visualDepth > 0 ? "border-l border-white/10 pl-4 mt-1" : "border border-white/10 bg-white/5"}`
         let avatarBorder = "border-2 border-black"
         let nameColor = "text-white"
         let bgEffect = ""
@@ -490,7 +494,7 @@ export const ShowComments = ({
                         animate={{ y: 0 }}
                         exit={{ y: "100%" }}
                         transition={{ type: "spring", damping: 25, stiffness: 200 }}
-                        className="fixed bottom-0 left-0 right-0 h-[60vh] z-[70] flex flex-col bg-[#050718] rounded-t-[2rem] border-t border-white/10 backdrop-blur-sm shadow-[0_-20px_80px_rgba(0,0,0,0.45)] overflow-hidden"
+                        className="fixed bottom-0 left-0 right-0 h-[65vh] z-[70] flex flex-col bg-[#050718] rounded-t-[2rem] border-t border-white/10 backdrop-blur-sm shadow-[0_-20px_80px_rgba(0,0,0,0.45)] overflow-hidden"
                         onClick={(e) => e.stopPropagation()}
                     >
                         {/* Rayita — click para cerrar */}
@@ -513,7 +517,26 @@ export const ShowComments = ({
                         </div>
 
                         <div className="flex-1 overflow-y-auto px-4 py-5 pb-28 custom-scrollbar">
-                            {!commentsTree.length ? (
+                            {isOffline ? (
+                                <div className="flex flex-col justify-center items-center py-20 text-center gap-3">
+                                    <div className="h-16 w-16 rounded-full bg-white/5 border border-white/10 flex items-center justify-center mb-1">
+                                        <svg className="w-7 h-7 text-white/30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                            <path d="M18.364 5.636a9 9 0 010 12.728M15.536 8.464a5 5 0 010 7.072M12 12h.01M8.464 15.536a5 5 0 010-7.072M5.636 18.364a9 9 0 010-12.728" strokeLinecap="round" strokeLinejoin="round"/>
+                                            <line x1="2" y1="2" x2="22" y2="22" strokeLinecap="round"/>
+                                        </svg>
+                                    </div>
+                                    <h3 className="text-white/70 font-semibold">Sin conexión a internet</h3>
+                                    <p className="text-white/35 text-sm max-w-[220px]">No se pueden cargar los comentarios en este momento.</p>
+                                    {onRetry && (
+                                        <button
+                                            onClick={onRetry}
+                                            className="mt-2 px-6 py-2.5 rounded-full bg-cyan-500/20 border border-cyan-400/30 text-cyan-400 text-sm font-semibold active:scale-95 transition-transform"
+                                        >
+                                            Reintentar
+                                        </button>
+                                    )}
+                                </div>
+                            ) : !commentsTree.length ? (
                                 <div className="flex flex-col justify-center items-center py-20 text-center gap-2">
                                     <div className="h-14 w-14 rounded-full bg-white/5 border border-white/10 flex items-center justify-center mb-2">
                                         <Smile size={24} className="text-white/20" />

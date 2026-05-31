@@ -1,5 +1,5 @@
 import axios from "axios";
-import { SUCCEES_LOGIN, FAILED_LOGIN, LOGOUT_USER } from "../type";
+import { SUCCEES_LOGIN, FAILED_LOGIN, LOGOUT_USER, UPDATE_USER } from "../type";
 import type { AppDispatch } from "../../store";
 import { apiClient, getBaseUrl } from "../client/api-client";
 export interface FetchWithAuthProps {
@@ -160,4 +160,31 @@ const handleLoginError = async (error: unknown, formData: FetchWithAuthProps, di
     dispatch({ type: FAILED_LOGIN, payload: null });
   }
   throw error;
+};
+
+/**
+ * Refresca el perfil del usuario autenticado desde la API al iniciar la app.
+ * Evita que se muestren imágenes rotas o datos stale del localStorage.
+ * Si no hay internet, usa silenciosamente los datos del localStorage.
+ */
+export const refreshSession = () => async (dispatch: AppDispatch): Promise<void> => {
+  try {
+    const stored = localStorage.getItem("user");
+    if (!stored) return;
+
+    const storedUser = JSON.parse(stored);
+    const username = storedUser?.username;
+    if (!username) return;
+
+    const response = await apiClient.get(`/api/get-user/${username}/`);
+    if (response.status === 200) {
+      const freshUser = response.data;
+      // Actualizar Redux con datos frescos
+      dispatch({ type: UPDATE_USER, payload: { user: freshUser } });
+      // Sincronizar localStorage para la próxima sesión offline
+      localStorage.setItem("user", JSON.stringify({ ...storedUser, ...freshUser }));
+    }
+  } catch {
+    // Sin internet o token expirado: los datos del localStorage siguen en Redux, no hacer nada
+  }
 };

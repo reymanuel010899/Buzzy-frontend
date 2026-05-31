@@ -68,6 +68,11 @@ const AdsPage: React.FC = () => {
         return () => window.removeEventListener("buzzy:refresh", handleRefresh);
     }, []);
 
+    const base = () => {
+        const url = getBaseUrl();
+        return url?.startsWith('http') ? url.replace(/\/+$/, '') : null;
+    };
+
     const handlePaymentSuccess = async (campaignId: string | null, sessionId: string | null) => {
         if (!campaignId || !sessionId) return;
 
@@ -75,7 +80,9 @@ const AdsPage: React.FC = () => {
             setLoading(true);
             const token = localStorage.getItem("accessToken");
             // Verify with backend
-            const response = await axios.get(`${getBaseUrl()}api/ads/campaigns/${campaignId}/verify_payment/?session_id=${sessionId}`, {
+            const b = base();
+            if (!b) return;
+            const response = await axios.get(`${b}/api/ads/campaigns/${campaignId}/verify_payment/?session_id=${sessionId}`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
 
@@ -86,14 +93,12 @@ const AdsPage: React.FC = () => {
                     setActiveTab("dashboard");
                     fetchCampaigns();
                     fetchStats();
-                    // Clean URL
                     window.history.replaceState({}, '', '/ads');
                 }, 3000);
             } else {
                 alert("El pago aún no se ha procesado. Si ya pagaste, espera unos segundos e intenta recargar.");
             }
         } catch (error) {
-            console.error("Error verifying payment:", error);
             alert("Error al verificar el pago.");
         } finally {
             setLoading(false);
@@ -101,27 +106,27 @@ const AdsPage: React.FC = () => {
     };
 
     const fetchCampaigns = async () => {
+        const b = base();
+        if (!b) return;
         try {
             const token = localStorage.getItem("accessToken");
-            const response = await axios.get(`${getBaseUrl()}api/ads/campaigns/`, {
+            const response = await axios.get(`${b}/api/ads/campaigns/`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
             setCampaigns(response.data);
-        } catch (error) {
-            console.error("Error fetching campaigns:", error);
-        }
+        } catch { }
     };
 
     const fetchStats = async () => {
+        const b = base();
+        if (!b) return;
         try {
             const token = localStorage.getItem("accessToken");
-            const response = await axios.get(`${getBaseUrl()}api/ads/campaigns/dashboard_stats/`, {
+            const response = await axios.get(`${b}/api/ads/campaigns/dashboard_stats/`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
             setStats(response.data);
-        } catch (error) {
-            console.error("Error fetching stats:", error);
-        }
+        } catch { }
     };
 
     const handleLaunch = async () => {
@@ -160,7 +165,9 @@ const AdsPage: React.FC = () => {
             complexFormData.append("budget.total_budget", campaignData.budget.total_budget.toString());
             complexFormData.append("budget.bidding_model", campaignData.budget.bidding_model || "CPM");
 
-            const response = await axios.post(`${getBaseUrl()}api/ads/campaigns/`, complexFormData, {
+            const b = base();
+            if (!b) { alert("Error de configuración."); return; }
+            const response = await axios.post(`${b}/api/ads/campaigns/`, complexFormData, {
                 headers: {
                     Authorization: `Bearer ${token}`,
                     'Content-Type': 'multipart/form-data'
@@ -169,8 +176,7 @@ const AdsPage: React.FC = () => {
 
             const campaign = response.data;
 
-            // Now create Stripe Session
-            const stripeResponse = await axios.post(`${getBaseUrl()}api/ads/campaigns/${campaign.id}/create_checkout_session/`, {}, {
+            const stripeResponse = await axios.post(`${b}/api/ads/campaigns/${campaign.id}/create_checkout_session/`, {}, {
                 headers: { Authorization: `Bearer ${token}` }
             });
 
@@ -180,7 +186,6 @@ const AdsPage: React.FC = () => {
                 throw new Error("No checkout URL received");
             }
         } catch (error) {
-            console.error("Error launching campaign:", error);
             alert("Error al iniciar el proceso de pago.");
         } finally {
             setLoading(false);

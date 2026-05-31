@@ -1,12 +1,14 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from "react"
 import { useRingtoneStore, RINGTONE_OPTIONS } from "../../store/ringtoneStore"
-import { useParams, useNavigate } from "react-router-dom"
+import { useParams, useNavigate, useLocation } from "react-router-dom"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   Settings,
   Play,
   X,
   Share2,
+  MoreVertical,
+  Download,
   MessageCircle,
   Heart,
   User,
@@ -26,10 +28,15 @@ import {
   Facebook,
   Check,
   Trash2,
+  Loader2,
   Phone,
   LogOut,
   Gift,
   Crown,
+  Globe,
+  Users,
+  Lock,
+  Bookmark,
 } from "lucide-react"
 import { Button } from "../ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs"
@@ -38,6 +45,7 @@ import { connect, useDispatch, useSelector } from "react-redux"
 import type { RootState } from "../../store"
 import { getUser } from "../../redux/actions/GetUser"
 import { getUserMedia } from "../../redux/actions/GetUserMedia"
+import { saveProfileVideos, loadProfileVideos } from "../../services/feedCacheDB"
 import { useWsEvent } from "../../context/WebSocketContext"
 import { createLike } from "../../redux/actions/createLike"
 import { createView } from "../../redux/actions/createView"
@@ -73,6 +81,7 @@ import { getUserGiftsReceived, markUserGiftsSeen } from "../../redux/actions/gif
 import { sendVideoGift } from "../../redux/actions/gift/sendVideoGift"
 import { sendUserGift } from "../../redux/actions/gift/sendUserGift"
 import { getWallet } from "../../redux/actions/getWallet"
+import { getSavedVideos, saveVideo, unsaveVideo } from "../../redux/actions/savedVideos"
 import type { GiftI } from "../../interfaces/gift"
 import { useCallStore } from "../../store/callStore"
 import { useTranslation } from "react-i18next"
@@ -82,12 +91,22 @@ import { registerFCMToken } from "../../utils/fcm"
 import { isNotifEnabled } from "../../utils/notifPrefs"
 
 // Muestra el emoji de fallback hasta que el video esté listo — evita flash negro en Android
-const GiftVideoThumb: React.FC<{ src: string; emoji: string; playing: boolean }> = ({ src, emoji, playing }) => {
+const GiftVideoThumb: React.FC<{ src: string; emoji: string; playing: boolean; thumbnail?: string }> = ({ src, emoji, playing, thumbnail }) => {
   const [ready, setReady] = React.useState(false);
   return (
     <div className="w-full h-full relative">
-      <span className="absolute inset-0 flex items-center justify-center text-2xl transition-opacity duration-200" style={{ opacity: ready ? 0 : 1 }}>{emoji}</span>
+      {thumbnail ? (
+        <img
+          src={thumbnail}
+          className="absolute inset-0 w-full h-full object-cover transition-opacity duration-200"
+          style={{ opacity: ready ? 0 : 1 }}
+          alt=""
+        />
+      ) : (
+        <span className="absolute inset-0 flex items-center justify-center text-2xl transition-opacity duration-200" style={{ opacity: ready ? 0 : 1 }}>{emoji}</span>
+      )}
       <video src={src} autoPlay={playing} loop muted={!playing} playsInline preload="auto"
+        poster={thumbnail}
         onCanPlayThrough={() => setReady(true)}
         className="w-full h-full object-cover transition-opacity duration-200"
         style={{ opacity: ready ? 1 : 0 }}
@@ -134,7 +153,11 @@ interface VideoItem {
   current_user_followered?: boolean
   create_at?: string
   content?: string
+  description?: string
   media_type?: 'video' | 'image'
+  status?: 'pending' | 'processing' | 'ready' | 'blocked'
+  thumbnail_url?: string
+  privacy?: 'public' | 'followers' | 'private'
 }
 
 interface Comment {
@@ -206,6 +229,7 @@ function ProfileSeccion({
   const userParams = useParams<{ username?: string }>()
   const { username } = userParams
   const navigate = useNavigate()
+  const location = useLocation()
   const dispatch = useDispatch()
   const { t } = useTranslation(['profile', 'videos', 'common'])
   const activeGifts = useSelector((state: any) => state.activeGiftReducer?.gift);
@@ -213,9 +237,12 @@ function ProfileSeccion({
   const walletTokens = getWalletReducer?.tokens || 0;
 
   // --- Estados Generales ---
+  const [isProfileSwitching, setIsProfileSwitching] = useState(false)
   const [isMuted, setIsMuted] = useState(true)
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([])
-  const [activeTab, setActiveTab] = useState("latest")
+  const [activeTab, setActiveTab] = useState("public")
+  const [savedVideos, setSavedVideos] = useState<any[]>([])
+  const [savedLoading, setSavedLoading] = useState(false)
   const [isLoggingOut, setIsLoggingOut] = useState(false)
   const currentUser = useSelector((state: any) => state.LoginReducer?.user);
   const isOwnProfile = !!currentUser && !!user && (
@@ -234,6 +261,7 @@ function ProfileSeccion({
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [initialScrollIndex, setInitialScrollIndex] = useState<number>(0)
   const [activeModalIndex, setActiveModalIndex] = useState<number>(0)
+  const [modalVideoSource, setModalVideoSource] = useState<'local' | 'saved'>('local')
   const modalContainerRef = useRef<HTMLDivElement>(null)
   const modalVideoRefs = useRef<(HTMLVideoElement | null)[]>([])
   const modalScrollSettleTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -285,9 +313,12 @@ function ProfileSeccion({
     videoId?: string | number;
     giftId: string;
     gift: string;
+    blobUrl?: string;
     amount?: number;
     color_premiun?: string;
   } | null>(null);
+  const giftAnimBlobRef = useRef<string | null>(null);
+  const playingGiftBlobRef = useRef<string | null>(null);
 
   // Suscripciones
   const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
@@ -380,6 +411,7 @@ function ProfileSeccion({
   const [selectedDays, setSelectedDays] = useState<string[]>([
     "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"
   ]);
+  const [isProfileOffline, setIsProfileOffline] = useState(false);
   const [availabilitySaveSuccess, setAvailabilitySaveSuccess] = useState(false);
   const [showEditProfileModal, setShowEditProfileModal] = useState(false);
   const [showReceivedGiftsModal, setShowReceivedGiftsModal] = useState(false);
@@ -387,6 +419,25 @@ function ProfileSeccion({
   const [receivedUserGifts, setReceivedUserGifts] = useState<any[]>([]);
   const [unseenGiftsCount, setUnseenGiftsCount] = useState(0);
   const [playingGiftUuid, setPlayingGiftUuid] = useState<string | null>(null);
+  const [playingGiftBlobUrl, setPlayingGiftBlobUrl] = useState<string | null>(null);
+
+  const openGiftPreview = (uuid: string, videoUrl: string | undefined) => {
+    if (playingGiftBlobRef.current) URL.revokeObjectURL(playingGiftBlobRef.current);
+    setPlayingGiftBlobUrl(null);
+    if (videoUrl) {
+      fetch(getMediaUrl(videoUrl))
+        .then(r => r.blob())
+        .then(blob => {
+          const blobUrl = URL.createObjectURL(blob);
+          playingGiftBlobRef.current = blobUrl;
+          setPlayingGiftBlobUrl(blobUrl);
+          setPlayingGiftUuid(uuid);
+        })
+        .catch(() => setPlayingGiftUuid(uuid));
+    } else {
+      setPlayingGiftUuid(uuid);
+    }
+  };
   const [showUserGiftModal, setShowUserGiftModal] = useState(false);
   const [giftsTab, setGiftsTab] = useState<'video' | 'user'>('video');
   const [sentGiftPreview, setSentGiftPreview] = useState<GiftI | null>(null);
@@ -395,6 +446,9 @@ function ProfileSeccion({
   const [showChatPrivacyModal, setShowChatPrivacyModal] = useState(false);
   const { setShowMessages, setSelectedChat, setPendingFolder } = useChat();
   const [showProfileMediaOptions, setShowProfileMediaOptions] = useState(false);
+  const [activeVideoOptions, setActiveVideoOptions] = useState<string | null>(null);
+  const [confirmDeleteVideoId, setConfirmDeleteVideoId] = useState<string | null>(null);
+  const [isDeletingVideo, setIsDeletingVideo] = useState(false);
   const [showFullProfileMedia, setShowFullProfileMedia] = useState(false);
   const [showFollowPrompt, setShowFollowPrompt] = useState(false);
   const [stories, setStories] = useState<StoryList>([]);
@@ -497,6 +551,18 @@ function ProfileSeccion({
     }
   }, [media_user]);
 
+  // Auto-open video modal when navigating from a notification deep-link
+  useEffect(() => {
+    const targetUuid = (location.state as { targetVideoUuid?: string } | null)?.targetVideoUuid
+    if (!targetUuid || !localMedia.length) return
+    const idx = localMedia.findIndex(v => v.uuid === targetUuid)
+    if (idx === -1) return
+    // Clear state so it doesn't re-trigger
+    navigate(location.pathname, { replace: true, state: {} })
+    openModalAtIndex(idx)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [localMedia, location.state]);
+
   useEffect(() => {
     dispatch(getWallet() as any);
   }, [dispatch]);
@@ -595,15 +661,24 @@ function ProfileSeccion({
     const activeVideo = localMedia[activeModalIndex];
     const isTargetVideoOpen = activeVideo?.id?.toString() === data.video_id?.toString();
     if (currentUser?.id == data.from_user || (currentUser?.id == data.to_user && isTargetVideoOpen)) {
-      setGiftAnimation({
-        type: data.gift_type,
-        giftId: data.gift_uuid,
-        videoId: data.video_id,
-        sender: data.sender,
-        amount: data.amount || 1,
-        gift: data.gift_video,
+      const entry = {
+        type: data.gift_type, giftId: data.gift_uuid, videoId: data.video_id,
+        sender: data.sender, amount: data.amount || 1, gift: data.gift_video,
         color_premiun: data.color_premiun,
-      });
+      };
+      if (data.gift_video) {
+        if (giftAnimBlobRef.current) URL.revokeObjectURL(giftAnimBlobRef.current);
+        fetch(getMediaUrl(data.gift_video))
+          .then(r => r.blob())
+          .then(blob => {
+            const blobUrl = URL.createObjectURL(blob);
+            giftAnimBlobRef.current = blobUrl;
+            setGiftAnimation({ ...entry, blobUrl });
+          })
+          .catch(() => setGiftAnimation(entry));
+      } else {
+        setGiftAnimation(entry);
+      }
     }
   }, [currentUser?.id, localMedia, activeModalIndex]));
 
@@ -626,13 +701,58 @@ function ProfileSeccion({
   }, []));
 
   // --- 2. Carga Inicial de Usuario ---
-  useEffect(() => {
+  const loadProfileData = useCallback(() => {
     if (!username) return;
-    setLocalMedia([]);
-    getUser(username);
-    getUserMedia(username);
+    setIsProfileOffline(false);
+    // Solo mostrar skeleton si el perfil cargado es diferente al que se pide
+    const currentUsername = (user as any)?.username;
+    if (!currentUsername || currentUsername.toLowerCase() !== username.toLowerCase()) {
+      setIsProfileSwitching(true);
+    }
+
+    if (!navigator.onLine) {
+      setIsProfileOffline(true);
+    }
+
+    // Si es perfil propio: mostrar cache inmediatamente, luego sincronizar
+    if (isOwnProfile) {
+      loadProfileVideos().then((cached) => {
+        if (cached.length > 0) setLocalMedia(cached as VideoItem[]);
+      });
+    } else {
+      setLocalMedia([]);
+    }
+
+    Promise.all([getUser(username), getUserMedia(username)]).finally(() => {
+      setIsProfileSwitching(false);
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [username])
+  }, [username, isOwnProfile]);
+
+  useEffect(() => {
+    loadProfileData();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [username, isOwnProfile]);
+
+  useEffect(() => {
+    if (activeTab !== 'saved' || !isOwnProfile) return;
+    setSavedLoading(true);
+    getSavedVideos()(dispatch as any).then((data: any[]) => {
+      setSavedVideos(Array.isArray(data) ? data : []);
+    }).finally(() => setSavedLoading(false));
+  }, [activeTab, isOwnProfile]);
+
+  // Detectar cuando vuelve internet y recargar
+  useEffect(() => {
+    const handleOnline = () => {
+      if (isProfileOffline) {
+        setIsProfileOffline(false);
+        loadProfileData();
+      }
+    };
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, [isProfileOffline, loadProfileData]);
 
   // Suscripción al evento global de refresh
   useEffect(() => {
@@ -648,15 +768,20 @@ function ProfileSeccion({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [username, dispatch]);
 
-  // Sincronizar localMedia cuando cambian los videos de Redux
+  // Sincronizar localMedia cuando llegan videos frescos de Redux
   useEffect(() => {
-    setLocalMedia(media_user || []);
-  }, [media_user]);
+    if (!media_user) return;
+    setLocalMedia(media_user);
+    // Persistir solo si es perfil propio
+    if (isOwnProfile && media_user.length > 0) {
+      saveProfileVideos(media_user).catch(() => {});
+    }
+  }, [media_user, isOwnProfile]);
 
   // Limpiar estados locales al cambiar de perfil
   useEffect(() => {
     if (username) {
-      setActiveTab("latest");
+      setActiveTab("public");
       setViewedVideos(new Set());
       setVideoProgress({});
     }
@@ -665,8 +790,8 @@ function ProfileSeccion({
   useEffect(() => {
     if (username) {
       _getAvailabilityStatus(username).then((data: any) => {
-        setAvailabilityStatus(data);
-      }).catch(console.error);
+        if (data) setAvailabilityStatus(data);
+      }).catch(() => { /* sin internet */ });
       _getSocialAccounts();
       _refreshSocialFollowers();
     }
@@ -916,12 +1041,27 @@ function ProfileSeccion({
     setShowSocialModal(true);
   };
 
+  const handleDeleteVideo = async (videoUuid: string) => {
+    setIsDeletingVideo(true);
+    try {
+      await apiClient.delete(`/api/videos/${videoUuid}/`);
+      setLocalMedia(prev => prev.filter(v => (v as any).uuid !== videoUuid && v.id.toString() !== videoUuid));
+      setConfirmDeleteVideoId(null);
+      closeModal();
+    } catch {
+      // silent
+    } finally {
+      setIsDeletingVideo(false);
+    }
+  };
+
   // --- 5. Lógica Modal FullScreen ---
-  const openModalAtIndex = (index: number) => {
+  const openModalAtIndex = (index: number, source: 'local' | 'saved' = 'local') => {
     videoRefs.current.forEach(v => v?.pause());
     setIsGridVideoPlaying({});
     setInitialScrollIndex(index);
     setActiveModalIndex(index);
+    setModalVideoSource(source);
     setIsModalOpen(true);
   };
 
@@ -929,6 +1069,7 @@ function ProfileSeccion({
     setIsModalOpen(false);
     setActiveModalIndex(-1);
     setShowCommentsModal(false);
+    setModalVideoSource('local');
   };
 
   const toggleMute = () => setIsMuted(!isMuted);
@@ -942,7 +1083,8 @@ function ProfileSeccion({
     const settleActiveIndex = () => {
       const containerHeight = container.clientHeight || 1;
       const nextIndex = Math.round(container.scrollTop / containerHeight);
-      const clampedIndex = Math.max(0, Math.min(nextIndex, localMedia.length - 1));
+      const modalList = modalVideoSource === 'saved' ? savedVideos : localMedia;
+      const clampedIndex = Math.max(0, Math.min(nextIndex, modalList.length - 1));
       setActiveModalIndex((prev) => (prev === clampedIndex ? prev : clampedIndex));
     };
 
@@ -1267,12 +1409,44 @@ function ProfileSeccion({
     );
   }
 
+  // Mostrar skeleton mientras carga el nuevo perfil (evita flash del perfil anterior)
+  if (isProfileSwitching || (!user && !notFoundUsername)) {
+    return (
+      <div className="min-h-screen bg-black flex flex-col items-center">
+        {/* Banner skeleton */}
+        <div className="w-full h-20 bg-gradient-to-r from-[#7000ff]/30 via-[#4c1d95]/30 to-[#00f0ff]/30 rounded-b-[2.5rem] animate-pulse" />
+        <div className="flex flex-col items-center gap-4 -mt-10 w-full px-4">
+          {/* Avatar skeleton */}
+          <div className="w-24 h-24 rounded-full bg-white/10 animate-pulse border-4 border-[#050718]" />
+          {/* Name skeleton */}
+          <div className="h-7 w-36 rounded-xl bg-white/10 animate-pulse" />
+          <div className="h-4 w-24 rounded-lg bg-white/8 animate-pulse" />
+          {/* Stats skeleton */}
+          <div className="flex gap-8 w-full max-w-sm justify-center py-3 px-6 rounded-2xl bg-white/5 border border-white/10">
+            {[0,1,2].map(i => (
+              <div key={i} className="flex flex-col items-center gap-1">
+                <div className="h-6 w-10 rounded-lg bg-white/10 animate-pulse" />
+                <div className="h-3 w-14 rounded-md bg-white/8 animate-pulse" />
+              </div>
+            ))}
+          </div>
+          {/* Grid skeleton */}
+          <div className="grid grid-cols-3 gap-1 w-full mt-4">
+            {Array.from({ length: 9 }).map((_, i) => (
+              <div key={i} className="aspect-square bg-white/8 animate-pulse rounded-sm" />
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
-      <div className="min-h-screen text-white flex flex-col items-center bg-[#050718] font-sans">
+      <div className="min-h-screen text-white flex flex-col items-center bg-black font-sans">
         {/* Fondo Dinámico */}
         <div className="fixed inset-0 z-0 pointer-events-none">
-          <div className="absolute inset-0 bg-black opacity-80"></div>
+          <div className="absolute inset-0 bg-black opacity-100"></div>
           <div className="absolute inset-0 bg-[url('/noise.png')] opacity-[0.03] mix-blend-overlay"></div>
           <div className="absolute top-1/4 left-1/4 h-40 w-40 rounded-full bg-[#7000ff]/20 blur-3xl animate-float"></div>
           {/* <div className="absolute bottom-1/3 right-1/3 h-60 w-60 rounded-full bg-[#00f0ff]/20 blur-3xl animate-float-delayed"></div> */}
@@ -1314,15 +1488,16 @@ function ProfileSeccion({
 
           <div className="px-4 w-full flex flex-col items-center -mt-5 md:-mt-20 space-y-4 relative z-30">
 
-            {/* Foto de Perfil (Restaurada) */}
+            {/* Foto de Perfil */}
             <motion.div
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               transition={{ duration: 0.5 }}
-              className="relative p-1.5 rounded-full bg-gradient-to-tr from-[#7000ff] to-[#00f0ff] cursor-pointer"
+              className="relative p-1.5 rounded-full cursor-pointer"
+              style={{ background: "linear-gradient(135deg, #ff0080, #7928ca, #00d4ff)" }}
               onClick={() => setShowProfileMediaOptions(true)}
             >
-              <div className="rounded-full p-1 bg-[#050718]">
+              <div className="rounded-full bg-[#050718]">
                 <div className="relative w-20 h-20 md:w-36 md:h-36 rounded-full overflow-hidden">
                   {user?.profile_video ? (
                     <video
@@ -1346,9 +1521,9 @@ function ProfileSeccion({
                   )}
                 </div>
               </div>
-              {/* Badge (Restaurado) */}
-              <div className="absolute bottom-2 right-2 bg-[#00f0ff] text-[#050718] p-1.5 rounded-full border-4 border-[#050718]">
-                <Sparkles size={14} fill="currentColor" />
+              {/* Badge — logo Buzzy */}
+              <div className="absolute bottom-1 right-1 w-7 h-7 rounded-full border-[3px] border-[#050718] overflow-hidden shadow-[0_0_14px_rgba(0,240,255,0.4)]">
+                <img src="/screenshots/buzzy_icon_1024.png" alt="Buzzy" className="w-full h-full object-cover" />
               </div>
             </motion.div>
 
@@ -1367,7 +1542,7 @@ function ProfileSeccion({
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.2 }}
-              className="flex items-center justify-center gap-8 md:gap-12 py-1 px-6 rounded-2xl bg-white/5 backdrop-blur-md border border-white/10 w-full max-w-sm mt-4 shadow-xl"
+              className="flex items-center justify-center gap-8 md:gap-12 py-1 px-6 rounded-2xl  w-full max-w-sm mt-4 shadow-xl"
             >
               <div
                 className="flex flex-col items-center cursor-pointer group"
@@ -1405,6 +1580,49 @@ function ProfileSeccion({
                 </span>
               </div>
             </motion.div>
+
+            {/* Botones de acción propios — debajo de stats */}
+            {isOwnProfile && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.3 }}
+                className="flex items-center justify-center gap-2"
+              >
+                <Button
+                  onClick={() => setShowPremiumModal(true)}
+                  variant="ghost"
+                  size="icon"
+                  className="rounded-xl h-10 w-10 border-0 relative overflow-hidden flex-shrink-0"
+                  style={{ background: 'linear-gradient(135deg, #7c3aed, #a855f7, #ec4899)' }}
+                >
+                  <span className="relative z-10 text-white font-black text-base">✦</span>
+                </Button>
+                <Button
+                  onClick={() => setShowReceivedGiftsModal(true)}
+                  variant="ghost"
+                  size="icon"
+                  className="rounded-xl bg-white/5 hover:bg-white/10 text-white border border-white/5 h-10 w-10 relative flex-shrink-0"
+                >
+                  <Gift size={18} />
+                  {unseenGiftsCount > 0 && (
+                    <motion.span
+                      animate={{ scale: [1, 1.3, 1] }}
+                      transition={{ repeat: Infinity, duration: 1.2, ease: "easeInOut" }}
+                      className="absolute -top-1 -right-1 min-w-[16px] h-4 px-0.5 rounded-full bg-pink-500 text-white text-[9px] font-bold flex items-center justify-center shadow-lg shadow-pink-500/50"
+                    >
+                      {unseenGiftsCount > 99 ? "99+" : unseenGiftsCount}
+                    </motion.span>
+                  )}
+                </Button>
+                <Button onClick={() => setShowEditProfileModal(true)} variant="ghost" size="icon" className="rounded-xl bg-white/5 hover:bg-white/10 text-white border border-white/5 h-10 w-10 flex-shrink-0">
+                  <UserCog size={18} />
+                </Button>
+                <Button onClick={() => setShowSettingsModal(true)} variant="ghost" size="icon" className="rounded-xl bg-white/5 hover:bg-white/10 text-white border border-white/5 h-10 w-10 flex-shrink-0">
+                  <Settings size={18} />
+                </Button>
+              </motion.div>
+            )}
 
             {/* Bio y Enlace (Restaurado) */}
             <motion.div
@@ -1539,82 +1757,124 @@ function ProfileSeccion({
             transition={{ delay: 0.6 }}
             className="w-full mt-3 px-2 md:px-0"
           >
-            <Tabs defaultValue="latest" value={activeTab} onValueChange={setActiveTab} className="w-full">
+            <Tabs defaultValue="public" value={activeTab} onValueChange={setActiveTab} className="w-full">
               {/* Botones de acción + Tabs — sticky al hacer scroll */}
               <div className="sticky top-0 z-30 backdrop-blur-sm  pb-3 rounded-xl flex flex-col gap-4">
-                {/* Botones de acción sticky */}
-                <div className="flex justify-center gap-4 pb-3">
-                  {/* <Button variant="ghost" size="icon" className="rounded-xl bg-white/5 hover:bg-white/10 text-white border border-white/5 h-10 w-10">
-                    <Share size={18} />
-                  </Button> */}
-                  {isOwnProfile && (
-                    <>
-                      <Button
-                        onClick={() => setShowPremiumModal(true)}
-                        variant="ghost"
-                        size="icon"
-                        className="rounded-xl h-10 w-10 border-0 relative overflow-hidden"
-                        style={{ background: 'linear-gradient(135deg, #7c3aed, #a855f7, #ec4899)' }}
-                      >
-                        <span className="relative z-10 text-white font-black text-base">✦</span>
-                      </Button>
-                      <Button
-                        onClick={() => setShowReceivedGiftsModal(true)}
-                        variant="ghost"
-                        size="icon"
-                        className="rounded-xl bg-white/5 hover:bg-white/10 text-white border border-white/5 h-10 w-10 relative"
-                      >
-                        <Gift size={18} />
-                        {unseenGiftsCount > 0 && (
-                          <motion.span
-                            animate={{ scale: [1, 1.3, 1] }}
-                            transition={{ repeat: Infinity, duration: 1.2, ease: "easeInOut" }}
-                            className="absolute -top-1 -right-1 min-w-[16px] h-4 px-0.5 rounded-full bg-pink-500 text-white text-[9px] font-bold flex items-center justify-center shadow-lg shadow-pink-500/50"
-                          >
-                            {unseenGiftsCount > 99 ? "99+" : unseenGiftsCount}
-                          </motion.span>
-                        )}
-                      </Button>
-                      <Button onClick={() => setShowEditProfileModal(true)} variant="ghost" size="icon" className="rounded-xl bg-white/5 hover:bg-white/10 text-white border border-white/5 h-10 w-10">
-                        <UserCog size={18} />
-                      </Button>
-                      <Button onClick={() => setShowSettingsModal(true)} variant="ghost" size="icon" className="rounded-xl bg-white/5 hover:bg-white/10 text-white border border-white/5 h-10 w-10">
-                        <Settings size={18} />
-                      </Button>
-                    </>
-                  )}
-                </div>
-                <div className="relative mx-auto max-w-sm px-1 w-full">
-                  <TabsList className="relative grid w-full grid-cols-3 gap-2 bg-transparent h-auto p-0">
-                    {["latest", "popular", "oldest"].map((tab) => (
-                      <TabsTrigger
-                        key={tab}
-                        value={tab}
-                        className={`rounded-2xl text-[10px] md:text-sm font-semibold py-2.5 transition-all duration-300 capitalize
-                                data-[state=active]:bg-gradient-to-r data-[state=active]:from-[#1c1427] data-[state=active]:to-[#142122] data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-[#7000ff]/30 data-[state=active]:border data-[state=active]:border-white/8
-                                ${activeTab === tab ? "" : "bg-gradient-to-r from-[#1c1427] to-[#142122] border border-white/5 text-white/30 hover:text-white/60"}`}
-                      >
-                        {(t as (k: string) => string)(`profile:orderTabs.${tab}`)}
-                      </TabsTrigger>
-                    ))}
+                <div className="relative w-full px-2">
+                  <TabsList className={`relative grid gap-1.5 bg-transparent h-auto p-0 w-full ${isOwnProfile ? 'grid-cols-4' : 'grid-cols-2'}`}>
+                    {(isOwnProfile
+                      ? [
+                          { value: 'public',    label: 'Público',    Icon: Globe,     activeColor: 'text-cyan-400',   glowColor: 'shadow-cyan-500/40'   },
+                          { value: 'followers', label: 'Seguidores', Icon: Users,     activeColor: 'text-purple-400', glowColor: 'shadow-purple-500/40' },
+                          { value: 'private',   label: 'Privado',    Icon: Lock,      activeColor: 'text-amber-400',  glowColor: 'shadow-amber-500/40'  },
+                          { value: 'saved',     label: 'Guardados',  Icon: Bookmark,  activeColor: 'text-pink-400',   glowColor: 'shadow-pink-500/40'   },
+                        ]
+                      : [
+                          { value: 'public',    label: 'Público',    Icon: Globe,  activeColor: 'text-cyan-400',   glowColor: 'shadow-cyan-500/40'   },
+                          { value: 'followers', label: 'Seguidores', Icon: Users,  activeColor: 'text-purple-400', glowColor: 'shadow-purple-500/40' },
+                        ]
+                    ).map((tab) => {
+                      const isActive = activeTab === tab.value;
+                      return (
+                        <TabsTrigger
+                          key={tab.value}
+                          value={tab.value}
+                          title={tab.label}
+                          className={`relative w-full h-10 rounded-xl transition-all duration-300 flex items-center justify-center p-0
+                            ${isActive
+                              ? `bg-gradient-to-br from-[#1c1427] to-[#0e1a22] border border-white/10 shadow-md ${tab.glowColor}`
+                              : 'bg-white/5 border border-white/5 hover:bg-white/10'
+                            }`}
+                        >
+                          <tab.Icon
+                            size={15}
+                            className={`transition-all duration-300 ${isActive ? `${tab.activeColor} drop-shadow-[0_0_5px_currentColor]` : 'text-white/30'}`}
+                            strokeWidth={isActive ? 2.5 : 1.5}
+                          />
+                          {isActive && (
+                            <motion.div
+                              layoutId="privacy-tab-indicator"
+                              className={`absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full ${tab.activeColor.replace('text-', 'bg-')}`}
+                            />
+                          )}
+                        </TabsTrigger>
+                      );
+                    })}
                   </TabsList>
                 </div>
               </div>
 
+              {isProfileOffline && (
+                <div className="mx-1 md:mx-4 mb-3 flex items-center justify-between gap-3 rounded-xl bg-yellow-500/10 border border-yellow-500/30 px-4 py-3">
+                  <span className="text-yellow-400 text-sm">Sin conexión</span>
+                  <button
+                    onClick={loadProfileData}
+                    className="text-xs font-bold text-yellow-300 bg-yellow-500/20 px-3 py-1.5 rounded-lg hover:bg-yellow-500/30 transition-all whitespace-nowrap"
+                  >
+                    Reintentar
+                  </button>
+                </div>
+              )}
+              {/* Tab guardados — grid propio */}
+              {activeTab === 'saved' && (
+                <TabsContent value="saved" className="px-1 md:px-4">
+                  {savedLoading ? (
+                    <div className="flex justify-center py-16">
+                      <div className="w-6 h-6 border-2 border-white/20 border-t-pink-400 rounded-full animate-spin" />
+                    </div>
+                  ) : savedVideos.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-16 gap-3 text-white/30">
+                      <Bookmark size={36} strokeWidth={1.2} />
+                      <span className="text-sm">No tienes videos guardados</span>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-3 gap-1 md:gap-4">
+                      {savedVideos.map((video: any, index: number) => (
+                        <motion.div
+                          key={video.id}
+                          initial={{ opacity: 0, scale: 0.9 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          transition={{ delay: index * 0.04 }}
+                          className="relative group rounded-lg overflow-hidden bg-zinc-900 aspect-[3/4] cursor-pointer"
+                          onClick={() => openModalAtIndex(index, 'saved')}
+                        >
+                          {video.media_type === 'image' ? (
+                            <img src={video.thumbnail_url || video.video_url} className="w-full h-full object-cover" alt="" />
+                          ) : (
+                            <video src={video.video_url} muted playsInline preload="none" poster={video.thumbnail_url || undefined} className="w-full h-full object-cover" />
+                          )}
+                          <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/50" />
+                          <div className="absolute top-1.5 right-1.5 bg-black/60 backdrop-blur-sm rounded-full p-1">
+                            <Bookmark size={10} className="text-pink-400 fill-pink-400" />
+                          </div>
+                        </motion.div>
+                      ))}
+                    </div>
+                  )}
+                </TabsContent>
+              )}
+
               <TabsContent value={activeTab} className="px-1 md:px-4">
                 <div className="grid grid-cols-3 gap-1 md:gap-4">
-                  {[...localMedia].sort((a, b) => {
-                    if (activeTab === 'popular') return (b.view_acount || 0) - (a.view_acount || 0);
-                    if (activeTab === 'oldest') return new Date(a.create_at || 0).getTime() - new Date(b.create_at || 0).getTime();
-                    return new Date(b.create_at || 0).getTime() - new Date(a.create_at || 0).getTime();
-                  }).map((video, index) => (
+                  {activeTab === 'saved' ? null : [...localMedia].filter((video) => {
+                    const p = video.privacy ?? 'public';
+                    if (activeTab === 'public')    return p === 'public';
+                    if (activeTab === 'followers') return p === 'followers';
+                    if (activeTab === 'private')   return p === 'private';
+                    return true;
+                  }).sort((a, b) =>
+                    new Date(b.create_at || 0).getTime() - new Date(a.create_at || 0).getTime()
+                  ).map((video, index) => {
+                    // Índice real en localMedia para que el modal scroll al video correcto
+                    const realIndex = localMedia.findIndex(v => v.id === video.id);
+                    return (
                     <motion.div
                       key={video.id}
                       initial={{ opacity: 0, scale: 0.9 }}
                       animate={{ opacity: 1, scale: 1 }}
                       transition={{ delay: index * 0.05 }}
                       className="relative group rounded-lg overflow-hidden bg-zinc-900 aspect-[3/4]"
-                      onClick={() => handleVideoClickOrDoubleClick(video, index)}
+                      onClick={() => handleVideoClickOrDoubleClick(video, realIndex)}
                     >
                       <div className="relative h-full w-full">
                         {video.media_type === 'image' ? (
@@ -1625,14 +1885,30 @@ function ProfileSeccion({
                           />
                         ) : (
                           <video
-                            ref={(el) => (videoRefs.current[index] = el)}
-                            muted={isMuted}
-                            loop
+                            ref={(el) => { videoRefs.current[index] = el }}
+                            src={getMediaUrl(video.video_url || video.video)}
+                            muted
                             playsInline
+                            preload="none"
+                            poster={video.thumbnail_url ? getMediaUrl(video.thumbnail_url) : undefined}
                             className="w-full h-full object-cover transform group-hover:scale-105 transition-transform duration-700"
-                          >
-                            <source src={getMediaUrl(video.video_url || video.video)} type="video/mp4" />
-                          </video>
+                          />
+                        )}
+                        {video.status && video.status !== 'ready' && (
+                          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center gap-1.5 z-10">
+                            <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                            <span className="text-white/70 text-[10px] font-medium tracking-wide">Procesando</span>
+                          </div>
+                        )}
+                        {video.privacy === 'private' && (
+                          <div className="absolute top-2 right-2 z-20 bg-black/70 backdrop-blur-sm rounded-full p-1.5">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                          </div>
+                        )}
+                        {video.privacy === 'followers' && (
+                          <div className="absolute top-2 right-2 z-20 bg-black/70 backdrop-blur-sm rounded-full p-1.5">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                          </div>
                         )}
                         <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/60"></div>
                         <div className="absolute bottom-2 left-2 flex items-center gap-1 text-xs font-medium">
@@ -1659,7 +1935,7 @@ function ProfileSeccion({
                         </div>
                       </div>
                     </motion.div>
-                  ))}
+                  )})}
                 </div>
               </TabsContent>
             </Tabs>
@@ -1745,13 +2021,13 @@ function ProfileSeccion({
                             if (!isPlaying) {
                               markUserGiftsSeen(gift.uuid)(dispatch);
                               if (isNew) setUnseenGiftsCount(prev => Math.max(0, prev - 1));
-                              setPlayingGiftUuid(gift.uuid);
+                              openGiftPreview(gift.uuid, gift.gift_video_url);
                             }
                           }}
                         >
                           <div className="relative flex-shrink-0 w-14 h-14 rounded-xl overflow-hidden bg-black/40">
                             {gift.gift_video_url ? (
-                              <GiftVideoThumb src={getMediaUrl(gift.gift_video_url)} emoji={gift.gift_emoji || "🎁"} playing={isPlaying} />
+                              <GiftVideoThumb src={getMediaUrl(gift.gift_video_url)} emoji={gift.gift_emoji || "🎁"} playing={isPlaying} thumbnail={gift.video_thumbnail ? getMediaUrl(gift.video_thumbnail) : undefined} />
                             ) : (
                               <div className="w-full h-full flex items-center justify-center text-2xl">{gift.gift_emoji || "🎁"}</div>
                             )}
@@ -1803,7 +2079,7 @@ function ProfileSeccion({
                             // Marcar como visto en BD inmediatamente al tocar
                             markVideoGiftsSeen(gift.uuid)(dispatch);
                             if (isNew) setUnseenGiftsCount(prev => Math.max(0, prev - 1));
-                            setPlayingGiftUuid(gift.uuid);
+                            openGiftPreview(gift.uuid, gift.gift_video_url);
                           }
                         }}
                       >
@@ -1912,12 +2188,25 @@ function ProfileSeccion({
               transition={{ duration: 0.35 }}
               className="fixed inset-0 z-[300] pointer-events-auto"
             >
+              {/* Poster mientras carga el video */}
+              {giftItem.video_thumbnail && (
+                <img
+                  src={getMediaUrl(giftItem.video_thumbnail)}
+                  className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+                  style={{
+                    maskImage: `radial-gradient(ellipse 70% 65% at 50% 45%, black 30%, transparent 75%)`,
+                    WebkitMaskImage: `radial-gradient(ellipse 70% 65% at 50% 45%, black 30%, transparent 75%)`,
+                  }}
+                />
+              )}
+
               {/* Video a pantalla completa con máscara que disuelve todos los bordes */}
               <motion.video
                 key={giftItem.uuid}
-                src={getMediaUrl(giftItem.gift_video_url)}
+                src={playingGiftBlobUrl || getMediaUrl(giftItem.gift_video_url)}
                 autoPlay
                 playsInline
+                poster={giftItem.video_thumbnail ? getMediaUrl(giftItem.video_thumbnail) : undefined}
                 initial={{ scale: 0.6, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 exit={{ scale: 0.6, opacity: 0 }}
@@ -1940,6 +2229,11 @@ function ProfileSeccion({
                 }}
                 onEnded={() => {
                   setGiftBlackout(false);
+                  if (playingGiftBlobRef.current) {
+                    URL.revokeObjectURL(playingGiftBlobRef.current);
+                    playingGiftBlobRef.current = null;
+                  }
+                  setPlayingGiftBlobUrl(null);
                   setReceivedVideoGifts(prev => prev.filter(g => g.uuid !== playingGiftUuid));
                   setReceivedUserGifts(prev => prev.filter(g => g.uuid !== playingGiftUuid));
                   setPlayingGiftUuid(null);
@@ -2845,7 +3139,7 @@ function ProfileSeccion({
                 className="w-full h-full overflow-y-scroll snap-y snap-mandatory no-scrollbar overscroll-contain"
                 style={{ scrollbarWidth: 'none' }}
               >
-                {localMedia.map((video, index) => (
+                {(modalVideoSource === 'saved' ? savedVideos : localMedia).map((video, index) => (
                   <div
                     key={video.id}
                     id={`modal-video-${index}`}
@@ -2873,12 +3167,15 @@ function ProfileSeccion({
                       />
                     )}
 
-                    <div className="absolute bottom-1 left-0 right-0 z-10 px-1 pb-1 text-left">
+                    <div className={`absolute bottom-1 left-0 right-0 px-1 pb-1 text-left ${expandedDescriptions[video.id] ? 'z-[80]' : 'z-10'}`}>
                       <div className="flex items-center gap-2 mb-2">
-                        <h3 className="text-white font-bold text-lg drop-shadow-md">@{video.user_id?.username || user?.username}</h3>
-                        <div className="bg-[#00f0ff] p-0.5 rounded-full"><Sparkles size={8} className="text-black" /></div>
+                        <h3
+                          className="text-white font-bold text-lg drop-shadow-md cursor-pointer hover:text-[#00f0ff] transition-colors"
+                          onClick={(e) => { e.stopPropagation(); navigate(`/profile/${video.user_id?.username || user?.username}`); closeModal(); }}
+                        >@{video.user_id?.username || user?.username}</h3>
+                        <img src="/screenshots/buzzy_icon_1024.png" alt="" className="w-4 h-4 rounded-full border border-white/20 object-cover flex-shrink-0" />
                       </div>
-                      {!!(video.content || video.user_id?.username) && (
+                      {!!(video.description || video.content || video.user_id?.username) && (
                         <motion.div
                           className={`
                             w-full backdrop-blur-md border border-white/10 bg-black/35 shadow-2xl transition-all duration-500 ease-in-out rounded-none
@@ -2911,7 +3208,7 @@ function ProfileSeccion({
 
                             {expandedDescriptions[video.id] ? (
                               <div className="flex flex-col gap-2">
-                                <p className="whitespace-pre-wrap">{video.content || "Sin descripcion."}</p>
+                                <p className="whitespace-pre-wrap">{video.description || video.content || "Sin descripcion."}</p>
                                 <button
                                   className="text-[#00f0ff] text-xs font-semibold mt-2 self-start hover:underline"
                                   onClick={(e) => {
@@ -2924,8 +3221,8 @@ function ProfileSeccion({
                               </div>
                             ) : (
                               <div className="flex flex-wrap items-center">
-                                <span className="line-clamp-2">{video.content || "Mira este increíble video... #viral #fyp"}</span>
-                                {(video.content || "").length > 70 && (
+                                <span className="line-clamp-2">{video.description || video.content || "Mira este increíble video... #viral #fyp"}</span>
+                                {(video.description || video.content || "").length > 70 && (
                                   <span className="ml-1 text-[#00f0ff] font-bold text-[11px]">... ver más</span>
                                 )}
                               </div>
@@ -2936,7 +3233,7 @@ function ProfileSeccion({
                     </div>
 
                     {/* Barra de Progreso del Modal */}
-                    <div className="absolute bottom-0 left-0 right-0 z-20 px-0 h-1 hover:h-2 transition-all group">
+                    <div className={`absolute bottom-0 left-0 right-0 px-0 h-1 hover:h-2 transition-all group ${expandedDescriptions[video.id] ? 'z-10 pointer-events-none' : 'z-20'}`}>
                       {(() => {
                         const vidId = video.id.toString();
                         const duration = videoDuration[vidId] || 1;
@@ -2957,7 +3254,7 @@ function ProfileSeccion({
                     </div>
 
                     {/* Botones Laterales del Modal */}
-                    <div className="absolute right-2 bottom-28 md:right-4 md:bottom-28 flex flex-col items-center gap-4 z-20">
+                    <div className={`absolute right-2 bottom-28 md:right-4 md:bottom-28 flex flex-col items-center gap-4 z-20 ${expandedDescriptions[video.id] ? 'pointer-events-none opacity-0' : ''}`}>
                       <div className="relative mb-1">
                         <div className="w-12 h-12 rounded-full border-2 border-white overflow-hidden">
                           <img
@@ -2966,6 +3263,11 @@ function ProfileSeccion({
                             alt="user"
                           />
                         </div>
+                        <img
+                          src="/screenshots/buzzy_icon_1024.png"
+                          alt=""
+                          className="absolute bottom-0 right-0 w-4 h-4 rounded-full border-2 border-black object-cover"
+                        />
                       </div>
 
                       {!isOwnProfile && (
@@ -3039,11 +3341,46 @@ function ProfileSeccion({
                         <span className="text-white text-xs font-bold drop-shadow-md">{video.view_acount || 0}</span>
                       </div>
 
-                      <div className="flex flex-col items-center gap-1">
-                        <motion.button whileTap={{ scale: 0.9 }} className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 backdrop-blur-sm">
-                          <Share2 className="h-5 w-5 text-white drop-shadow-lg" />
+                      <div className="flex flex-col items-center gap-1 relative">
+                        <motion.button
+                          whileTap={{ scale: 0.9 }}
+                          onClick={(e) => { e.stopPropagation(); setActiveVideoOptions(prev => prev === video.id.toString() ? null : video.id.toString()); }}
+                          className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 backdrop-blur-sm"
+                        >
+                          <MoreVertical className="h-5 w-5 text-white/70" />
                         </motion.button>
-                        <span className="text-white text-xs font-bold drop-shadow-md">Share</span>
+
+                        {/* Mini options menu */}
+                        {activeVideoOptions === video.id.toString() && (
+                          <>
+                            <motion.div
+                              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                              className="fixed inset-0 z-[9998]"
+                              onPointerDown={(e) => { e.stopPropagation(); setActiveVideoOptions(null); }}
+                            />
+                            <motion.div
+                              initial={{ opacity: 0, scale: 0.85, y: 8 }}
+                              animate={{ opacity: 1, scale: 1, y: 0 }}
+                              exit={{ opacity: 0, scale: 0.85, y: 8 }}
+                              className="absolute bottom-12 right-0 z-[9999] flex flex-col gap-1 rounded-2xl border border-white/10 bg-black/95 p-2 shadow-2xl backdrop-blur-xl min-w-[140px]"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {[
+                                { icon: <Bookmark size={14} className={savedVideos.some(s => s.id === video.id) ? 'fill-pink-400 text-pink-400' : 'text-white/80'} />, label: savedVideos.some(s => s.id === video.id) ? 'Quitar' : 'Guardar', onClick: () => { const isSaved = savedVideos.some(s => s.id === video.id); if (isSaved) { setSavedVideos(prev => prev.filter((v: any) => v.id !== video.id)); unsaveVideo(video.id)(dispatch); closeModal(); } else { setSavedVideos(prev => [...prev, video]); saveVideo(video.id)(dispatch); } setActiveVideoOptions(null); } },
+                                { icon: <Share2 size={14} className="text-cyan-300" />, label: 'Compartir', onClick: () => { if (navigator.share) { navigator.share({ url: video.video_url || '' }); } setActiveVideoOptions(null); } },
+                                { icon: <Download size={14} className="text-violet-300" />, label: 'Descargar', onClick: () => { const a = document.createElement('a'); a.href = video.video_url || ''; a.download = ''; a.click(); setActiveVideoOptions(null); } },
+                                ...(isOwnProfile && (video as any).user_id?.id === (user as any)?.id ? [{ icon: <Trash2 size={14} className="text-red-400" />, label: 'Eliminar', onClick: () => { setConfirmDeleteVideoId((video as any).uuid || video.id.toString()); setActiveVideoOptions(null); } }] : []),
+                              ].map((opt) => (
+                                <button key={opt.label} onClick={opt.onClick}
+                                  className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-white/8 text-white text-xs font-medium transition-colors text-left w-full"
+                                >
+                                  {opt.icon}
+                                  {opt.label}
+                                </button>
+                              ))}
+                            </motion.div>
+                          </>
+                        )}
                       </div>
 
                       <div className="flex flex-col items-center gap-1">
@@ -3079,7 +3416,7 @@ function ProfileSeccion({
           >
             <video
               key={giftAnimation.giftId}
-              src={getMediaUrl(giftAnimation.gift)}
+              src={giftAnimation.blobUrl || getMediaUrl(giftAnimation.gift)}
               autoPlay
               playsInline
               muted={false}
@@ -3106,6 +3443,10 @@ function ProfileSeccion({
               }}
               onEnded={() => {
                 setIsBlackout(false);
+                if (giftAnimBlobRef.current) {
+                  URL.revokeObjectURL(giftAnimBlobRef.current);
+                  giftAnimBlobRef.current = null;
+                }
                 setGiftAnimation(null);
               }}
             />
@@ -3267,7 +3608,7 @@ function ProfileSeccion({
                     <button
                       onClick={handlePostComment}
                       disabled={!commentText.trim()}
-                      className="rounded-xl bg-gradient-to-r from-[#7000ff] to-[#00f0ff] px-4 py-2 text-sm font-bold text-white shadow-lg shadow-cyan-500/10 transition disabled:cursor-not-allowed disabled:opacity-40"
+                      className="rounded-xl bg-[#10b981] px-4 py-2 text-sm font-bold text-white shadow-[0_0_20px_rgba(16,185,129,0.4)] hover:shadow-[0_0_28px_rgba(16,185,129,0.55)] transition disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       Publicar
                     </button>
@@ -3278,6 +3619,52 @@ function ProfileSeccion({
           )
         }
       </AnimatePresence >
+
+      {/* Confirm Delete Video Modal */}
+      <AnimatePresence>
+        {confirmDeleteVideoId && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[300] bg-black/70 backdrop-blur-sm"
+              onClick={() => !isDeletingVideo && setConfirmDeleteVideoId(null)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.88, y: 24 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.88, y: 24 }}
+              transition={{ type: "spring", stiffness: 320, damping: 28 }}
+              className="fixed inset-x-6 top-1/2 -translate-y-1/2 z-[301] rounded-3xl border border-white/10 bg-black p-6 shadow-2xl"
+            >
+              <div className="flex flex-col items-center gap-4 text-center">
+                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-red-500/15 border border-red-500/30">
+                  <Trash2 size={24} className="text-red-400" />
+                </div>
+                <div>
+                  <p className="text-white font-bold text-lg">¿Eliminar video?</p>
+                  <p className="text-white/50 text-sm mt-1">Esta acción no se puede deshacer. El video se eliminará permanentemente.</p>
+                </div>
+                <div className="flex gap-3 w-full mt-2">
+                  <button
+                    onClick={() => setConfirmDeleteVideoId(null)}
+                    disabled={isDeletingVideo}
+                    className="flex-1 py-3 rounded-2xl border border-white/10 bg-white/5 text-white text-sm font-semibold disabled:opacity-50"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={() => handleDeleteVideo(confirmDeleteVideoId)}
+                    disabled={isDeletingVideo}
+                    className="flex-1 py-3 rounded-2xl bg-red-500 text-white text-sm font-bold disabled:opacity-60 flex items-center justify-center gap-2"
+                  >
+                    {isDeletingVideo ? <><Loader2 size={16} className="animate-spin" /> Eliminando...</> : 'Sí, eliminar'}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
       {/* Profile Media Options Modal */}
       <AnimatePresence>
@@ -3296,7 +3683,7 @@ function ProfileSeccion({
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
               className="fixed z-50 left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-[320px] px-4"
             >
-              <div className="bg-[#0c1033]/95 border border-white/10 rounded-3xl shadow-[0_0_40px_-10px_rgba(0,0,0,0.5)] overflow-hidden backdrop-blur-sm">
+              <div className="bg-black border border-white/8 rounded-3xl shadow-[0_24px_60px_rgba(0,0,0,0.9)] overflow-hidden backdrop-blur-xl">
                 {/* Header con gradiente sutil */}
                 <div className="bg-gradient-to-r from-white/5 to-transparent px-5 py-4 flex justify-between items-center border-b border-white/5">
                   <h3 className="text-white font-semibold text-lg tracking-tight">Opciones de perfil</h3>
