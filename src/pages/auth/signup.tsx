@@ -210,15 +210,15 @@ const SignUp: React.FC = () => {
   };
 
   return (
-    <div className="flex justify-center items-center min-h-screen bg-[#0b0f19] py-12 px-4 relative overflow-hidden">
-      <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-cyan-500/20 rounded-full blur-[120px] pointer-events-none" />
-      <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-600/20 rounded-full blur-[120px] pointer-events-none" />
+    <div className="flex justify-center items-center min-h-screen py-12 px-4 relative overflow-hidden" style={{ backgroundColor: '#0b0f19' }}>
+      <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(ellipse 60% 50% at 0% 0%, rgba(6,182,212,0.18) 0%, transparent 70%), radial-gradient(ellipse 60% 50% at 100% 100%, rgba(37,99,235,0.18) 0%, transparent 70%)' }} />
 
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
-        className="bg-[#131b2c]/80 backdrop-blur-2xl shadow-2xl border border-white/10 rounded-[2.5rem] p-8 sm:p-10 max-w-md w-full relative z-10"
+        className="shadow-2xl border border-white/10 rounded-[2.5rem] p-8 sm:p-10 max-w-md w-full relative z-10"
+        style={{ backgroundColor: 'rgba(19,27,44,0.85)', WebkitBackdropFilter: 'blur(24px)', backdropFilter: 'blur(24px)' }}
       >
         <div className="text-center mb-8">
           <h2 className="text-3xl font-black text-white tracking-tight">Crea tu cuenta</h2>
