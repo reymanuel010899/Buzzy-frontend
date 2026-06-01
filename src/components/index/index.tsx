@@ -2392,7 +2392,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       >
         {/* Stories Bar */}
         <div
-          className={`w-full transition-opacity duration-100 ${showStoriesBar ? "opacity-100" : "opacity-0 h-0 overflow-hidden pointer-events-none"}`}
+          className={`w-full overflow-hidden transition-all duration-300 ease-in-out ${showStoriesBar ? "max-h-24 opacity-100" : "max-h-0 opacity-0 pointer-events-none"}`}
         >
           <div>
             <div className="flex gap-2 px-2 py-2 snap-x ">

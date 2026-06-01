@@ -3,13 +3,14 @@
 import React, { useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import {
-  X, Clapperboard, ImageIcon, Zap, ShoppingCart, Wallet,
+  X, Clapperboard, ImageIcon, Zap, ShoppingCart,
   CheckCircle2, Sparkles, Star, ChevronRight, AlertCircle
 } from "lucide-react"
 import {
-  getAIPackages, purchaseAIPackage, purchaseAICustom,
+  getAIPackages, createAICheckoutSession,
   type AIPackage, type PurchaseResult,
 } from "@/services/aiService"
+import { Browser } from '@capacitor/browser'
 
 interface AIRechargeModalProps {
   isOpen: boolean
@@ -68,19 +69,13 @@ const AIRechargeModal: React.FC<AIRechargeModalProps> = ({
     setErrorMsg('')
     setInsufficientFunds(false)
     try {
-      let res: PurchaseResult
-      if (selected) {
-        res = await purchaseAIPackage(selected.id)
-      } else {
-        res = await purchaseAICustom(customPrice)
-      }
-      setResult(res)
-      setStep('success')
-      onSuccess(res)
+      const params = selected ? { package_id: selected.id } : { custom_amount: customPrice }
+      const { url } = await createAICheckoutSession(params)
+      await Browser.open({ url, windowName: '_blank' })
+      handleClose()
     } catch (err: any) {
       const data = err?.response?.data
-      setErrorMsg(data?.error || 'Error al procesar la compra.')
-      setInsufficientFunds(!!data?.insufficient_funds)
+      setErrorMsg(data?.error || 'Error al iniciar el pago.')
       setStep('error')
     }
   }
@@ -295,8 +290,8 @@ const AIRechargeModal: React.FC<AIRechargeModalProps> = ({
 
                   {/* Secure payment note */}
                   <div className="flex items-center justify-center gap-2 mt-3">
-                    <Wallet size={12} className="text-gray-600" />
-                    <span className="text-gray-600 text-[10px]">Pago seguro desde tu wallet · Acreditado al instante</span>
+                    <Zap size={12} className="text-gray-600" />
+                    <span className="text-gray-600 text-[10px]">Pago seguro con Stripe · Tarjeta de crédito o débito</span>
                   </div>
                 </motion.div>
               )}
@@ -350,8 +345,8 @@ const AIRechargeModal: React.FC<AIRechargeModalProps> = ({
                   </div>
 
                   <div className="flex items-center gap-2 mt-3 px-1">
-                    <Wallet size={12} className="text-amber-400 flex-shrink-0" />
-                    <span className="text-gray-500 text-xs">Se descontará de tu wallet al confirmar</span>
+                    <Zap size={12} className="text-amber-400 flex-shrink-0" />
+                    <span className="text-gray-500 text-xs">Serás redirigido a Stripe para completar el pago</span>
                   </div>
 
                   <motion.button
@@ -359,8 +354,8 @@ const AIRechargeModal: React.FC<AIRechargeModalProps> = ({
                     onClick={handlePurchase}
                     className="w-full mt-5 py-4 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 text-white font-bold text-base shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2"
                   >
-                    <Zap size={18} />
-                    Confirmar y pagar ${selectedPrice.toFixed(2)}
+                    <ShoppingCart size={18} />
+                    Pagar ${selectedPrice.toFixed(2)} con Stripe
                   </motion.button>
                 </motion.div>
               )}

@@ -20,6 +20,7 @@ import AccountCancel from "../pages/main/CancelAccount";
 import SupportForm from "../pages/main/Support";
 import AdsPage from "../pages/main/AdsPage";
 import PremiumSuccess from "../pages/main/PremiumSuccess";
+import AiCreditsSuccess from "../pages/main/AiCreditsSuccess";
 import NotFound from "../pages/NotFound";
 import JoinPage from "../pages/auth/JoinPage";
 import VideoDeepLink from "../components/VideoDeepLink";
@@ -125,6 +126,14 @@ export const router = createBrowserRouter(
         element={
           <ProtectedRoute>
             <PremiumSuccess />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/ai-credits-success"
+        element={
+          <ProtectedRoute>
+            <AiCreditsSuccess />
           </ProtectedRoute>
         }
       />

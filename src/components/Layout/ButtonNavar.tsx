@@ -28,7 +28,7 @@ const BottomNavbar: React.FC = () => {
       <nav className="fixed bottom-0 left-0 right-0 z-50"
         style={{ background: '#000', borderTop: '1px solid rgba(255,255,255,0.06)' }}
       >
-        <div className="flex h-13 items-center justify-around px-4 max-w-lg mx-auto">
+        <div className="flex h-11 items-center justify-around px-4 max-w-lg mx-auto">
 
           {/* Home */}
           <Link to="/" className="relative flex flex-col items-center gap-0.5 group">
