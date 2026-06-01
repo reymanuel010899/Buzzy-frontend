@@ -9,6 +9,9 @@ const config: CapacitorConfig = {
   },
   server: {
     androidScheme: 'http',
+    iosScheme: 'http',
+    url: 'http://10.0.0.41:5173',
+    cleartext: true,
   },
   plugins: {
     GoogleAuth: {
