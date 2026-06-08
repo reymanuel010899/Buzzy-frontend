@@ -246,6 +246,9 @@ function drawTextOverlays(
 
 // ── Sticker drawing ───────────────────────────────────────────────────────────
 
+// Cache for preloaded image/video elements used during canvas export
+const _stickerMediaCache = new Map<string, HTMLImageElement | HTMLVideoElement>()
+
 function drawStickerOverlays(
   ctx: CanvasRenderingContext2D,
   stickers: StickerOverlayData[],
@@ -259,7 +262,6 @@ function drawStickerOverlays(
   offsetY: number
 ) {
   for (const sticker of stickers) {
-    // Only draw if within the sticker's time range
     if (currentTime < sticker.startTime || currentTime > sticker.endTime) continue
 
     const containerPxX = (sticker.x / 100) * containerRect.width
@@ -269,16 +271,35 @@ function drawStickerOverlays(
     const canvasX = normX * vW
     const canvasY = normY * vH
 
-    // Scale emoji size relative to video dimensions
-    const baseFontSize = vH * 0.08 * sticker.scale  // ~8% of video height
-
     ctx.save()
     ctx.translate(canvasX, canvasY)
     ctx.rotate((sticker.rotation * Math.PI) / 180)
-    ctx.font = `${Math.round(baseFontSize)}px serif`
-    ctx.textAlign = "center"
-    ctx.textBaseline = "middle"
-    ctx.fillText(sticker.emoji, 0, 0)
+
+    if ((sticker.kind === "image" || sticker.kind === "video") && sticker.src) {
+      const media = _stickerMediaCache.get(sticker.id)
+      if (media) {
+        // Sync video sticker frame to current export time (looped)
+        if (media instanceof HTMLVideoElement && isFinite(media.duration) && media.duration > 0) {
+          const stickerTime = currentTime % media.duration
+          if (Math.abs(media.currentTime - stickerTime) > 0.05) {
+            media.currentTime = stickerTime
+          }
+        }
+        const stickerW = vW * 0.22 * sticker.scale
+        const aspectEl = media instanceof HTMLImageElement
+          ? (media.naturalHeight / media.naturalWidth)
+          : (media.videoHeight / media.videoWidth) || 1
+        const stickerH = stickerW * aspectEl
+        ctx.drawImage(media as CanvasImageSource, -stickerW / 2, -stickerH / 2, stickerW, stickerH)
+      }
+    } else {
+      const baseFontSize = vH * 0.08 * sticker.scale
+      ctx.font = `${Math.round(baseFontSize)}px serif`
+      ctx.textAlign = "center"
+      ctx.textBaseline = "middle"
+      ctx.fillText(sticker.emoji, 0, 0)
+    }
+
     ctx.restore()
   }
 }
@@ -300,6 +321,7 @@ export async function processVideoWithText(
   playbackSpeed = 1,
   filterStartTime = 0,
   filterEndTime = 100000,
+  volumeSticker = 1.0,
 ): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const objectUrl = URL.createObjectURL(file)
@@ -335,6 +357,28 @@ export async function processVideoWithText(
     }
 
     video.onloadedmetadata = async () => {
+      // Preload image/video sticker media into cache before processing frames
+      _stickerMediaCache.clear()
+      await Promise.all(stickerOverlays.filter(s => (s.kind === "image" || s.kind === "video") && s.src).map(s => new Promise<void>(res => {
+        if (s.kind === "image") {
+          const img = new Image()
+          img.crossOrigin = "anonymous"
+          img.onload = () => { _stickerMediaCache.set(s.id, img); res() }
+          img.onerror = () => res()
+          img.src = s.src!
+        } else {
+          const vid = document.createElement("video")
+          vid.crossOrigin = "anonymous"
+          vid.muted = true
+          vid.playsInline = true
+          vid.preload = "auto"
+          vid.onloadeddata = () => { _stickerMediaCache.set(s.id, vid); res() }
+          vid.onerror = () => res()
+          vid.src = s.src!
+          vid.load()
+        }
+      })))
+
       const vW = video.videoWidth || 720
       const vH = video.videoHeight || 1280
       const sourceDuration = await resolveActualDuration()
@@ -363,9 +407,32 @@ export async function processVideoWithText(
         offsetY = 0
       }
 
-      /* ── MediaRecorder (no audio for speed-changed videos — avoids pitch issues) ── */
+      /* ── MediaRecorder ── */
       const OUTPUT_FPS = 30
       const canvasStream = canvas.captureStream(OUTPUT_FPS)
+
+      // Mix audio from any video stickers into the output stream via AudioContext
+      const audioCtx = new AudioContext()
+      const audioDestination = audioCtx.createMediaStreamDestination()
+      const gainNode = audioCtx.createGain()
+      gainNode.gain.value = volumeSticker
+      gainNode.connect(audioDestination)
+      let hasAudioTracks = false
+      for (const [, media] of _stickerMediaCache) {
+        if (media instanceof HTMLVideoElement) {
+          try {
+            const src = audioCtx.createMediaElementSource(media)
+            src.connect(gainNode)
+            hasAudioTracks = true
+            media.play().catch(() => {})
+          } catch { /* already connected or no audio */ }
+        }
+      }
+      if (hasAudioTracks) {
+        for (const track of audioDestination.stream.getAudioTracks()) {
+          canvasStream.addTrack(track)
+        }
+      }
 
       const mimeType =
         MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus") ? "video/webm;codecs=vp9,opus" :
@@ -386,6 +453,7 @@ export async function processVideoWithText(
       recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data) }
       recorder.onstop = () => {
         URL.revokeObjectURL(objectUrl)
+        audioCtx.close().catch(() => {})
         const type = mimeType ? mimeType.split(";")[0] : "video/webm"
         resolve(new Blob(chunks, { type }))
       }

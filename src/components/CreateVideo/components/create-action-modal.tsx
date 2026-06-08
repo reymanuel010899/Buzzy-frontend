@@ -97,6 +97,8 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
   const [showStickerPanel, setShowStickerPanel] = useState(false)
   const [stickerOverlays, setStickerOverlays] = useState<StickerOverlayData[]>([])
   const [selectedStickerId, setSelectedStickerId] = useState<string | null>(null)
+  const [pendingStickerFiles, setPendingStickerFiles] = useState<{ id: string; file: File }[]>([])
+  const [volumeSticker, setVolumeSticker] = useState(1.0)
   // Sync data-selected attr so updateOverlayVisibility sees current selection without re-render
   useEffect(() => {
     overlayElsRef.current.forEach((el, id) => {
@@ -107,6 +109,7 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
   }, [selectedTextId, selectedStickerId, updateOverlayVisibility])
 
   const stickerDragRef = useRef<{ id: string; startX: number; startY: number; origX: number; origY: number } | null>(null)
+  const stickerRotationRef = useRef<{ id: string; startAngle: number; startRotation: number; centerX: number; centerY: number } | null>(null)
 
 
   // Speed / Duration
@@ -371,11 +374,11 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
       const speedActive = playbackSpeed !== 1
       const hasEffects = textOverlays.length > 0 || stickerOverlays.length > 0 || filterActive || adjustmentsActive || speedActive
 
-      console.log('[publish] speedActive=', speedActive, 'playbackSpeed=', playbackSpeed, 'hasEffects=', hasEffects, 'containerRef=', !!videoContainerRef.current)
+     
       if (hasEffects && videoContainerRef.current) {
         setPublishStep('processing')
         const rect = videoContainerRef.current.getBoundingClientRect()
-        console.log('[publish] container rect=', rect.width, rect.height)
+     
         const filterCss = filterActive ? activeFilter.css : "none"
         const adjCss = adjustmentsActive ? adjustmentsToCss(adjustments) : "none"
         fileToUpload = await processVideoWithText(
@@ -388,9 +391,10 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
           adjCss,
           playbackSpeed,
           filterStartTime,
-          filterEndTime ?? (videoDuration > 0 ? videoDuration : 100000)
+          filterEndTime ?? (videoDuration > 0 ? videoDuration : 100000),
+          volumeSticker,
         )
-        console.log('[publish] processed blob size=', fileToUpload.size, 'original size=', uploadFile.size)
+        
       }
 
       setPublishStep('uploading')
@@ -411,6 +415,15 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
         formData.append('audio_trim_end', String(audioData.trim_end ?? 0))
       }
       formData.append('privacy', privacy)
+      // Sticker overlays: strip blob src before sending, upload files separately
+      const stickerLayersClean = stickerOverlays.map(s =>
+        (s.kind === "image" || s.kind === "video") ? { ...s, src: "" } : s
+      )
+      formData.append('sticker_layers', JSON.stringify(stickerLayersClean))
+      for (const { id, file: sf } of pendingStickerFiles) {
+        const ext = sf.name.split(".").pop() || "bin"
+        formData.append('sticker_files', sf, `${id}__sticker.${ext}`)
+      }
       await apiClient.post('api/videos/create/', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
@@ -482,9 +495,64 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
     stickerDragRef.current = null
   }
 
+  const handleStickerRotationDown = (e: React.PointerEvent<HTMLButtonElement>, sticker: StickerOverlayData) => {
+    e.stopPropagation()
+    e.preventDefault()
+    if (!videoContainerRef.current) return
+    const rect = videoContainerRef.current.getBoundingClientRect()
+    const centerX = rect.left + (sticker.x / 100) * rect.width
+    const centerY = rect.top + (sticker.y / 100) * rect.height
+    const startAngle = Math.atan2(e.clientY - centerY, e.clientX - centerX) * (180 / Math.PI)
+    stickerRotationRef.current = { id: sticker.id, startAngle, startRotation: sticker.rotation, centerX, centerY }
+    stickerDragRef.current = null
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+  }
+
+  const handleStickerRotationMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (!stickerRotationRef.current) return
+    const { id, startAngle, startRotation, centerX, centerY } = stickerRotationRef.current
+    const currentAngle = Math.atan2(e.clientY - centerY, e.clientX - centerX) * (180 / Math.PI)
+    const rotation = startRotation + (currentAngle - startAngle)
+    setStickerOverlays(prev => prev.map(s => s.id === id ? { ...s, rotation } : s))
+  }
+
+  const handleStickerRotationUp = (e: React.PointerEvent<HTMLButtonElement>) => {
+    ;(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
+    stickerRotationRef.current = null
+  }
+
   const handleDeleteSticker = (id: string) => {
     setStickerOverlays(prev => prev.filter(s => s.id !== id))
+    setPendingStickerFiles(prev => prev.filter(f => f.id !== id))
     if (selectedStickerId === id) setSelectedStickerId(null)
+  }
+
+  const handleAddImageSticker = (file: File) => {
+    const src = URL.createObjectURL(file)
+    const id = `sticker-${Date.now()}`
+    const video = videoRef.current
+    setPendingStickerFiles(prev => [...prev, { id, file }])
+    setStickerOverlays(prev => [...prev, {
+      id, stickerId: id, emoji: "", kind: "image", src,
+      x: 50, y: 50, scale: 1, rotation: 0,
+      startTime: 0,
+      endTime: (video?.duration && isFinite(video.duration)) ? video.duration : (videoDuration || 10),
+    }])
+    setSelectedStickerId(id)
+  }
+
+  const handleAddVideoSticker = (file: File) => {
+    const src = URL.createObjectURL(file)
+    const id = `sticker-${Date.now()}`
+    const video = videoRef.current
+    setPendingStickerFiles(prev => [...prev, { id, file }])
+    setStickerOverlays(prev => [...prev, {
+      id, stickerId: id, emoji: "", kind: "video", src,
+      x: 50, y: 50, scale: 1, rotation: 0,
+      startTime: 0,
+      endTime: (video?.duration && isFinite(video.duration)) ? video.duration : (videoDuration || 10),
+    }])
+    setSelectedStickerId(id)
   }
 
   // ── End sticker handlers ───────────────────────────────────────────────────
@@ -545,6 +613,7 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
     setShowTextEditor(false)
     setStickerOverlays([])
     setSelectedStickerId(null)
+    setPendingStickerFiles([])
     setShowStickerPanel(false)
     setShowLayersPanel(false)
     setShowSpeedPanel(false)
@@ -585,6 +654,7 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
       setShowTextEditor(false)
       setStickerOverlays([])
       setSelectedStickerId(null)
+      setPendingStickerFiles([])
       setShowStickerPanel(false)
       setShowLayersPanel(false)
       setShowSpeedPanel(false)
@@ -1211,24 +1281,63 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
                       onPointerUp={handleStickerPointerUp}
                       onClick={() => setSelectedStickerId(isSelected ? null : sticker.id)}
                     >
-                      {isSelected && (
+                      {/* Sticker content */}
+                      {sticker.kind === "image" && sticker.src ? (
+                        <img src={sticker.src} alt="Sticker" draggable={false}
+                          className="select-none rounded-xl"
+                          style={{ width: 88, height: "auto" }}
+                        />
+                      ) : sticker.kind === "video" && sticker.src ? (
+                        <video src={sticker.src} autoPlay loop playsInline draggable={false}
+                          className="select-none rounded-xl"
+                          style={{ width: 88, height: "auto" }}
+                        />
+                      ) : (
+                        <span className="text-4xl leading-none block select-none">{sticker.emoji}</span>
+                      )}
+
+                      {isSelected && (<>
+                        {/* Selection ring */}
+                        <div className="absolute inset-0 pointer-events-none rounded-xl"
+                          style={{ margin: -3, border: "1.5px solid rgba(255,255,255,0.55)", boxShadow: "0 0 0 1px rgba(0,0,0,0.3)" }} />
+
+                        {/* ✕ delete — top-left corner */}
                         <button
-                          className="absolute -top-5 -right-5 w-5 h-5 rounded-full bg-red-500 flex items-center justify-center z-30"
+                          className="absolute -top-3 -left-3 w-6 h-6 rounded-full flex items-center justify-center z-30 shadow-md"
+                          style={{ background: "rgba(20,20,30,0.92)", border: "1px solid rgba(255,255,255,0.15)" }}
                           onPointerDown={(e) => e.stopPropagation()}
                           onClick={(e) => { e.stopPropagation(); handleDeleteSticker(sticker.id) }}
                         >
-                          <X size={10} className="text-white" />
+                          <X size={11} className="text-white/80" />
                         </button>
-                      )}
-                      <span
-                        className="text-4xl leading-none block"
-                        style={{ filter: isSelected ? 'drop-shadow(0 0 6px rgba(99,255,240,0.8))' : 'none' }}
-                      >
-                        {sticker.emoji}
-                      </span>
-                      {isSelected && (
-                        <div className="absolute inset-0 rounded border-2 border-dashed border-cyan-400/70 pointer-events-none" style={{ margin: -4, padding: 4 }} />
-                      )}
+
+                        {/* − scale — bottom-left corner */}
+                        <button
+                          className="absolute -bottom-3 -left-3 w-6 h-6 rounded-full flex items-center justify-center z-30 shadow-md text-white/80 text-sm font-bold"
+                          style={{ background: "rgba(20,20,30,0.92)", border: "1px solid rgba(255,255,255,0.15)" }}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => { e.stopPropagation(); setStickerOverlays(prev => prev.map(s => s.id === sticker.id ? { ...s, scale: Math.max(0.2, +(s.scale * 0.85).toFixed(2)) } : s)) }}
+                        >−</button>
+
+                        {/* + scale — bottom-right corner */}
+                        <button
+                          className="absolute -bottom-3 -right-3 w-6 h-6 rounded-full flex items-center justify-center z-30 shadow-md text-white/80 text-sm font-bold"
+                          style={{ background: "rgba(20,20,30,0.92)", border: "1px solid rgba(255,255,255,0.15)" }}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => { e.stopPropagation(); setStickerOverlays(prev => prev.map(s => s.id === sticker.id ? { ...s, scale: Math.min(5, +(s.scale * 1.15).toFixed(2)) } : s)) }}
+                        >+</button>
+
+                        {/* ↻ rotate — top-right corner, draggable */}
+                        <button
+                          className="absolute -top-3 -right-3 w-6 h-6 rounded-full flex items-center justify-center z-30 shadow-md touch-none"
+                          style={{ background: "linear-gradient(135deg,#a855f7,#ec4899)", border: "1px solid rgba(255,255,255,0.2)" }}
+                          onPointerDown={(e) => handleStickerRotationDown(e, sticker)}
+                          onPointerMove={handleStickerRotationMove}
+                          onPointerUp={handleStickerRotationUp}
+                        >
+                          <span className="text-white text-[11px] font-bold leading-none">↻</span>
+                        </button>
+                      </>)}
                     </div>
                   )
                 })}
@@ -1238,6 +1347,8 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
                   isOpen={showStickerPanel}
                   onClose={() => setShowStickerPanel(false)}
                   onSelectSticker={handleAddSticker}
+                  onSelectImageFile={handleAddImageSticker}
+                  onSelectVideoFile={handleAddVideoSticker}
                 />
 
                 {/* ── Layers Panel ── */}
@@ -1955,9 +2066,12 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
             onClose={() => setShowMixerPanel(false)}
             volumeOriginal={audioControls.volumeOriginal}
             volumeMusic={audioControls.volumeMusic}
+            volumeSticker={volumeSticker}
             onSetVolumeOriginal={audioControls.setVolumeOriginal}
             onSetVolumeMusic={audioControls.setVolumeMusic}
+            onSetVolumeSticker={setVolumeSticker}
             hasTrack={!!audioControls.selectedTrack}
+            hasVideoSticker={stickerOverlays.some(s => s.kind === "video" && !!s.src)}
           />
 
           {/* Volume Panel */}

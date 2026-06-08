@@ -7,18 +7,21 @@ import { Music, Mic2 } from "lucide-react"
 interface MixerPanelProps {
   isOpen: boolean
   onClose: () => void
-  volumeOriginal: number   // 0–100
-  volumeMusic: number      // 0–100
+  volumeOriginal: number
+  volumeMusic: number
+  volumeSticker: number
   onSetVolumeOriginal: (v: number) => void
   onSetVolumeMusic: (v: number) => void
+  onSetVolumeSticker: (v: number) => void
   hasTrack: boolean
+  hasVideoSticker: boolean
 }
 
 const MixerPanel: React.FC<MixerPanelProps> = ({
   isOpen, onClose,
-  volumeOriginal, volumeMusic,
-  onSetVolumeOriginal, onSetVolumeMusic,
-  hasTrack,
+  volumeOriginal, volumeMusic, volumeSticker,
+  onSetVolumeOriginal, onSetVolumeMusic, onSetVolumeSticker,
+  hasTrack, hasVideoSticker,
 }) => {
   return (
     <AnimatePresence>
@@ -65,36 +68,59 @@ const MixerPanel: React.FC<MixerPanelProps> = ({
             </div>
           </div>
 
-          {/* Música */}
-          <div className={!hasTrack ? "opacity-40 pointer-events-none" : ""}>
-            <div className="flex items-center gap-2 mb-3">
-              <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-pink-500 to-purple-500 flex items-center justify-center">
-                <Music size={14} className="text-white" />
+          {/* Música — solo si hay pista */}
+          {hasTrack ? (
+            <div className="mb-5">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-pink-500 to-purple-500 flex items-center justify-center">
+                  <Music size={14} className="text-white" />
+                </div>
+                <span className="text-white/80 text-sm font-medium">Música</span>
+                <span className="ml-auto text-pink-400 text-sm font-bold">{Math.round(volumeMusic * 100)}%</span>
               </div>
-              <span className="text-white/80 text-sm font-medium">Música</span>
-              {!hasTrack && (
-                <span className="text-white/40 text-xs">(sin pista)</span>
-              )}
-              <span className="ml-auto text-pink-400 text-sm font-bold">{Math.round(volumeMusic * 100)}%</span>
+              <div className="relative h-2 bg-white/10 rounded-full">
+                <div
+                  className="absolute left-0 top-0 h-full rounded-full bg-gradient-to-r from-pink-500 to-purple-500 transition-all"
+                  style={{ width: `${volumeMusic * 100}%` }}
+                />
+                <input
+                  type="range" min={0} max={100} step={1}
+                  value={Math.round(volumeMusic * 100)}
+                  onChange={e => onSetVolumeMusic(Number(e.target.value) / 100)}
+                  className="absolute inset-0 w-full opacity-0 cursor-pointer h-full"
+                />
+              </div>
             </div>
-            <div className="relative h-2 bg-white/10 rounded-full">
-              <div
-                className="absolute left-0 top-0 h-full rounded-full bg-gradient-to-r from-pink-500 to-purple-500 transition-all"
-                style={{ width: `${volumeMusic * 100}%` }}
-              />
-              <input
-                type="range"
-                min={0} max={100} step={1}
-                value={Math.round(volumeMusic * 100)}
-                onChange={e => onSetVolumeMusic(Number(e.target.value) / 100)}
-                className="absolute inset-0 w-full opacity-0 cursor-pointer h-full"
-              />
-            </div>
-          </div>
+          ) : null}
 
-          {!hasTrack && (
+          {/* Audio sticker — solo si hay sticker de video */}
+          {hasVideoSticker ? (
+            <div className="mb-5">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center">
+                  <span className="text-white text-[13px]">🎬</span>
+                </div>
+                <span className="text-white/80 text-sm font-medium">Audio del sticker</span>
+                <span className="ml-auto text-amber-400 text-sm font-bold">{Math.round(volumeSticker * 100)}%</span>
+              </div>
+              <div className="relative h-2 bg-white/10 rounded-full">
+                <div
+                  className="absolute left-0 top-0 h-full rounded-full bg-gradient-to-r from-amber-400 to-orange-500 transition-all"
+                  style={{ width: `${volumeSticker * 100}%` }}
+                />
+                <input
+                  type="range" min={0} max={100} step={1}
+                  value={Math.round(volumeSticker * 100)}
+                  onChange={e => onSetVolumeSticker(Number(e.target.value) / 100)}
+                  className="absolute inset-0 w-full opacity-0 cursor-pointer h-full"
+                />
+              </div>
+            </div>
+          ) : null}
+
+          {!hasTrack && !hasVideoSticker && (
             <p className="text-white/40 text-xs text-center mt-4">
-              Añade una pista de música para mezclar los volúmenes
+              Añade música o un sticker de video para mezclar los volúmenes
             </p>
           )}
         </motion.div>

@@ -14,6 +14,7 @@ export interface Video {
   thumbnail_url: string;
   updated_at: string; // También podría ser Date si se convierte
   current_user_followered: boolean;
+  is_saved?: boolean;
   user_id: {
     id: string
     email: string;
@@ -63,7 +64,7 @@ export interface StoryTextLayer {
 
 export interface StoryStickerLayer {
   id: string;
-  kind?: "emoji" | "location" | "image";
+  kind?: "emoji" | "location" | "image" | "video";
   emoji?: string;
   text?: string;
   src?: string;

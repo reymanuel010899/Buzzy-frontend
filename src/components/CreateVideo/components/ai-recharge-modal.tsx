@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import {
-  X, Clapperboard, ImageIcon, Zap, ShoppingCart,
+  X, Clapperboard, ImageIcon, Zap, ShoppingCart, Wallet,
   CheckCircle2, Sparkles, Star, ChevronRight, AlertCircle
 } from "lucide-react"
 import {
@@ -27,7 +27,7 @@ const CUSTOM_IMAGES_PER_DOLLAR = 2
 type Step = 'packages' | 'confirm' | 'processing' | 'success' | 'error'
 
 const AIRechargeModal: React.FC<AIRechargeModalProps> = ({
-  isOpen, onClose, onSuccess, onGoToWallet,
+  isOpen, onClose, onGoToWallet,
 }) => {
   const [packages, setPackages] = useState<AIPackage[]>([])
   const [loading, setLoading] = useState(true)

@@ -26,11 +26,6 @@ function openDB(): Promise<IDBDatabase> {
   });
 }
 
-/**
- * Pre-carga las fotos de perfil de los videos en la Cache API del navegador
- * para que estén disponibles sin internet.
- * Falla silenciosamente si el browser no soporta Cache API o hay error de red.
- */
 async function precacheProfilePictures(videos: Video[]): Promise<void> {
   if (!('caches' in window)) return;
   try {
@@ -41,10 +36,31 @@ async function precacheProfilePictures(videos: Video[]): Promise<void> {
         v.thumbnail_url,
       ])
       .filter((url): url is string => typeof url === 'string' && url.startsWith('http'));
-    console.log(urls, "********************")
     const unique = [...new Set(urls)];
     await Promise.allSettled(unique.map(url =>
       cache.match(url).then(hit => hit ? undefined : fetch(url).then(r => r.ok ? cache.put(url, r) : undefined).catch(() => {}))
+    ));
+  } catch {
+    // best-effort
+  }
+}
+
+// Pre-carga los audios de los videos en la Cache API del SW para reproducción offline.
+// Se usa Cache First en el SW para audio_tracks, así que basta con que el request
+// haya pasado por el SW al menos una vez — este precache lo garantiza al guardar el feed.
+async function precacheAudioTracks(videos: Video[]): Promise<void> {
+  if (!('caches' in window)) return;
+  try {
+    const cache = await caches.open('buzzy-audio-v1');
+    const urls = videos
+      .map(v => v.audio_track_url)
+      .filter((url): url is string => typeof url === 'string' && url.startsWith('http'));
+    const unique = [...new Set(urls)];
+    await Promise.allSettled(unique.map(url =>
+      cache.match(url).then(hit => {
+        if (hit) return undefined;
+        return fetch(url).then(r => r.ok ? cache.put(url, r) : undefined).catch(() => {});
+      })
     ));
   } catch {
     // best-effort — sin internet no hay nada que pre-cachear
@@ -61,8 +77,9 @@ export async function saveFeed(videos: Video[]): Promise<void> {
       tx.oncomplete = () => res();
       tx.onerror = () => rej(tx.error);
     });
-    // Pre-cachear fotos de perfil en paralelo con el guardado del feed
+    // Pre-cachear fotos de perfil y audios en paralelo con el guardado del feed
     precacheProfilePictures(videos);
+    precacheAudioTracks(videos);
   } catch {
     // fallo silencioso — el cache es best-effort
   }

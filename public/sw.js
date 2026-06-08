@@ -2,6 +2,7 @@
 const CACHE_NAME = 'buzzy-static-v1';
 const MEDIA_CACHE = 'buzzy-media-v1';
 const AVATAR_CACHE = 'buzzy-avatars-v1';
+const AUDIO_CACHE = 'buzzy-audio-v1';
 
 // Assets críticos que deben funcionar sin internet
 const STATIC_ASSETS = [
@@ -23,7 +24,7 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((keys) =>
       Promise.all(
         keys
-          .filter((k) => k !== CACHE_NAME && k !== MEDIA_CACHE && k !== AVATAR_CACHE)
+          .filter((k) => k !== CACHE_NAME && k !== MEDIA_CACHE && k !== AVATAR_CACHE && k !== AUDIO_CACHE)
           .map((k) => caches.delete(k))
       )
     )
@@ -48,6 +49,12 @@ self.addEventListener('fetch', (event) => {
     url.pathname.includes('/media/thumbnails/')
   ) {
     event.respondWith(cacheFirst(request, AVATAR_CACHE));
+    return;
+  }
+
+  // Audio tracks → Cache First (el audio de un video publicado nunca cambia)
+  if (url.pathname.includes('/media/audio_tracks/')) {
+    event.respondWith(cacheFirst(request, AUDIO_CACHE));
     return;
   }
 

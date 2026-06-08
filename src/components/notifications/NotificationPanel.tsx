@@ -165,7 +165,7 @@ export default function NotificationPanel({ open, onClose }: Props) {
             initial={{ x: "100%" }}
             animate={{ x: 0 }}
             exit={{ x: "100%" }}
-            transition={{ type: "spring", damping: 30, stiffness: 300 }}
+            transition={{ duration: 0.18, ease: "easeOut" }}
             className="fixed top-0 right-0 h-full w-full max-w-sm z-[61] flex flex-col bg-[#0b0d1a] border-l border-white/8 shadow-2xl overflow-hidden"
           >
             {/* Header */}
@@ -289,7 +289,7 @@ export default function NotificationPanel({ open, onClose }: Props) {
                 initial={{ y: "100%" }}
                 animate={{ y: 0 }}
                 exit={{ y: "100%" }}
-                transition={{ type: "spring", damping: 30, stiffness: 300 }}
+                transition={{ duration: 0.18, ease: "easeOut" }}
                 className="fixed inset-0 z-[62] flex flex-col bg-[#0b0d1a]"
               >
                 {/* Sub-header */}

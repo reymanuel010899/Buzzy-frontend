@@ -11,7 +11,7 @@ import {
   Mic, Trash2, StopCircle, Search, X, Phone, Video, Plus, Send, Download, Play, MessageCircleMore,
   Sparkles, Shield, ChevronRight, Users, EyeOff, Inbox, UserCheck, Forward, CheckCheck, Check,
 } from "lucide-react"
-import { motion, AnimatePresence, LayoutGroup } from "framer-motion"
+import { motion, AnimatePresence } from "framer-motion"
 import { useNavigate } from "react-router-dom"
 import FluidSearch from "../Layout/fluid-search"
 import { useChat } from "../../context/ChatContext"
@@ -883,15 +883,15 @@ const ChatModal: React.FC = () => {
 
   useEffect(() => {
     if (!showMessages) return;
-    const load = async () => {
-      await refreshChatPrivacy();
-      if (chatFolder === ChatFolderFilter.Hidden) {
-        return;
-      }
-      await loadChatsForFolder(chatFolder);
-    };
-
-    load();
+    // Paralelizar privacy + chats — no esperar uno para el otro
+    if (chatFolder !== ChatFolderFilter.Hidden) {
+      Promise.all([
+        refreshChatPrivacy(),
+        loadChatsForFolder(chatFolder),
+      ]);
+    } else {
+      refreshChatPrivacy();
+    }
   }, [showMessages, chatFolder, loadChatsForFolder, refreshChatPrivacy])
 
   useEffect(() => {
@@ -1071,7 +1071,7 @@ const ChatModal: React.FC = () => {
         )}
       </AnimatePresence>
 
-      <LayoutGroup>
+      <>
         {/* LISTA DE CHATS */}
         <AnimatePresence>
           {showMessages && !selectedChat && (
@@ -1085,10 +1085,10 @@ const ChatModal: React.FC = () => {
               />
 
               <motion.div
-                initial={{ opacity: 0, scale: 0.95, y: 20 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95, y: -20 }}
-                transition={{ type: "spring", damping: 30, stiffness: 300 }}
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.12, ease: "easeOut" }}
                 className="fixed inset-x-0 top-0 z-[60] mx-auto w-full max-w-md"
               >
                 <div className="bg-black border-x border-b border-white/8 rounded-b-2xl shadow-2xl overflow-hidden">
@@ -2316,7 +2316,7 @@ const ChatModal: React.FC = () => {
           )}
         </AnimatePresence>
 
-      </LayoutGroup>
+      </>
     </>
   )
 }

@@ -123,7 +123,10 @@ const SpaceBackground: React.FC = () => (
 );
 
 const Header: React.FC<{ onClose: () => void; title: string }> = ({ onClose, title }) => (
-    <div className="absolute top-4 left-0 right-0 flex justify-between items-center z-50 px-4">
+    <div
+        className="absolute left-0 right-0 flex justify-between items-center z-50 px-4"
+        style={{ top: 'max(1rem, env(safe-area-inset-top))' }}
+    >
         <div className="flex items-center gap-3">
             <div className="p-2 bg-gradient-to-br from-purple-400 to-blue-500 rounded-lg shadow-[0_0_15px_rgba(147,51,234,0.4)]">
                 <Star size={20} className="text-white fill-white" />
@@ -133,9 +136,9 @@ const Header: React.FC<{ onClose: () => void; title: string }> = ({ onClose, tit
             </h1>
         </div>
         <button
-            onClick={onClose}
+            onPointerDown={(e) => { e.stopPropagation(); onClose(); }}
             className="p-3 bg-white/10 rounded-full border border-white/20 active:scale-90 transition-all"
-            style={{ touchAction: 'manipulation' }}
+            style={{ touchAction: 'manipulation', minWidth: 48, minHeight: 48 }}
         >
             <X size={22} className="text-white" />
         </button>
@@ -153,7 +156,7 @@ const GiftCarousel: React.FC<{
 
     return (
         <div className="relative w-full max-w-5xl flex justify-center items-center h-56 mt-12 mb-8 z-10 select-none">
-            <button onClick={prevGift} className="absolute left-4 md:left-16 p-1.5 bg-white/5 rounded-full hover:bg-white/10 transition-all z-20">
+            <button onClick={prevGift} className="absolute left-0 p-1.5 bg-white/5 rounded-full hover:bg-white/10 transition-all z-20">
                 <ChevronLeft size={40} className="text-white/30 hover:text-white" />
             </button>
 
@@ -219,7 +222,7 @@ const GiftCarousel: React.FC<{
                 })}
             </div>
 
-            <button onClick={nextGift} className="absolute right-4 md:right-16 p-1.5 bg-white/5 rounded-full hover:bg-white/10 transition-all z-20">
+            <button onClick={nextGift} className="absolute right-0 p-1.5 bg-white/5 rounded-full hover:bg-white/10 transition-all z-20">
                 <ChevronRight size={40} className="text-white/30 hover:text-white" />
             </button>
         </div>
@@ -367,6 +370,9 @@ const VipGiftExperience: React.FC<VipGiftExperienceProps> = ({ onClose, onSendGi
     const [isPressing, setIsPressing] = useState(false);
     const [progress, setProgress] = useState(0);
     const sentRef = React.useRef(false);
+    const intervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+    const onCloseRef = React.useRef(onClose);
+    onCloseRef.current = onClose;
     const [selectedIndex, setSelectedIndex] = useState(2);
     const [message, setMessage] = useState("");
     const { t } = useTranslation('videos');
@@ -382,28 +388,47 @@ const VipGiftExperience: React.FC<VipGiftExperienceProps> = ({ onClose, onSendGi
     ];
 
     const selectedGift = displayGifts[selectedIndex] || displayGifts[0];
+    const selectedGiftRef = React.useRef(selectedGift);
+    selectedGiftRef.current = selectedGift;
+    const messageRef = React.useRef(message);
+    messageRef.current = message;
+    const onSendGiftRef = React.useRef(onSendGift);
+    onSendGiftRef.current = onSendGift;
 
+    // Clean up interval on unmount
     useEffect(() => {
-        let interval: ReturnType<typeof setInterval>;
-        if (isPressing && progress < 100) {
-            interval = setInterval(() => {
-                setProgress((prev) => Math.min(prev + 1, 100));
-            }, 10);
-        } else if (progress >= 100) {
-            handleComplete();
-        } else if (!isPressing) {
-            setProgress(0);
-        }
-        return () => clearInterval(interval);
-    }, [isPressing, progress]);
+        return () => {
+            if (intervalRef.current) clearInterval(intervalRef.current);
+        };
+    }, []);
 
-    const handleComplete = () => {
+    const startPress = () => {
         if (sentRef.current) return;
-        sentRef.current = true;
-        onSendGift({ ...selectedGift, vip_message: message });
-        setIsPressing(false);
-        setTimeout(onClose, 100);
+        setIsPressing(true);
+        setProgress(0);
+        if (intervalRef.current) clearInterval(intervalRef.current);
+        intervalRef.current = setInterval(() => {
+            setProgress(prev => {
+                const next = Math.min(prev + 1, 100);
+                if (next >= 100) {
+                    if (intervalRef.current) clearInterval(intervalRef.current);
+                    if (!sentRef.current) {
+                        sentRef.current = true;
+                        onSendGiftRef.current({ ...selectedGiftRef.current, vip_message: messageRef.current });
+                        setTimeout(() => onCloseRef.current(), 100);
+                    }
+                }
+                return next;
+            });
+        }, 10);
     };
+
+    const stopPress = () => {
+        setIsPressing(false);
+        setProgress(0);
+        if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
+    };
+
 
     const needsTokens = walletTokens < (selectedGift.token_price || 0);
 
@@ -432,8 +457,8 @@ const VipGiftExperience: React.FC<VipGiftExperienceProps> = ({ onClose, onSendGi
                     <VipPowerButton
                         progress={progress}
                         isPressing={isPressing}
-                        onPressStart={() => setIsPressing(true)}
-                        onPressEnd={() => setIsPressing(false)}
+                        onPressStart={startPress}
+                        onPressEnd={stopPress}
                         theme={theme}
                     />
                 </div>
@@ -445,7 +470,7 @@ const VipGiftExperience: React.FC<VipGiftExperienceProps> = ({ onClose, onSendGi
                     <motion.button
                         initial={{ y: 40, opacity: 0 }}
                         animate={{ y: 0, opacity: 1 }}
-                        transition={{ type: "spring", stiffness: 300, damping: 24 }}
+                        transition={{ duration: 0.15, ease: "easeOut" }}
                         whileTap={{ scale: 0.97 }}
                         onClick={onBuyTokens}
                         className="relative w-full overflow-hidden rounded-2xl py-4 flex items-center justify-center gap-3"
