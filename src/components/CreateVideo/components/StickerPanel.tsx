@@ -1,8 +1,8 @@
 "use client"
 
-import React, { useState, useMemo } from "react"
+import React, { useState, useMemo, useRef } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { X, Search } from "lucide-react"
+import { X, Search, Image, Film } from "lucide-react"
 
 export interface StickerItem {
   id: string
@@ -15,6 +15,8 @@ export interface StickerOverlayData {
   id: string
   stickerId: string
   emoji: string
+  kind?: "emoji" | "image" | "video"
+  src?: string
   x: number
   y: number
   scale: number
@@ -170,11 +172,15 @@ interface StickerPanelProps {
   isOpen: boolean
   onClose: () => void
   onSelectSticker: (sticker: StickerItem) => void
+  onSelectImageFile?: (file: File) => void
+  onSelectVideoFile?: (file: File) => void
 }
 
-const StickerPanel: React.FC<StickerPanelProps> = ({ isOpen, onClose, onSelectSticker }) => {
+const StickerPanel: React.FC<StickerPanelProps> = ({ isOpen, onClose, onSelectSticker, onSelectImageFile, onSelectVideoFile }) => {
   const [activeCategory, setActiveCategory] = useState<Category>("popular")
   const [query, setQuery] = useState("")
+  const imageInputRef = useRef<HTMLInputElement>(null)
+  const videoInputRef = useRef<HTMLInputElement>(null)
 
   const filtered = useMemo(() => {
     if (query.trim()) {
@@ -221,9 +227,47 @@ const StickerPanel: React.FC<StickerPanelProps> = ({ isOpen, onClose, onSelectSt
             </div>
 
             {/* Header */}
-            <div className="flex items-center px-4 pb-2 shrink-0">
+            <div className="flex items-center justify-between px-4 pb-2 shrink-0">
               <h3 className="text-white font-semibold text-sm">Stickers</h3>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => imageInputRef.current?.click()}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/8 border border-white/10 text-white/70 text-[11px] font-semibold hover:bg-white/12 transition-colors"
+                >
+                  <Image size={12} />
+                  Imagen
+                </button>
+                <button
+                  onClick={() => videoInputRef.current?.click()}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/8 border border-white/10 text-white/70 text-[11px] font-semibold hover:bg-white/12 transition-colors"
+                >
+                  <Film size={12} />
+                  Video
+                </button>
+              </div>
             </div>
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={e => {
+                const file = e.target.files?.[0]
+                if (file && onSelectImageFile) { onSelectImageFile(file); onClose() }
+                e.currentTarget.value = ""
+              }}
+            />
+            <input
+              ref={videoInputRef}
+              type="file"
+              accept="video/*"
+              className="hidden"
+              onChange={e => {
+                const file = e.target.files?.[0]
+                if (file && onSelectVideoFile) { onSelectVideoFile(file); onClose() }
+                e.currentTarget.value = ""
+              }}
+            />
 
             {/* Search Bar */}
             <div className="px-4 pb-2 shrink-0">

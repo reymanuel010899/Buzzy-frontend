@@ -493,7 +493,7 @@ export const ShowComments = ({
                         initial={{ y: "100%" }}
                         animate={{ y: 0 }}
                         exit={{ y: "100%" }}
-                        transition={{ type: "spring", damping: 25, stiffness: 200 }}
+                        transition={{ duration: 0.18, ease: "easeOut" }}
                         className="fixed bottom-0 left-0 right-0 h-[65vh] z-[70] flex flex-col bg-[#050718] rounded-t-[2rem] border-t border-white/10 backdrop-blur-sm shadow-[0_-20px_80px_rgba(0,0,0,0.45)] overflow-hidden"
                         onClick={(e) => e.stopPropagation()}
                     >

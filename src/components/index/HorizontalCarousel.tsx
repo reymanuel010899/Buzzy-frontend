@@ -7,6 +7,7 @@ import { Link } from "react-router-dom"
 import { Video } from "./main.interface"
 import { useUserVideos } from "../../hooks/useUserVideos"
 import { getMediaUrl } from "../../redux/client/api-client"
+import { prefetchAudioUrl } from "../../hooks/useVideoAudio"
 
 const HINT_KEY = "buzzy_swipe_hint_seen"
 const SWIPE_COMMIT = 60
@@ -99,15 +100,60 @@ interface Props {
 
 const SlideVideo = React.memo(function SlideVideo({ video, isMuted, isVisible, isNear }: { video: Video; isMuted: boolean; isVisible: boolean; isNear: boolean }) {
   const ref = useRef<HTMLVideoElement>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
   const src = video.video?.startsWith("http") ? video.video : getMediaUrl(video.video)
   const thumb = video.thumbnail_url?.startsWith("http") ? video.thumbnail_url : getMediaUrl(video.thumbnail_url)
 
   useEffect(() => {
     const el = ref.current
     if (!el) return
-    if (isVisible) { el.currentTime = 0; el.play().catch(() => {}) }
-    else el.pause()
+    if (isVisible) {
+      el.volume = Math.min(Math.max(video.volume_original ?? 1.0, 0), 1)
+      el.currentTime = 0
+      el.play().catch(() => {})
+    } else {
+      el.pause()
+    }
   }, [isVisible])
+
+  // Audio track con cache, volumen y trim
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current = null
+    }
+    if (!isVisible || !video.audio_track_url || isMuted) return
+
+    const trackUrl = video.audio_track_url
+    const volumeMusic = Math.min(Math.max(video.volume_music ?? 0.8, 0), 1)
+    const trimStart = Math.max(0, video.audio_trim_start ?? 0)
+    const trimEnd = typeof video.audio_trim_end === 'number' && isFinite(video.audio_trim_end)
+      ? Math.max(trimStart, video.audio_trim_end) : null
+
+    prefetchAudioUrl(trackUrl).then(blobUrl => {
+      if (audioRef.current) return
+      const audio = new Audio(blobUrl)
+      audio.loop = false
+      audio.volume = volumeMusic
+      audio.currentTime = trimStart
+      if (trimEnd) {
+        audio.ontimeupdate = () => {
+          if (audio.currentTime >= trimEnd) {
+            audio.currentTime = trimStart
+            audio.play().catch(() => {})
+          }
+        }
+      } else {
+        audio.loop = true
+      }
+      audio.play().catch(() => {})
+      audioRef.current = audio
+    }).catch(() => {})
+
+    return () => {
+      if (audioRef.current) { audioRef.current.pause(); audioRef.current = null }
+    }
+  }, [isVisible, video.audio_track_url, isMuted])
 
   if (video.media_type === "image")
     return <img src={isNear ? src : undefined} className="h-full w-full object-cover" alt="" />
@@ -125,6 +171,106 @@ const SlideVideo = React.memo(function SlideVideo({ video, isMuted, isVisible, i
     />
   )
 })
+
+function SlideWithUI({ video: s, isMuted, isVisible, isNear, onLike, onComment, onGift }: {
+  video: Video; isMuted: boolean; isVisible: boolean; isNear: boolean;
+  onLike: (uuid: string, id: number) => void;
+  onComment: (uuid: string, id: number) => void;
+  onGift: (id: number) => void;
+}) {
+  const [expanded, setExpanded] = useState(false)
+
+  return (
+    <div className="relative h-full w-full bg-black">
+      <SlideVideo video={s} isMuted={isMuted} isVisible={isVisible} isNear={isNear} />
+
+      {/* Gradiente inferior */}
+      <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-black/70 to-transparent pointer-events-none" />
+
+      {/* Pill — arriba centro, abre descripción */}
+      {s.description && (
+        <div
+          className={`absolute top-0 left-0 right-0 z-[60] flex justify-center pointer-events-auto cursor-pointer ${expanded ? 'invisible' : ''}`}
+          style={{ paddingTop: 6, paddingBottom: 10 }}
+          onClick={e => { e.stopPropagation(); setExpanded(true) }}
+        >
+          <div className="w-10 h-1.5 rounded-full bg-white/50" />
+        </div>
+      )}
+
+      {/* Descripción expandida */}
+      {s.description && expanded && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="absolute top-0 left-0 right-0 z-40 pointer-events-auto backdrop-blur-md bg-black/70 border-b border-white/10 px-3 pt-10 pb-3"
+        >
+          <div
+            className="flex justify-center mb-3 py-2 cursor-pointer"
+            onClick={e => { e.stopPropagation(); setExpanded(false) }}
+          >
+            <div className="w-10 h-1 rounded-full bg-white/30" />
+          </div>
+          <p className="text-[13px] text-white/95 leading-relaxed whitespace-pre-wrap">{s.description}</p>
+        </motion.div>
+      )}
+
+      {/* Avatar + follow — arriba izquierda / derecha */}
+      <div className="absolute top-2 left-3 right-3 z-50 flex items-center justify-between pointer-events-auto">
+        <Link
+          to={`/profile/${s.user_id.username}`}
+          onClick={e => e.stopPropagation()}
+          className="relative h-9 w-9 flex-shrink-0 block"
+        >
+          <img
+            className="h-full w-full object-cover rounded-full border border-white/20"
+            src={getMediaUrl(s.user_id.profile_picture)}
+            onError={e => { (e.target as HTMLImageElement).src = `https://picsum.photos/100/100?random=${s.id}` }}
+            alt={s.user_id.username}
+            loading="lazy"
+          />
+        </Link>
+      </div>
+
+      {/* Footer — mute izquierda + música centrada + disco derecha */}
+      <div className="absolute bottom-[calc(env(safe-area-inset-bottom)+2.5rem)] left-3 right-3 z-30 flex items-center justify-center pointer-events-auto">
+        {s.audio_track_title && (
+          <div className="flex items-center gap-2 px-2 py-1 rounded-full">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-white/80 truncate">
+              ♪ {s.audio_track_title}
+            </span>
+            {s.audio_track_artist && (
+              <>
+                <span className="text-white/30 text-[10px] shrink-0">·</span>
+                <span className="text-[9px] font-semibold uppercase tracking-widest text-white/60 truncate">
+                  {s.audio_track_artist}
+                </span>
+              </>
+            )}
+          </div>
+        )}
+        {s.audio_track_title && (
+          <motion.div
+            animate={{ rotate: 360 }}
+            transition={{ duration: 4, repeat: Infinity, ease: 'linear' }}
+            className="absolute right-0 h-9 w-9 rounded-full overflow-hidden border-2 border-white/20 shadow-lg pointer-events-none"
+          >
+            {s.audio_track_cover ? (
+              <img src={s.audio_track_cover} className="h-full w-full object-cover" alt="" />
+            ) : (
+              <div className="h-full w-full bg-gradient-to-br from-cyan-500 to-purple-600 flex items-center justify-center">
+                <span className="text-white text-[10px]">♪</span>
+              </div>
+            )}
+          </motion.div>
+        )}
+      </div>
+
+      {/* Panel de acciones */}
+      <SlideActions video={s} onLike={onLike} onComment={onComment} onGift={onGift} />
+    </div>
+  )
+}
 
 function SwipeHint({ show }: { show: boolean }) {
   return (
@@ -289,54 +435,61 @@ export default function HorizontalCarousel({ video, isActive, isMuted, isExpande
     }
   }, [commitSlide, expandInBackground, video.id, video.user_id.username])
 
-  // Calcular posición X del strip
-  const pctPerSlide = 100 / slides.length
-  const baseTranslate = -(slideIndex * pctPerSlide)
-  const dragTranslate = dragPct / slides.length
+  // Extra slides (index >= 1) — slide 0 is always the main video fixed in place
+  const extraSlides = slides.slice(1)
+  const extraCount = extraSlides.length
+
+  // Translate is in units of container width (100% = one full slide)
+  // When on slide 0: translate = 0 (main video stays fixed)
+  // When on slide N: translate = -N * 100%
+  const baseTranslate = -(slideIndex * 100)
+  const dragTranslate = dragPct
   const totalTranslate = baseTranslate + dragTranslate
 
   return (
     <div
       ref={containerRef}
       className="relative h-full w-full overflow-hidden rounded-t-xl rounded-b-none"
+      style={{ contain: "layout style" }}
     >
-      <div
-        className="flex h-full"
-        style={{
-          width: `${slides.length * 100}%`,
-          transform: `translateX(${totalTranslate}%)`,
-          transition: dragging ? "none" : "transform 0.28s cubic-bezier(0.33, 1, 0.68, 1)",
-          willChange: "transform",
-        }}
-      >
-        {slides.map((s, i) => (
-          <div
-            key={s.id}
-            className="relative h-full flex-shrink-0"
-            style={{ width: `${100 / slides.length}%` }}
-          >
-            {i === 0 ? (
-              <div className="relative h-full w-full">{children}</div>
-            ) : (
-              <div className="relative h-full w-full bg-black">
-                <SlideVideo video={s} isMuted={isMuted} isVisible={isActive && slideIndex === i} isNear={isActive && Math.abs(slideIndex - i) <= 1} />
-                {/* Gradiente inferior */}
-                <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-black/80 to-transparent pointer-events-none" />
-                {/* Info usuario + descripción */}
-                <div className="absolute bottom-6 left-3 right-16 z-10">
-                  <Link to={`/profile/${s.user_id.username}`} className="text-white text-sm font-semibold mb-1 hover:text-[#00f0ff] transition-colors" onClick={e => e.stopPropagation()}>@{s.user_id.username}</Link>
-                  {s.description && (
-                    <p className="text-white/80 text-xs line-clamp-2">{s.description}</p>
-                  )}
-                </div>
-                {/* Panel de acciones */}
-                <SlideActions video={s} onLike={onLike} onComment={onComment} onGift={onGift} />
-              </div>
-            )}
-          </div>
-        ))}
+      {/* Slide 0 — main video, always fixed at full size, never resizes */}
+      <div className="absolute inset-0">
+        {children}
       </div>
 
+      {/* Extra slides overlay strip — only rendered if there are more slides */}
+      {extraCount > 0 && (
+        <div
+          className="absolute inset-0 flex"
+          style={{
+            width: `${(extraCount + 1) * 100}%`,
+            height: "100%",
+            transform: `translateX(${totalTranslate / (extraCount + 1)}%)`,
+            transition: dragging ? "none" : "transform 0.28s cubic-bezier(0.33, 1, 0.68, 1)",
+            willChange: "transform",
+          }}
+        >
+          {/* Transparent spacer for slide 0 */}
+          <div style={{ width: `${100 / (extraCount + 1)}%`, flexShrink: 0 }} />
+          {extraSlides.map((s, i) => (
+            <div
+              key={s.id}
+              className="relative h-full flex-shrink-0"
+              style={{ width: `${100 / (extraCount + 1)}%` }}
+            >
+              <SlideWithUI
+                video={s}
+                isMuted={isMuted}
+                isVisible={isActive && slideIndex === i + 1}
+                isNear={isActive && Math.abs(slideIndex - (i + 1)) <= 1}
+                onLike={onLike}
+                onComment={onComment}
+                onGift={onGift}
+              />
+            </div>
+          ))}
+        </div>
+      )}
 
       <SwipeHint show={showHint && isActive} />
     </div>

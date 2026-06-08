@@ -2,7 +2,7 @@
 
 import React, { useRef, useState, useEffect, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { X, Type, ChevronLeft, ChevronRight, Check, Loader2, Music2, VolumeX, Volume2, MapPin, Smile, Sparkles, RotateCw, Images } from "lucide-react"
+import { X, Type, ChevronLeft, ChevronRight, Check, Loader2, Music2, VolumeX, Volume2, MapPin, Smile, Sparkles, Images } from "lucide-react"
 
 const MY_STICKERS_KEY = "buzzy_my_stickers"
 interface SavedSticker { id: string; src: string; name: string }
@@ -53,6 +53,15 @@ type StickerLayer =
   | {
       id: string
       kind: "image"
+      src: string
+      x: number
+      y: number
+      size: number
+      rotation: number
+    }
+  | {
+      id: string
+      kind: "video"
       src: string
       x: number
       y: number
@@ -187,6 +196,7 @@ export default function StoryEditor({ file, onPublish, onClose, isUploading }: S
   const [locationDraft, setLocationDraft] = useState("")
   const [locationAutocomplete, setLocationAutocomplete] = useState<google.maps.places.Autocomplete | null>(null)
   const stickerFileInputRef = useRef<HTMLInputElement>(null)
+  const videoStickerInputRef = useRef<HTMLInputElement>(null)
   const locationInputRef = useRef<HTMLInputElement>(null)
   const { isLoaded: isMapsLoaded } = useLoadScript({
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "",
@@ -348,8 +358,31 @@ export default function StoryEditor({ file, onPublish, onClose, isUploading }: S
     reader.readAsDataURL(file)
   }
 
+  const addVideoStickerFromFile = (file: File) => {
+    if (!file.type.startsWith("video/")) return
+    const src = URL.createObjectURL(file)
+    const id = uid()
+    setPendingStickerFiles(prev => [...prev, { id, file }])
+    setStickerLayers(prev => [
+      ...prev,
+      { id, kind: "video", src, x: 50, y: 42, size: 72, rotation: 0 },
+    ])
+    setSelectedStickerId(id)
+    setStickerTab("my")
+    setTool("none")
+  }
+
   const addStickerFromSaved = (saved: SavedSticker) => {
     const id = uid()
+    // Reconvert base64 → File so the backend receives the actual file on publish
+    if (saved.src.startsWith("data:")) {
+      const [header, b64] = saved.src.split(",")
+      const mime = header.match(/:(.*?);/)?.[1] || "image/png"
+      const ext = mime.split("/")[1] || "png"
+      const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0))
+      const file = new File([bytes], `${saved.name || id}.${ext}`, { type: mime })
+      setPendingStickerFiles(prev => [...prev, { id, file }])
+    }
     setStickerLayers(prev => [
       ...prev,
       { id, kind: "image", src: saved.src, x: 50, y: 42, size: 72, rotation: 0 },
@@ -500,6 +533,16 @@ export default function StoryEditor({ file, onPublish, onClose, isUploading }: S
                       <span className="text-[10px] font-black">›</span>
                     </div>
                   </div>
+                ) : layer.kind === "video" ? (
+                  <video
+                    src={layer.src}
+                    autoPlay
+                    loop
+                    playsInline
+                    className="select-none drop-shadow-[0_2px_12px_rgba(0,0,0,0.45)] rounded-lg"
+                    style={{ width: layer.size * 1.4, height: "auto", maxHeight: layer.size * 2.5 }}
+                    draggable={false}
+                  />
                 ) : (
                   <img
                     src={layer.src}
@@ -510,46 +553,55 @@ export default function StoryEditor({ file, onPublish, onClose, isUploading }: S
                   />
                 )}
 
-                {isSelected && (
-                  <div className="absolute left-1/2 top-full mt-2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/10 bg-black/80 px-2 py-1 backdrop-blur-md shadow-lg">
-                    <button
-                      type="button"
-                      onPointerDown={e => e.stopPropagation()}
-                      onClick={e => {
-                        e.stopPropagation()
-                        updateSelectedSticker({ size: Math.max(18, Math.round(layer.size * 0.88)) })
-                      }}
-                      className="h-7 w-7 rounded-full bg-white/10 text-white text-sm font-black"
-                      aria-label="Disminuir sticker"
-                    >
-                      −
-                    </button>
-                    <button
-                      type="button"
-                      onPointerDown={e => e.stopPropagation()}
-                      onClick={e => {
-                        e.stopPropagation()
-                        updateSelectedSticker({ size: Math.min(220, Math.round(layer.size * 1.12)) })
-                      }}
-                      className="h-7 w-7 rounded-full bg-white/10 text-white text-sm font-black"
-                      aria-label="Aumentar sticker"
-                      >
-                      +
-                    </button>
-                  </div>
-                )}
+                {isSelected && (<>
+                  {/* Selection ring */}
+                  <div className="absolute inset-0 pointer-events-none rounded-xl"
+                    style={{ margin: -3, border: "1.5px solid rgba(255,255,255,0.55)", boxShadow: "0 0 0 1px rgba(0,0,0,0.3)" }} />
 
-                {isSelected && (
+                  {/* ✕ delete — top-left */}
                   <button
                     type="button"
-                    onPointerDown={e => startStickerRotation(e, layer)}
-                    className="absolute left-1/2 -top-11 flex -translate-x-1/2 items-center gap-1 rounded-full border border-pink-400/30 bg-black/85 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-pink-200 backdrop-blur-md shadow-lg"
-                    aria-label="Arrastrar para rotar libremente"
+                    className="absolute -top-3 -left-3 w-6 h-6 rounded-full flex items-center justify-center z-30 shadow-md"
+                    style={{ background: "rgba(20,20,30,0.92)", border: "1px solid rgba(255,255,255,0.15)" }}
+                    onPointerDown={e => e.stopPropagation()}
+                    onClick={e => {
+                      e.stopPropagation()
+                      setStickerLayers(prev => prev.filter(l => l.id !== layer.id))
+                      setPendingStickerFiles(prev => prev.filter(f => f.id !== layer.id))
+                      setSelectedStickerId(null)
+                    }}
                   >
-                    <RotateCw size={12} />
-                    Gira
+                    <X size={11} className="text-white/80" />
                   </button>
-                )}
+
+                  {/* − scale — bottom-left */}
+                  <button
+                    type="button"
+                    className="absolute -bottom-3 -left-3 w-6 h-6 rounded-full flex items-center justify-center z-30 shadow-md text-white/80 text-sm font-bold"
+                    style={{ background: "rgba(20,20,30,0.92)", border: "1px solid rgba(255,255,255,0.15)" }}
+                    onPointerDown={e => e.stopPropagation()}
+                    onClick={e => { e.stopPropagation(); updateSelectedSticker({ size: Math.max(18, Math.round(layer.size * 0.85)) }) }}
+                  >−</button>
+
+                  {/* + scale — bottom-right */}
+                  <button
+                    type="button"
+                    className="absolute -bottom-3 -right-3 w-6 h-6 rounded-full flex items-center justify-center z-30 shadow-md text-white/80 text-sm font-bold"
+                    style={{ background: "rgba(20,20,30,0.92)", border: "1px solid rgba(255,255,255,0.15)" }}
+                    onPointerDown={e => e.stopPropagation()}
+                    onClick={e => { e.stopPropagation(); updateSelectedSticker({ size: Math.min(220, Math.round(layer.size * 1.15)) }) }}
+                  >+</button>
+
+                  {/* ↻ rotate — top-right, draggable */}
+                  <button
+                    type="button"
+                    className="absolute -top-3 -right-3 w-6 h-6 rounded-full flex items-center justify-center z-30 shadow-md touch-none"
+                    style={{ background: "linear-gradient(135deg,#a855f7,#ec4899)", border: "1px solid rgba(255,255,255,0.2)" }}
+                    onPointerDown={e => startStickerRotation(e, layer)}
+                  >
+                    <span className="text-white text-[11px] font-bold leading-none">↻</span>
+                  </button>
+                </>)}
               </div>
             )
           })}
@@ -735,6 +787,13 @@ export default function StoryEditor({ file, onPublish, onClose, isUploading }: S
                     <p className="text-white/35 text-[11px]">Agrega emojis, ubicación y tus stickers propios</p>
                   </div>
                   <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => videoStickerInputRef.current?.click()}
+                      className="h-8 px-3 rounded-full bg-white/8 border border-white/10 flex items-center gap-1.5 text-white/80 text-[11px] font-semibold hover:bg-white/12 transition-colors"
+                    >
+                      <span className="text-xs">🎬</span>
+                      Video
+                    </button>
                     <button
                       onClick={() => stickerFileInputRef.current?.click()}
                       className="h-8 px-3 rounded-full bg-white/8 border border-white/10 flex items-center gap-1.5 text-white/80 text-[11px] font-semibold hover:bg-white/12 transition-colors"
@@ -979,9 +1038,18 @@ export default function StoryEditor({ file, onPublish, onClose, isUploading }: S
           className="hidden"
           onChange={e => {
             const file = e.target.files?.[0]
-            if (file) {
-              addImageStickerFromFile(file)
-            }
+            if (file) addImageStickerFromFile(file)
+            e.currentTarget.value = ""
+          }}
+        />
+        <input
+          ref={videoStickerInputRef}
+          type="file"
+          accept="video/*"
+          className="hidden"
+          onChange={e => {
+            const file = e.target.files?.[0]
+            if (file) addVideoStickerFromFile(file)
             e.currentTarget.value = ""
           }}
         />

@@ -50,17 +50,37 @@ export function prefetchAudioUrl(url: string): Promise<string> {
   return prefetchAudio(url)
 }
 
+async function getResponseForAudio(url: string): Promise<Response> {
+  // 1. Try network first — fastest path when online
+  try {
+    const r = await fetch(url)
+    if (r.ok) {
+      // Opportunistically warm the persistent cache for future offline sessions
+      if ('caches' in window) {
+        caches.open('buzzy-audio-v1').then(c => c.put(url, r.clone())).catch(() => {})
+      }
+      return r
+    }
+  } catch {
+    // network unavailable — fall through to Cache API
+  }
+
+  // 2. Network failed: look up the pre-populated Cache API (populated by feedCacheDB.ts)
+  if ('caches' in window) {
+    const cached = await caches.match(url)
+    if (cached) return cached
+  }
+
+  throw new Error(`audio unavailable offline: ${url}`)
+}
+
 function prefetchAudio(url: string): Promise<string> {
   if (audioCache.has(url)) return audioCache.get(url)!
   evictIfNeeded()
-  const p = fetch(url)
-    .then(r => {
-      if (!r.ok) throw new Error(`audio fetch failed: ${r.status}`)
-      return r.arrayBuffer()
-    })
+  const p = getResponseForAudio(url)
+    .then(r => r.arrayBuffer())
     .then(buf => URL.createObjectURL(new Blob([buf], { type: 'audio/mpeg' })))
     .catch(err => {
-      // Remove the failed entry so the next attempt retries the network request
       audioCache.delete(url)
       return Promise.reject(err)
     })

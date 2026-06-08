@@ -176,3 +176,26 @@ export const purchaseAICustom = async (customAmount: number): Promise<PurchaseRe
   const response = await apiClient.post('api/ai/packages/purchase/', { custom_amount: customAmount })
   return response.data
 }
+
+export interface CheckoutSession {
+  url: string
+  session_id: string
+}
+
+export interface CheckoutVerifyResult {
+  paid: boolean
+  videos_added: number
+  images_added: number
+  video_credits: number
+  image_credits: number
+}
+
+export const createAICheckoutSession = async (params: { package_id?: number; custom_amount?: number }): Promise<CheckoutSession> => {
+  const response = await apiClient.post('api/ai/packages/checkout/', params)
+  return response.data
+}
+
+export const verifyAICheckout = async (sessionId: string): Promise<CheckoutVerifyResult> => {
+  const response = await apiClient.get(`api/ai/packages/checkout/verify/?session_id=${sessionId}`)
+  return response.data
+}

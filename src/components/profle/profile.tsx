@@ -89,6 +89,7 @@ import { useVideoMetrics } from "../../hooks/useVideoMetrics"
 import axios from "axios"
 import { registerFCMToken } from "../../utils/fcm"
 import { isNotifEnabled } from "../../utils/notifPrefs"
+import { prefetchAudioUrl } from "../../hooks/useVideoAudio"
 
 // Muestra el emoji de fallback hasta que el video esté listo — evita flash negro en Android
 const GiftVideoThumb: React.FC<{ src: string; emoji: string; playing: boolean; thumbnail?: string }> = ({ src, emoji, playing, thumbnail }) => {
@@ -238,7 +239,7 @@ function ProfileSeccion({
 
   // --- Estados Generales ---
   const [isProfileSwitching, setIsProfileSwitching] = useState(false)
-  const [isMuted, setIsMuted] = useState(true)
+
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([])
   const [activeTab, setActiveTab] = useState("public")
   const [savedVideos, setSavedVideos] = useState<any[]>([])
@@ -265,6 +266,7 @@ function ProfileSeccion({
   const modalContainerRef = useRef<HTMLDivElement>(null)
   const modalVideoRefs = useRef<(HTMLVideoElement | null)[]>([])
   const modalScrollSettleTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const modalMusicRef = useRef<HTMLAudioElement | null>(null)
 
   // Lógica importada de StreamingUI
   const [localMedia, setLocalMedia] = useState<VideoItem[]>(media_user || []);
@@ -444,7 +446,7 @@ function ProfileSeccion({
   const [giftBlackout, setGiftBlackout] = useState(false);
   const [showBankAccountModal, setShowBankAccountModal] = useState(false);
   const [showChatPrivacyModal, setShowChatPrivacyModal] = useState(false);
-  const { setShowMessages, setSelectedChat, setPendingFolder } = useChat();
+  const { setShowMessages, setSelectedChat } = useChat();
   const [showProfileMediaOptions, setShowProfileMediaOptions] = useState(false);
   const [activeVideoOptions, setActiveVideoOptions] = useState<string | null>(null);
   const [confirmDeleteVideoId, setConfirmDeleteVideoId] = useState<string | null>(null);
@@ -723,9 +725,9 @@ function ProfileSeccion({
       setLocalMedia([]);
     }
 
-    Promise.all([getUser(username), getUserMedia(username)]).finally(() => {
-      setIsProfileSwitching(false);
-    });
+    // Quitar skeleton en cuanto llega el usuario, sin esperar al grid de videos
+    Promise.resolve(getUser(username)).finally(() => setIsProfileSwitching(false))
+    getUserMedia(username)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [username, isOwnProfile]);
 
@@ -1070,9 +1072,23 @@ function ProfileSeccion({
     setActiveModalIndex(-1);
     setShowCommentsModal(false);
     setModalVideoSource('local');
+    if (modalMusicRef.current) {
+      modalMusicRef.current.pause();
+      modalMusicRef.current = null;
+    }
   };
 
-  const toggleMute = () => setIsMuted(!isMuted);
+  const handleModalVideoTap = (index: number) => {
+    const videoEl = modalVideoRefs.current[index];
+    if (!videoEl) return;
+    if (videoEl.paused) {
+      videoEl.play().catch(() => {});
+      modalMusicRef.current?.play().catch(() => {});
+    } else {
+      videoEl.pause();
+      modalMusicRef.current?.pause();
+    }
+  };
   // const generateAudioLevels = () => Array.from({ length: 15 }, () => Math.random() * 100);
 
   useEffect(() => {
@@ -1117,6 +1133,60 @@ function ProfileSeccion({
         video.pause();
       }
     });
+
+    // Audio track para el video activo
+    const source = modalVideoSource === 'saved' ? savedVideos : localMedia;
+    const activeVid = source[activeModalIndex];
+    const trackUrl = activeVid?.audio_track_url;
+
+    if (modalMusicRef.current) {
+      modalMusicRef.current.pause();
+      modalMusicRef.current.src = '';
+      modalMusicRef.current = null;
+    }
+
+    // Aplicar volumen original al elemento de video
+    const videoEl = modalVideoRefs.current[activeModalIndex];
+    if (videoEl) {
+      videoEl.volume = Math.min(Math.max(activeVid?.volume_original ?? 1.0, 0), 1);
+    }
+
+    if (trackUrl) {
+      const volumeMusic = Math.min(Math.max(activeVid?.volume_music ?? 0.8, 0), 1);
+      const trimStart = Math.max(0, activeVid?.audio_trim_start ?? 0);
+      const trimEnd = typeof activeVid?.audio_trim_end === 'number' && isFinite(activeVid.audio_trim_end)
+        ? Math.max(trimStart, activeVid.audio_trim_end)
+        : null;
+
+      prefetchAudioUrl(trackUrl).then(blobUrl => {
+        if (modalMusicRef.current) return; // ya cambió de video
+        const audio = new Audio(blobUrl);
+        audio.loop = false;
+        audio.volume = volumeMusic;
+        audio.currentTime = trimStart;
+
+        if (trimEnd) {
+          audio.ontimeupdate = () => {
+            if (audio.currentTime >= trimEnd) {
+              audio.currentTime = trimStart;
+              audio.play().catch(() => {});
+            }
+          };
+        } else {
+          audio.loop = true;
+        }
+
+        audio.play().catch(() => {});
+        modalMusicRef.current = audio;
+      }).catch(() => {});
+    }
+
+    return () => {
+      if (modalMusicRef.current) {
+        modalMusicRef.current.pause();
+        modalMusicRef.current = null;
+      }
+    };
   }, [activeModalIndex, isModalOpen]);
 
   useEffect(() => {
@@ -1166,20 +1236,16 @@ function ProfileSeccion({
       setShowFollowPrompt(true);
       return;
     }
-    setPendingFolder("request");
     setShowMessages(true);
     setSelectedChat(user?.chat_uuid ?? null);
-    navigate("/");
   };
 
   const handleFollowAndMessage = () => {
     if (user?.id) {
       createFollower({ follower_user_id: user.id.toString() })(dispatch).then((res) => {
         setShowFollowPrompt(false);
-        setPendingFolder("request");
         setShowMessages(true);
         setSelectedChat(res?.data.chat_uuid ?? null);
-        navigate("/");
       }).catch(() => {
         showProfileToast('No se pudo seguir al usuario.', true);
         setShowFollowPrompt(false);
@@ -2206,13 +2272,15 @@ function ProfileSeccion({
                 src={playingGiftBlobUrl || getMediaUrl(giftItem.gift_video_url)}
                 autoPlay
                 playsInline
+                muted
                 poster={giftItem.video_thumbnail ? getMediaUrl(giftItem.video_thumbnail) : undefined}
-                initial={{ scale: 0.6, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.6, opacity: 0 }}
-                transition={{ type: "spring", damping: 22, stiffness: 200 }}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.15, ease: "easeOut" }}
                 className="absolute inset-0 w-full h-full object-cover pointer-events-none"
                 style={{
+                  display: 'block',
                   maskImage: `radial-gradient(ellipse 70% 65% at 50% 45%, black 30%, transparent 75%)`,
                   WebkitMaskImage: `radial-gradient(ellipse 70% 65% at 50% 45%, black 30%, transparent 75%)`,
                 }}
@@ -2279,12 +2347,14 @@ function ProfileSeccion({
               src={getMediaUrl(sentGiftPreview.video) || undefined}
               autoPlay
               playsInline
-              initial={{ scale: 0.6, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.6, opacity: 0 }}
-              transition={{ type: "spring", damping: 22, stiffness: 200 }}
+              muted
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15, ease: "easeOut" }}
               className="absolute inset-0 w-full h-full object-cover pointer-events-none"
               style={{
+                display: 'block',
                 maskImage: `radial-gradient(ellipse 70% 65% at 50% 45%, black 30%, transparent 75%)`,
                 WebkitMaskImage: `radial-gradient(ellipse 70% 65% at 50% 45%, black 30%, transparent 75%)`,
               }}
@@ -3158,9 +3228,13 @@ function ProfileSeccion({
                         src={getMediaUrl(video.video_url || video.video)}
                         className="w-full h-full object-cover md:object-contain max-h-screen"
                         loop
-                        muted={isMuted}
+                        muted={false}
                         playsInline
-                        onClick={toggleMute}
+                        preload="auto"
+                        poster={video.thumbnail_url ? getMediaUrl(video.thumbnail_url) : undefined}
+                        x-webkit-airplay="deny"
+                        style={{ display: 'block' }}
+                        onClick={() => handleModalVideoTap(index)}
                         onPlay={() => onVideoPlay(video.id.toString())}
                         onEnded={() => resetVideo(video.id.toString())}
                         onTimeUpdate={(e) => handleVideoProgress(e, video.id.toString())}

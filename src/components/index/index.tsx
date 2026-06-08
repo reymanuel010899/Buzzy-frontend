@@ -5,6 +5,7 @@ import axios from "axios";
 import { Link, useNavigate, useLocation } from "react-router-dom"
 import sendMessageSound from "../../assets/sounds/sendMessage.mp3";
 import { prefetchAudioUrl } from "../../hooks/useVideoAudio";
+import { Howler } from "howler";
 import { Eye, MessageCircle, Heart, Volume2, VolumeX, Play, Pause, Plus, UserPlus, UserCheck, Loader2, X, MoreVertical, Music2, Camera, Image as ImageIcon, MapPin, Bookmark, Share2, Download, Lock } from "lucide-react"
 import AdCard from "../ads/AdCard"
 import StoryEditor from "./StoryEditor"
@@ -266,6 +267,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [_fullGifts, setFullGifts] = useState<GiftI[] | GiftI | []>([]);
   const [, setGiftsLoading] = useState(true);
   const [showVideoGiftModal, setShowVideoGiftModal] = useState(false);
+  const [videoGiftModalKey, setVideoGiftModalKey] = useState(0);
   const [selectedVideoForGift, setSelectedVideoForGift] = useState<string | number | null>(null);
 
   const [isBlackout, setIsBlackout] = useState(false);
@@ -402,6 +404,10 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   useEffect(() => {
     setMedia(media);
     if (!media?.length) return
+    // Inicializar savedMap con los videos ya guardados
+    const saved: Record<string, boolean> = {};
+    media.forEach(v => { if (v.is_saved) saved[String(v.id)] = true; });
+    if (Object.keys(saved).length) setSavedMap(prev => ({ ...prev, ...saved }));
     const entries = media.map(v => ({ username: v.user_id.username, excludeId: v.id }))
     prefetchBatch(entries)
     // Pre-fetch only first 4 music tracks — enough for immediate playback without RAM abuse
@@ -933,36 +939,42 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   useEffect(() => {
     const unlockAudio = () => {
       if (audioUnlockedRef.current) return;
-      if (!sendAudioRef.current) return;
 
+      // Resume Howler AudioContext directly — works even without the sendAudio element
+      const howlerCtx = (Howler as any).ctx as AudioContext | undefined;
+      if (howlerCtx && howlerCtx.state === "suspended") {
+        howlerCtx.resume().catch(() => {});
+      }
+
+      // Also try the sendAudio element as secondary unlock
       const sa = sendAudioRef.current;
-      sa.volume = 0;
-      sa.play()
-        .then(() => {
-          sa.pause();
-          sa.currentTime = 0;
-          sa.volume = 1;
-          audioUnlockedRef.current = true;
-          setIsAudioUnlocked(true);
-          // Remove listeners only after confirmed success
-          window.removeEventListener("click", unlockAudio);
-          window.removeEventListener("keydown", unlockAudio);
-          window.removeEventListener("touchstart", unlockAudio);
-          window.removeEventListener("touchend", unlockAudio);
+      const tryUnlock = (success: boolean) => {
+        if (!success) return;
+        audioUnlockedRef.current = true;
+        setIsAudioUnlocked(true);
+        window.removeEventListener("click", unlockAudio);
+        window.removeEventListener("keydown", unlockAudio);
+        window.removeEventListener("touchstart", unlockAudio);
+        window.removeEventListener("touchend", unlockAudio);
+        const ta = typingAudioRef.current;
+        if (ta) {
+          ta.volume = 0;
+          ta.play().then(() => { ta.pause(); ta.currentTime = 0; ta.volume = 1; }).catch(() => {});
+        }
+      };
 
-          // Also unlock typing sound if available
-          const ta = typingAudioRef.current;
-          if (ta) {
-            ta.volume = 0;
-            ta.play()
-              .then(() => { ta.pause(); ta.currentTime = 0; ta.volume = 1; })
-              .catch(() => {});
-          }
-        })
-        .catch(() => {
-          // play() rejected (browser policy) — leave listeners registered so the
-          // next user gesture retries the unlock
-        });
+      if (sa) {
+        sa.volume = 0;
+        sa.play()
+          .then(() => { sa.pause(); sa.currentTime = 0; sa.volume = 1; tryUnlock(true); })
+          .catch(() => {
+            // sendAudio failed but Howler ctx may be resumed — mark unlocked anyway
+            if (!howlerCtx || howlerCtx.state === "running") tryUnlock(true);
+          });
+      } else {
+        // No sendAudio element yet — rely solely on Howler ctx
+        if (!howlerCtx || howlerCtx.state === "running") tryUnlock(true);
+      }
     };
 
     window.addEventListener("click", unlockAudio);
@@ -1446,6 +1458,16 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       setFeedLocked(false);
     }
 
+    // Unlock audio context on this user gesture — guaranteed to run inside a tap event
+    if (!audioUnlockedRef.current) {
+      audioUnlockedRef.current = true;
+      setIsAudioUnlocked(true);
+      const howlerCtx = (Howler as any).ctx as AudioContext | undefined;
+      if (howlerCtx && howlerCtx.state === "suspended") {
+        howlerCtx.resume().catch(() => {});
+      }
+    }
+
     if (videoElement.paused) {
       if (index === 0) hasPlayedFirstVideo.current = true;
       videoElement.play().catch(error => {
@@ -1584,6 +1606,16 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     setShowStoryPicker(prev => !prev);
   }
 
+  useEffect(() => {
+    if (!showStoryPicker) return;
+    const close = () => setShowStoryPicker(false);
+    // setTimeout defers the listener registration until after the current click
+    // event has finished bubbling — without this the same click that opens the
+    // picker immediately closes it via document bubble.
+    const tid = setTimeout(() => document.addEventListener('click', close), 0);
+    return () => { clearTimeout(tid); document.removeEventListener('click', close); };
+  }, [showStoryPicker]);
+
   const handlePickStoryFromLibrary = async () => {
     const picked = await pickMedia("any", 50);
     if (!picked) return;
@@ -1619,9 +1651,9 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     if (filterCss && filterCss !== "none") {
       formData.append('filter_css', filterCss);
     }
-    // Strip base64 src from image stickers — backend will receive them as files
+    // Strip blob/base64 src from image and video stickers — backend will receive them as files
     const stickerLayersClean = stickerLayers.map(l =>
-      l.kind === "image" ? { ...l, src: "" } : l
+      (l.kind === "image" || l.kind === "video") ? { ...l, src: "" } : l
     );
     formData.append('text_layers', JSON.stringify(textLayers));
     formData.append('sticker_layers', JSON.stringify(stickerLayersClean));
@@ -2233,6 +2265,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         setIsGridVideoPlaying(prev => ({ ...prev, [videoId.toString()]: false }));
       }
     }
+    setVideoGiftModalKey(k => k + 1);
     setShowVideoGiftModal(true);
   };
   const sendVideoGiftCount = useRef(false)
@@ -2392,7 +2425,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       >
         {/* Stories Bar */}
         <div
-          className={`w-full transition-opacity duration-100 ${showStoriesBar ? "opacity-100" : "opacity-0 h-0 overflow-hidden pointer-events-none"}`}
+          className={`w-full transition-all duration-300 ease-in-out ${showStoriesBar ? "max-h-24 opacity-100" : "max-h-0 opacity-0 pointer-events-none"}`}
         >
           <div>
             <div className="flex gap-2 px-2 py-2 snap-x ">
@@ -2427,7 +2460,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 	                        initial={{ opacity: 0, y: 8, scale: 0.96 }}
 	                        animate={{ opacity: 1, y: 0, scale: 1 }}
 	                        exit={{ opacity: 0, y: 8, scale: 0.96 }}
-	                        className="absolute left-0 top-[48px] z-50 w-44 overflow-hidden rounded-xl border border-white/10 bg-[#0b0b14]/95 shadow-2xl backdrop-blur-md"
+	                        className="absolute left-0 top-[48px] z-[9999] w-44 overflow-hidden rounded-xl border border-white/10 bg-[#0b0b14]/95 shadow-2xl backdrop-blur-md"
 	                        onClick={(e) => e.stopPropagation()}
 	                      >
 	                        <button
@@ -2632,8 +2665,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 return { content, needsTruncation };
               };
 
-              const { content: truncatedContent, needsTruncation } = renderDescriptionWithMentions(data.description || "", !isExpanded);
-              const { content: fullContent } = renderDescriptionWithMentions(data.description || "", false);
+              const fullContent = renderDescriptionWithMentions(data.description || "", false).content;
 
               if (data.type === 'ad') {
                 return (
@@ -2656,12 +2688,10 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
               }
 
               return (
-                <motion.div
+                <div
                   key={videoId}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ duration: 0.15 }}
                   className="relative h-full min-h-full snap-start snap-always rounded-t-xl rounded-b-none border border-[#2a2f5e]/30 shadow-2xl shadow-black/50"
+                  style={{ contain: "layout style" }}
                 >
                   <HorizontalCarousel
                     video={data}
@@ -2703,9 +2733,21 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                             muted={isMuted || activeAdIndex === index}
                             loop
                             playsInline
-                            className="h-full w-full object-cover border-[#00f0ff]/5"
+                            className="object-cover border-[#00f0ff]/5"
+                            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
                             onClick={() => handleVideoClick(index)}
-                            onPlay={() => onVideoPlay(videoId)}
+                            onPlay={() => {
+                              onVideoPlay(videoId);
+                              // Unlock audio context on first video play (Capacitor/Android)
+                              if (!audioUnlockedRef.current) {
+                                const howlerCtx = (Howler as any).ctx as AudioContext | undefined;
+                                if (howlerCtx && howlerCtx.state === "suspended") {
+                                  howlerCtx.resume().catch(() => {});
+                                }
+                                audioUnlockedRef.current = true;
+                                setIsAudioUnlocked(true);
+                              }
+                            }}
                             onEnded={() => resetVideo(videoId)}
                             onTimeUpdate={(e) => {
                               handleVideoProgress(e, videoId);
@@ -2849,223 +2891,153 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                             )}
                           </AnimatePresence>
                         </div>
-                        {data.media_type === 'video' && data.audio_track_title && activeVideo === index && !isExpanded && (
-                          <div className="pointer-events-none absolute z-40 top-3 left-0 right-0 flex justify-center px-3">
-                            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full max-w-[70%]"
-                              style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)', border: '1px solid rgba(0,240,255,0.18)', overflow: 'hidden' }}>
-                              <Music2 className="h-3 w-3 text-cyan-400 shrink-0" />
-                              <span className="text-[10px] font-bold uppercase tracking-widest text-white/90 truncate">
-                                {clampWords(data.audio_track_title, 4)}
-                              </span>
-                              {data.audio_track_artist && (
-                                <>
-                                  <span className="text-cyan-400/50 text-[10px] shrink-0">·</span>
-                                  <span className="text-[9px] font-semibold uppercase tracking-widest text-cyan-300/80 truncate">
-                                    {clampWords(data.audio_track_artist, 3)}
-                                  </span>
-                                </>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                        {!isExpanded && (
-                          <motion.button
-                            whileTap={{ scale: 0.9 }}
-                            className="h-9 w-9 flex items-center justify-center rounded-full text-white drop-shadow-lg pointer-events-auto absolute top-3 right-2 z-10"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              toggleMute()
-                            }}
+                        {/* PERFIL + DESCRIPCIÓN — esquina superior izquierda */}
+                        {/* Pill central — siempre visible arriba, tap para expandir descripción */}
+                        <div
+                          className={`absolute top-0 left-0 right-0 z-[60] flex justify-center pointer-events-auto cursor-pointer ${isExpanded || !data.description ? 'invisible' : ''}`}
+                          style={{ paddingTop: 6, paddingBottom: 10 }}
+                          onClick={(e) => { e.stopPropagation(); handleToggleDescription(videoId); }}
+                        >
+                          <div className="w-10 h-1.5 rounded-full bg-white/50" />
+                        </div>
+
+                        {/* Descripción pegada al borde superior — solo visible cuando expandida */}
+                        {data.description && isExpanded && (
+                          <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            className="absolute top-0 left-0 right-0 z-40 pointer-events-auto backdrop-blur-md bg-black/70 border-b border-white/10 px-3 pt-10 pb-3"
                           >
-                            {isMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
-                          </motion.button>
-                        )}
-
-                        {/* INICIO DEL CONTENEDOR DE METADATOS INFERIOR UNIFICADO */}
-                        <div className={`absolute -bottom-6 left-0 right-0 px-1 pt-16 pb-[calc(env(safe-area-inset-bottom)+2.2rem)] pointer-events-none flex flex-col justify-end bg-gradient-to-t from-black/60 via-black/20 to-transparent ${isExpanded ? 'z-[80]' : 'z-20'}`}>
-
-                          <div className="flex flex-col gap-4 pointer-events-auto max-w-[100%]">
-                            {/* DOTS carrusel — siempre 15px encima del nombre */}
-                            {carouselDots[videoId] && carouselDots[videoId].total > 1 && (
-                              <div className="flex justify-center gap-1.5 pointer-events-none mb-[-6px]">
-                                {Array.from({ length: Math.max(carouselDots[videoId].total, 4) }).map((_, i) => {
-                                  const isActiveDot = i === carouselDots[videoId].index
-                                  const isReal = i < carouselDots[videoId].total
-                                  return (
-                                    <motion.div
-                                      key={i}
-                                      animate={{ width: isActiveDot ? 16 : 5, opacity: isActiveDot ? 1 : isReal ? 0.45 : 0.2 }}
-                                      transition={{ duration: 0.2 }}
-                                      className="h-1.5 rounded-full bg-white"
-                                    />
-                                  )
-                                })}
+                            {/* Pill dentro del panel expandido */}
+                            <div
+                              className="flex justify-center items-center mb-3 py-2 cursor-pointer"
+                              onClick={(e) => { e.stopPropagation(); handleToggleDescription(videoId); }}
+                            >
+                              <div className="w-10 h-1 rounded-full bg-white/30" />
+                            </div>
+                            <p className="text-[13px] text-white/95 leading-relaxed whitespace-pre-wrap">{fullContent}</p>
+                            {data.tags?.tags && Array.isArray(data.tags.tags) && (
+                              <div className="flex flex-wrap gap-1.5 mt-2">
+                                {data.tags.tags.map((tag: string, i: number) => (
+                                  <span key={i} className="text-[11px] font-medium text-[#00f0ff]">#{tag}</span>
+                                ))}
                               </div>
                             )}
+                          </motion.div>
+                        )}
 
-                            {/* 2. PERFIL DE USUARIO */}
-                            <div className="flex w-full items-center pr-14">
-                              <div className="flex min-w-0 items-center">
-                                <div className="relative h-10 w-10 overflow-hidden rounded-full flex-shrink-0 group">
-                                  <img
-                                    className="h-full w-full object-cover rounded-full border border-white/20"
-                                    src={getMediaUrl(data.user_id?.profile_picture) || getMediaUrl("profile_pics/avatar.webp")}
-                                    onError={(e) => {
-                                      (e.target as HTMLImageElement).src = `https://picsum.photos/100/100?random=${index}`;
-                                    }}
-                                    alt={data.user_id?.username}
-                                    loading="lazy"
-                                  />
-                                  <div className="absolute inset-0 rounded-full border-2 border-white/5 pointer-events-none" />
-
-                                  {!isMuted && videoRefs.current[index]?.paused === false && (
-                                    <motion.div
-                                      className="absolute inset-0 rounded-full border-4 border-[#00f0ff]/60"
-                                      animate={{
-                                        boxShadow: [
-                                          "0 0 0 0 rgba(0, 240, 255, 0)",
-                                          "0 0 20px 4px rgba(0, 240, 255, 0.4)",
-                                          "0 0 0 0 rgba(0, 240, 255, 0)",
-                                        ],
-                                        scale: [1, 1.05, 1],
-                                      }}
-                                      transition={{
-                                        duration: 0.8,
-                                        repeat: Infinity,
-                                        repeatType: "loop",
-                                        ease: "easeInOut",
-                                      }}
-                                    />
-                                  )}
-                                </div>
-                                <Link
-                                  className="ml-3 max-w-[20ch] flex-shrink-0 overflow-hidden whitespace-nowrap text-white font-bold text-shadow-md hover:text-[#00f0ff] transition-colors"
-                                  to={`/profile/${data.user_id?.username}`}
-                                >
-                                  @{String(data.user_id?.username || "").slice(0, 20)}
-                                </Link>
-                                <img
-                                  src="/screenshots/buzzy_icon_1024.png"
-                                  alt="Buzzy"
-                                  className="w-4 h-4 rounded-full flex-shrink-0 ml-1"
-                                />
-                                <AnimatePresence mode="wait">
-                                  {data.user_id.username !== user.username && (
-                                    (!followingState[data.user_id.id.toString()] && !data.current_user_followered) ? (
-                                      <motion.button
-                                        key="inline-follow"
-                                        initial={{ opacity: 0, scale: 0.8 }}
-                                        animate={{ opacity: 1, scale: 1 }}
-                                        exit={{ opacity: 0, scale: 0.8, transition: { duration: 0.2 } }}
-                                        whileTap={{ scale: 0.95 }}
-                                        className="ml-2 flex h-8 w-8 flex-shrink-0 items-center justify-center text-white/95 transition-all"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleFollowClick(Number(data.user_id.id), data.user_id.id.toString(), "create");
-                                        }}
-                                        aria-label={`${t('videos:actions.follow')} ${data.user_id?.username}`}
-                                        title={t('videos:actions.follow')}
-                                      >
-                                        <UserPlus className="h-4 w-4 text-white" strokeWidth={2.4} />
-                                      </motion.button>
-                                    ) : (
-                                      <motion.button
-                                        key="inline-following"
-                                        initial={{ opacity: 0, scale: 0.8 }}
-                                        animate={{ opacity: 1, scale: 1, transition: { delay: 0.1 } }}
-                                        exit={{ opacity: 0, scale: 0.8, transition: { duration: 0.2 } }}
-                                        className="ml-2 flex h-8 w-8 flex-shrink-0 items-center justify-center text-white/95 transition-all"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleFollowClick(Number(data.user_id.id), data.user_id.id.toString(), "delete");
-                                        }}
-                                        aria-label={`${t('videos:actions.following')} ${data.user_id?.username}`}
-                                        title={t('videos:actions.following')}
-                                      >
-                                        <UserCheck className="h-4 w-4 text-white" strokeWidth={2.4} />
-                                      </motion.button>
-                                    )
-                                  )}
-                                </AnimatePresence>
-                              </div>
-
-                            </div>
-
-                            {/* 1. SECCIÓN DE DESCRIPCIÓN DEL VIDEO (Manejo de @mentions) */}
-                            {data.description && (
+                        {/* Avatar + follow — encima del contenedor de descripción */}
+                        <div className="absolute top-2 left-3 right-3 z-50 flex items-center justify-between pointer-events-auto">
+                          <Link
+                            to={`/profile/${data.user_id?.username}`}
+                            onClick={e => e.stopPropagation()}
+                            className="relative h-9 w-9 flex-shrink-0 block"
+                          >
+                            <img
+                              className="h-full w-full object-cover rounded-full border border-white/20"
+                              src={getMediaUrl(data.user_id?.profile_picture) || getMediaUrl("profile_pics/avatar.webp")}
+                              onError={(e) => { (e.target as HTMLImageElement).src = `https://picsum.photos/100/100?random=${index}`; }}
+                              alt={data.user_id?.username}
+                              loading="lazy"
+                            />
+                            {!isMuted && videoRefs.current[index]?.paused === false && (
                               <motion.div
-                                className={`
-                                 backdrop-blur-md border border-white/10 bg-white/5 shadow-2xl transition-all duration-500 ease-in-out
-                                ${isExpanded
-                                    ? 'p-4 max-h-[60vh] overflow-hidden shadow-2xl z-30 w-full'
-                                    : 'p-2  max-h-[120px] overflow-hidden cursor-pointer hover:bg-white/10'
-                                  }
-                              `}
-                                onClick={(e) => {
-                                  if (!isExpanded) {
-                                    e.stopPropagation();
-                                    handleToggleDescription(videoId);
-                                  }
-                                }}
-                                initial={false}
-                                animate={{
-                                  scale: isExpanded ? 1.02 : 1,
-                                  y: isExpanded ? -5 : 0
-                                }}
+                                className="absolute inset-0 rounded-full border-2 border-[#00f0ff]/60"
+                                animate={{ boxShadow: ["0 0 0 0 rgba(0,240,255,0)", "0 0 12px 3px rgba(0,240,255,0.4)", "0 0 0 0 rgba(0,240,255,0)"], scale: [1, 1.05, 1] }}
+                                transition={{ duration: 0.8, repeat: Infinity, ease: "easeInOut" }}
+                              />
+                            )}
+                          </Link>
+                          <AnimatePresence mode="wait">
+                            {data.user_id.username !== user.username && (
+                              (!followingState[data.user_id.id.toString()] && !data.current_user_followered) ? (
+                                <motion.button
+                                  key="top-follow"
+                                  initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.8 }}
+                                  whileTap={{ scale: 0.95 }}
+                                  className="flex h-7 w-7 flex-shrink-0 items-center justify-center text-white/95"
+                                  onClick={(e) => { e.stopPropagation(); handleFollowClick(Number(data.user_id.id), data.user_id.id.toString(), "create"); }}
+                                >
+                                  <UserPlus className="h-4 w-4 text-white" strokeWidth={2.4} />
+                                </motion.button>
+                              ) : (
+                                <motion.button
+                                  key="top-following"
+                                  initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1, transition: { delay: 0.1 } }} exit={{ opacity: 0, scale: 0.8 }}
+                                  className="flex h-7 w-7 flex-shrink-0 items-center justify-center text-white/95"
+                                  onClick={(e) => { e.stopPropagation(); handleFollowClick(Number(data.user_id.id), data.user_id.id.toString(), "delete"); }}
+                                >
+                                  <UserCheck className="h-4 w-4 text-white" strokeWidth={2.4} />
+                                </motion.button>
+                              )
+                            )}
+                          </AnimatePresence>
+                        </div>
+
+{/* FOOTER INFERIOR — música + audio + dots */}
+                        <div className={`absolute -bottom-6 left-0 right-0 px-3 pb-[calc(env(safe-area-inset-bottom)+2.85rem)] pt-10 pointer-events-none flex flex-col justify-end gap-2 bg-gradient-to-t from-black/70 via-black/20 to-transparent ${isExpanded ? 'z-[80]' : 'z-20'}`}>
+
+                          {/* Dots carrusel */}
+                          {carouselDots[videoId] && carouselDots[videoId].total > 1 && (
+                            <div className="flex justify-center gap-1.5 pointer-events-none">
+                              {Array.from({ length: Math.max(carouselDots[videoId].total, 4) }).map((_, i) => {
+                                const isActiveDot = i === carouselDots[videoId].index
+                                const isReal = i < carouselDots[videoId].total
+                                return (
+                                  <motion.div
+                                    key={i}
+                                    animate={{ width: isActiveDot ? 16 : 5, opacity: isActiveDot ? 1 : isReal ? 0.45 : 0.2 }}
+                                    transition={{ duration: 0.2 }}
+                                    className="h-1.5 rounded-full bg-white"
+                                  />
+                                )
+                              })}
+                            </div>
+                          )}
+
+                          {/* Fila: mute izquierda + música centrada + disco derecha */}
+                          <div className="relative flex items-center justify-center w-full pointer-events-auto">
+                            {data.media_type === 'video' && data.audio_track_title && activeVideo === index && !isExpanded && (
+                              <div className="flex items-center gap-2 px-2 py-1 rounded-full">
+                                <Music2 className="h-3 w-3 text-cyan-400 shrink-0" />
+                                <span className="text-[10px] font-bold uppercase tracking-widest text-white/80 truncate">
+                                  {clampWords(data.audio_track_title, 4)}
+                                </span>
+                                {data.audio_track_artist && (
+                                  <>
+                                    <span className="text-white/30 text-[10px] shrink-0">·</span>
+                                    <span className="text-[9px] font-semibold uppercase tracking-widest text-white/60 truncate">
+                                      {clampWords(data.audio_track_artist, 3)}
+                                    </span>
+                                  </>
+                                )}
+                              </div>
+                            )}
+                            <motion.button
+                              whileTap={{ scale: 0.9 }}
+                              className="absolute left-0 h-9 w-9 flex items-center justify-center rounded-full text-white drop-shadow-lg"
+                              onClick={(e) => { e.stopPropagation(); toggleMute(); }}
+                            >
+                              {isMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+                            </motion.button>
+                            {data.audio_track_title && (
+                              <motion.div
+                                animate={{ rotate: 360 }}
+                                transition={{ duration: 4, repeat: Infinity, ease: 'linear' }}
+                                className="absolute right-0 h-9 w-9 rounded-full overflow-hidden border-2 border-white/20 shadow-lg pointer-events-none"
                               >
-                                <div className="text-[13px] leading-relaxed text-white/95 drop-shadow-sm font-light">
-                                  {isExpanded && (
-                                    <div className="flex justify-center mb-3">
-                                      <div
-                                        className="w-10 h-1 bg-white/30 rounded-full cursor-pointer hover:bg-[#00f0ff]/60 transition-colors"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleToggleDescription(videoId);
-                                        }}
-                                      ></div>
-                                    </div>
-                                  )}
-
-                                  {isExpanded ? (
-                                    <div className="flex flex-col gap-2">
-                                      <p className="whitespace-pre-wrap">{fullContent}</p>
-                                      <button
-                                        className="text-[#00f0ff] text-xs font-semibold mt-2 self-start hover:underline"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleToggleDescription(videoId);
-                                        }}
-                                      >
-                                        Ocultar
-                                      </button>
-                                    </div>
-                                  ) : (
-                                    <div className="flex flex-wrap items-center">
-                                      <span>{truncatedContent}</span>
-                                      {needsTruncation && (
-                                        <span
-                                          className="ml-1 text-[#00f0ff] font-bold text-[11px]"
-                                        >
-                                          ... ver más
-                                        </span>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-
-                                {/* Hashtags */}
-                                {data.tags && data.tags.tags && Array.isArray(data.tags.tags) && (
-                                  <div className={`flex flex-wrap gap-2 mt-2 ${isExpanded ? 'opacity-100' : 'opacity-80'}`}>
-                                    {data.tags.tags.map((tag: any, i: number) => (
-                                      <span key={i} className="text-[11px] font-medium text-[#00f0ff] hover:text-white transition-colors">
-                                        #{tag}
-                                      </span>
-                                    ))}
+                                {data.audio_track_cover ? (
+                                  <img src={data.audio_track_cover} className="h-full w-full object-cover" alt="" />
+                                ) : (
+                                  <div className="h-full w-full bg-gradient-to-br from-cyan-500 to-purple-600 flex items-center justify-center">
+                                    <Music2 className="h-4 w-4 text-white" />
                                   </div>
                                 )}
                               </motion.div>
                             )}
                           </div>
+
 
 
                           {/* 3. BARRA DE INTERACCIÓN Y BOTÓN DE SUSCRIPCIÓN */}
@@ -3374,6 +3346,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                               </div>
                             </motion.button>
 
+
                           </div>
 
 
@@ -3407,7 +3380,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                       </div>
                     </div>
                   </HorizontalCarousel>
-                </motion.div>
+                </div>
               );
             })}
           </div>
@@ -3577,7 +3550,9 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                     ))}
                     {stickerLayers.map((layer) => {
                       const isLocation = layer.kind === "location" && !!layer.text;
-                      const isImage = layer.kind === "image" && !!layer.src;
+                      const stickerSrc = layer.src ? (layer.src.startsWith("http") ? layer.src : getMediaUrl(layer.src)) : "";
+                      const isImage = layer.kind === "image" && !!stickerSrc;
+                      const isVideo = layer.kind === "video" && !!stickerSrc;
                       const rotation = layer.rotation ?? 0;
                       return (
                         <div
@@ -3612,9 +3587,19 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                                 <span className="text-[10px] font-black">›</span>
                               </div>
                             </div>
+                          ) : isVideo ? (
+                            <video
+                              src={stickerSrc}
+                              autoPlay
+                              loop
+                              playsInline
+                              className="drop-shadow-[0_2px_12px_rgba(0,0,0,0.45)] rounded-lg"
+                              style={{ width: `${layer.size * 1.4}px`, height: "auto", maxHeight: `${layer.size * 2.5}px` }}
+                              draggable={false}
+                            />
                           ) : isImage ? (
                             <img
-                              src={layer.src}
+                              src={stickerSrc}
                               alt="Sticker"
                               className="drop-shadow-[0_2px_12px_rgba(0,0,0,0.45)]"
                               style={{ width: `${layer.size * 1.4}px`, height: "auto" }}
@@ -3669,7 +3654,9 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                     ))}
                     {stickerLayers.map((layer) => {
                       const isLocation = layer.kind === "location" && !!layer.text;
-                      const isImage = layer.kind === "image" && !!layer.src;
+                      const stickerSrc = layer.src ? (layer.src.startsWith("http") ? layer.src : getMediaUrl(layer.src)) : "";
+                      const isImage = layer.kind === "image" && !!stickerSrc;
+                      const isVideo = layer.kind === "video" && !!stickerSrc;
                       const rotation = layer.rotation ?? 0;
                       return (
                         <div
@@ -3704,9 +3691,19 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                                 <span className="text-[10px] font-black">›</span>
                               </div>
                             </div>
+                          ) : isVideo ? (
+                            <video
+                              src={stickerSrc}
+                              autoPlay
+                              loop
+                              playsInline
+                              className="drop-shadow-[0_2px_12px_rgba(0,0,0,0.45)] rounded-lg"
+                              style={{ width: `${layer.size * 1.4}px`, height: "auto", maxHeight: `${layer.size * 2.5}px` }}
+                              draggable={false}
+                            />
                           ) : isImage ? (
                             <img
-                              src={layer.src}
+                              src={stickerSrc}
                               alt="Sticker"
                               className="drop-shadow-[0_2px_12px_rgba(0,0,0,0.45)]"
                               style={{ width: `${layer.size * 1.4}px`, height: "auto" }}
@@ -3983,10 +3980,10 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
               />
               <motion.div
                 key="viewers-panel"
-                initial={{ y: "100%", scale: 0.9 }}
-                animate={{ y: 0, scale: 1 }}
-                exit={{ y: "100%", scale: 0.9 }}
-                transition={{ type: "spring", damping: 30, stiffness: 300 }}
+                initial={{ y: "100%" }}
+                animate={{ y: 0 }}
+                exit={{ y: "100%" }}
+                transition={{ duration: 0.18, ease: "easeOut" }}
                 className="fixed bottom-0 left-0 right-0 h-[50vh] z-70 bg-black backdrop-blur-xl rounded-t-3xl overflow-hidden border-t border-white/10"
                 onClick={(e) => e.stopPropagation()}
               >
@@ -4159,10 +4156,10 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
               onClick={() => setSelectedStoryLocation(null)}
             />
             <motion.div
-              initial={{ opacity: 0, scale: 0.88, y: 24 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.88, y: 24 }}
-              transition={{ type: "spring", stiffness: 320, damping: 28 }}
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 16 }}
+              transition={{ duration: 0.15, ease: "easeOut" }}
               className="fixed inset-x-6 bottom-1/3 z-[201] rounded-[28px] border border-white/10 bg-[#0d0f1e] p-5 shadow-[0_24px_80px_rgba(0,0,0,0.6)]"
             >
               <div className="flex items-start gap-3 mb-4">
@@ -4509,12 +4506,13 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
               autoPlay
               playsInline
               muted={false}
-              initial={{ scale: 0.6, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.6, opacity: 0 }}
-              transition={{ type: "spring", damping: 22, stiffness: 200 }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15, ease: "easeOut" }}
               className="absolute inset-0 w-full h-full object-cover"
               style={{
+                display: 'block',
                 maskImage: `radial-gradient(ellipse 70% 65% at 50% 45%, black 30%, transparent 75%)`,
                 WebkitMaskImage: `radial-gradient(ellipse 70% 65% at 50% 45%, black 30%, transparent 75%)`,
               }}
@@ -4598,6 +4596,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
               preload="auto"
               muted={false}
               style={{
+                display: 'block',
                 position: 'absolute', inset: 0, width: '100%', height: '100%',
                 objectFit: 'cover', pointerEvents: 'none',
                 opacity: viewerGiftReady ? 1 : 0, transition: 'opacity 0.3s',
@@ -4706,6 +4705,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       <AnimatePresence>
         {showVideoGiftModal && (
           <VipGiftExperience
+            key={videoGiftModalKey}
             onClose={() => setShowVideoGiftModal(false)}
             onSendGift={handleSendVideoGift}
             onBuyTokens={() => { setShowVideoGiftModal(false); setShowTokenShopModal(true); }}
