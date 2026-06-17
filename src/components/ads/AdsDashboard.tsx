@@ -55,7 +55,8 @@ const AdsDashboard: React.FC<AdsDashboardProps> = ({ campaigns, stats, onRefresh
 
   const token  = () => localStorage.getItem("accessToken")
   const headers = () => ({ Authorization: `Bearer ${token()}` })
-  const apiPost = async (url: string) => { await axios.post(`${getBaseUrl()}${url}`, {}, { headers: headers() }); onRefresh?.() }
+  const base = () => getBaseUrl().replace(/\/+$/, '')
+  const apiPost = async (url: string) => { await axios.post(`${base()}/${url}`, {}, { headers: headers() }); onRefresh?.() }
 
   const handleRelaunch = (id: number) => apiPost(`api/ads/campaigns/${id}/relaunch/`).catch(() => alert("No se pudo relanzar."))
   const handlePause    = (id: number) => apiPost(`api/ads/campaigns/${id}/pause/`).catch(() => alert("No se pudo pausar."))
@@ -63,14 +64,14 @@ const AdsDashboard: React.FC<AdsDashboardProps> = ({ campaigns, stats, onRefresh
 
   const handlePay = async (id: number) => {
     try {
-      const res = await axios.post(`${getBaseUrl()}api/ads/campaigns/${id}/create_checkout_session/`, {}, { headers: headers() })
+      const res = await axios.post(`${base()}/api/ads/campaigns/${id}/create_checkout_session/`, {}, { headers: headers() })
       if (res.data.url) window.location.href = res.data.url
     } catch { alert("No se pudo iniciar el pago.") }
   }
 
   const handleExportCsv = async () => {
     try {
-      const res = await axios.get(`${getBaseUrl()}api/ads/campaigns/export_csv/`, { headers: headers(), responseType: "blob" })
+      const res = await axios.get(`${base()}/api/ads/campaigns/export_csv/`, { headers: headers(), responseType: "blob" })
       const url = window.URL.createObjectURL(new Blob([res.data]))
       const a = document.createElement("a"); a.href = url; a.download = "buzzy_ads_report.csv"; a.click()
     } catch { alert("Error al exportar.") }

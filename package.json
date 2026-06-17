@@ -18,6 +18,7 @@
     "@capacitor/cli": "^6.2.1",
     "@capacitor/core": "^6.2.1",
     "@capacitor/geolocation": "^6.1.1",
+    "@capacitor/haptics": "^6.0.3",
     "@capacitor/push-notifications": "^6.0.5",
     "@capawesome/capacitor-badge": "^8.0.2",
     "@capawesome/capacitor-file-picker": "^6.2.0",
@@ -53,7 +54,6 @@
     "redux-persist": "^6.0.0",
     "shadcn-ui": "^0.9.4",
     "tailwind-merge": "^3.0.1",
-    "three": "^0.175.0",
     "zustand": "^4.5.2"
   },
   "devDependencies": {
@@ -87,9 +87,7 @@
     "@capacitor/haptics": "^6.0.3",
     "exif-js": "^2.3.0",
     "i18next-http-backend": "^3.0.4",
-    "react-native": "^0.82.1",
     "react-phone-input-2": "^2.15.1",
-    "react-player": "^2.16.0",
     "redux-devtools-extension": "^2.13.9",
     "redux-thunk": "^2.4.2",
     "speech-recognition-polyfill": "^0.0.5",

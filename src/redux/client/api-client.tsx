@@ -30,12 +30,15 @@ const normalizeBaseUrl = (value: unknown): string | null => {
 
 export const getBaseUrl = (): string => {
   const viteUrl = normalizeBaseUrl(import.meta.env.VITE_DOMAIN_SERVER);
-  if (viteUrl) return viteUrl;
-
   const runtimeUrl = normalizeBaseUrl(
     typeof window !== "undefined" ? window.__RUNTIME_CONFIG__?.VITE_DOMAIN_SERVER : undefined
   );
-  return runtimeUrl || DEFAULT_BASE_URL;
+  // normalizeBaseUrl returns URL.origin (no trailing slash). Most call sites
+  // concatenate paths directly as `${getBaseUrl()}api/...`, so we MUST return a
+  // trailing slash here — otherwise the result is e.g. "http://host:8000api/..."
+  // which throws "Failed to construct 'URL': Invalid URL".
+  const base = viteUrl || runtimeUrl || DEFAULT_BASE_URL;
+  return base.endsWith("/") ? base : `${base}/`;
 };
 
 export const BASE_URL = getBaseUrl();
@@ -118,7 +121,7 @@ const responseInterceptor = async (error: any) => {
 
     if (refreshToken) {
       try {
-        const { data } = await axios.post(`${getBaseUrl()}/api/token/refresh/`, {
+        const { data } = await axios.post(`${getBaseUrl()}api/token/refresh/`, {
           refresh: refreshToken,
         });
 

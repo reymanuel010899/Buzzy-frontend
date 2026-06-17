@@ -1,7 +1,10 @@
 import axios from "axios";
 import { SUCCEES_LOGIN, FAILED_LOGIN, LOGOUT_USER, UPDATE_USER } from "../type";
 import type { AppDispatch } from "../../store";
+import { persistor } from "../../store";
 import { apiClient, getBaseUrl } from "../client/api-client";
+import { clearFeedCache } from "../../services/feedCacheDB";
+import { clearChatCache } from "../../services/chatCacheDB";
 export interface FetchWithAuthProps {
   email: string;
   password: string;
@@ -37,10 +40,80 @@ export const login = (formData: FetchWithAuthProps) => async (dispatch: AppDispa
 };
 
 // Función de Logout
+// Claves de localStorage que se CONSERVAN tras el logout (no son datos del usuario).
+const LOGOUT_PRESERVE_KEYS = ["buzzy_language"];
+
 export const logout = () => (dispatch: AppDispatch) => {
   clearAuthData();
   dispatch({ type: LOGOUT_USER });
-  window.location.replace("/sign-in");
+
+  // Limpieza TOTAL: nada del usuario anterior debe sobrevivir en el dispositivo.
+
+  // 1. localStorage — borrar todo menos las claves preservadas (idioma).
+  const clearLocalStorage = () => {
+    try {
+      const preserved: Record<string, string> = {};
+      for (const key of LOGOUT_PRESERVE_KEYS) {
+        const v = localStorage.getItem(key);
+        if (v !== null) preserved[key] = v;
+      }
+      localStorage.clear();
+      for (const [key, value] of Object.entries(preserved)) {
+        localStorage.setItem(key, value);
+      }
+    } catch { /* ignore */ }
+  };
+
+  // 2. sessionStorage — borrar todo.
+  const clearSessionStorage = () => {
+    try { sessionStorage.clear(); } catch { /* ignore */ }
+  };
+
+  // 3. Cache API — borrar TODOS los buckets (avatares, audio, etc.).
+  const clearCacheApi = async () => {
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    }
+  };
+
+  // 4. IndexedDB — borrar las BASES DE DATOS ENTERAS (no solo sus stores), así
+  //    nada queda dentro (p.ej. el feed cacheado en buzzy_feed_cache → main_feed).
+  const clearIndexedDB = async () => {
+    if (!('indexedDB' in window)) return;
+    const deleteDB = (name: string) => new Promise<void>((resolve) => {
+      try {
+        const req = indexedDB.deleteDatabase(name);
+        req.onsuccess = () => resolve();
+        req.onerror = () => resolve();
+        req.onblocked = () => resolve();
+      } catch { resolve(); }
+    });
+    let names: string[] = ["buzzy_feed_cache", "buzzy_chat_cache"];
+    // Si el navegador soporta databases(), borrar TODAS las que existan.
+    try {
+      const idbAny = indexedDB as unknown as { databases?: () => Promise<{ name?: string }[]> };
+      if (typeof idbAny.databases === 'function') {
+        const dbs = await idbAny.databases();
+        const found = dbs.map(d => d.name).filter((n): n is string => !!n);
+        if (found.length) names = Array.from(new Set([...names, ...found]));
+      }
+    } catch { /* fallback a la lista fija */ }
+    await Promise.all(names.map(deleteDB));
+  };
+
+  clearLocalStorage();
+  clearSessionStorage();
+
+  // Esperar a que TODA la limpieza asíncrona termine antes de recargar, para que
+  // la recarga no aborte un borrado a medias (causa de que el feed sobreviviera).
+  Promise.allSettled([
+    persistor.purge(),
+    clearIndexedDB(),
+    clearCacheApi(),
+  ]).finally(() => {
+    window.location.replace("/sign-in");
+  });
 };
 
 // Función de login con Google
@@ -123,6 +196,13 @@ const persistAuthData = (response: { refresh: string; access: string; user: unkn
   localStorage.setItem("accessToken", response.access);
   localStorage.setItem("isAuthenticated", "true");
   localStorage.setItem("user", JSON.stringify(response.user));
+  // Belt-and-suspenders: a fresh login MUST start with a clean feed. If a previous
+  // logout's cache purge didn't finish (timing/redirect), this guarantees the new
+  // session never shows the old user's cached videos. seen_initial is reset so the
+  // feed is fetched fresh from the server, not served from a stale cache.
+  localStorage.removeItem("seen_initial");
+  clearFeedCache().catch(() => {});
+  clearChatCache().catch(() => {});
 };
 
 const handleLoginError = async (error: unknown, formData: FetchWithAuthProps, dispatch: AppDispatch): Promise<void> => {

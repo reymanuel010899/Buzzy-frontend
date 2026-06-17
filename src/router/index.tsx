@@ -1,29 +1,39 @@
-import Login from "../pages/auth/Signin";
+import { lazy } from "react";
 import {
   createBrowserRouter,
   createRoutesFromElements,
   Route,
 } from "react-router-dom";
+
+// ── Eager: lo necesario para arrancar (auth + feed) entra en el bundle inicial.
+import Login from "../pages/auth/Signin";
 import Main from "../pages/main";
 import SignUp from "../pages/auth/signup";
 import RootLayout from "../components/Layout/RootLayout";
-import Wallet from "../pages/main/wallet";
-import Profile from "../pages/profille/profile";
-import SubscriptionSuccess from "../pages/main/SubscriptionSuccess";
-import SubscriptionCancel from "../pages/main/SubscriptionCancel";
-import WalletSuccess from "../pages/main/WalletSuccess";
-import WalletCancel from "../pages/main/WalletCancel";
-import SocialAuthCallback from "../pages/SocialAuthCallback";
 import ProtectedRoute from "../PrivateRoute";
-import AccountSuccess from "../pages/main/successAcount";
-import AccountCancel from "../pages/main/CancelAccount";
-import SupportForm from "../pages/main/Support";
-import AdsPage from "../pages/main/AdsPage";
-import PremiumSuccess from "../pages/main/PremiumSuccess";
-import AiCreditsSuccess from "../pages/main/AiCreditsSuccess";
-import NotFound from "../pages/NotFound";
 import JoinPage from "../pages/auth/JoinPage";
 import VideoDeepLink from "../components/VideoDeepLink";
+
+// ── Lazy: pantallas pesadas u ocasionales — se descargan solo al visitarlas,
+// sacándolas del bundle inicial para que el feed arranque más rápido.
+const Wallet              = lazy(() => import("../pages/main/wallet"));
+const Profile             = lazy(() => import("../pages/profille/profile"));
+const AdsPage             = lazy(() => import("../pages/main/AdsPage"));
+const SupportForm         = lazy(() => import("../pages/main/Support"));
+const SubscriptionSuccess = lazy(() => import("../pages/main/SubscriptionSuccess"));
+const SubscriptionCancel  = lazy(() => import("../pages/main/SubscriptionCancel"));
+const WalletSuccess       = lazy(() => import("../pages/main/WalletSuccess"));
+const WalletCancel        = lazy(() => import("../pages/main/WalletCancel"));
+const AccountSuccess      = lazy(() => import("../pages/main/successAcount"));
+const AccountCancel       = lazy(() => import("../pages/main/CancelAccount"));
+const AdCampaignSuccess   = lazy(() => import("../pages/main/AdCampaignSuccess"));
+const PremiumSuccess      = lazy(() => import("../pages/main/PremiumSuccess"));
+const AiCreditsSuccess    = lazy(() => import("../pages/main/AiCreditsSuccess"));
+const SocialAuthCallback  = lazy(() => import("../pages/SocialAuthCallback"));
+const NotFound            = lazy(() => import("../pages/NotFound"));
+
+// El <Suspense> que muestra el fallback mientras llega cada chunk lazy vive en
+// RootLayout (envuelve el <Outlet/>), así no hay que envolver ruta por ruta.
 
 export const router = createBrowserRouter(
   createRoutesFromElements(
@@ -118,6 +128,14 @@ export const router = createBrowserRouter(
         element={
           <ProtectedRoute>
             <AdsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/ads/campaign-success"
+        element={
+          <ProtectedRoute>
+            <AdCampaignSuccess />
           </ProtectedRoute>
         }
       />

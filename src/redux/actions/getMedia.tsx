@@ -82,3 +82,33 @@ export const getRecommendedFeed = (forceRefresh = false) => async (dispatch: (a:
     setTimeout(() => { _feedFetchInFlight = false; }, 3000);
   }
 };
+
+// loadMoreFeed: paginación por scroll infinito.
+// A diferencia de getRecommendedFeed (REPLACE vía SUCCEES_MEDIA), esta AGREGA
+// los videos nuevos al final con APPEND_MEDIA — el reducer ya deduplica por id.
+// El backend excluye los ya vistos (Redis seen:{user}), así que cada página trae
+// videos distintos y la lista crece sin reiniciarse ni repetir contenido.
+export const loadMoreFeed = () => async (dispatch: (a: unknown) => void) => {
+  // Evitar doble llamada simultánea (re-mount, StrictMode, scroll rápido)
+  if (_feedFetchInFlight) return;
+  _feedFetchInFlight = true;
+
+  try {
+    const response = await apiClient.get('/api/recommendations/feed/');
+    if (response.status === 200) {
+      const videos = response.data?.results ?? response.data;
+
+      // AGREGA al final en vez de reemplazar — el reducer deduplica por id
+      dispatch({ type: APPEND_MEDIA, payload: videos });
+
+      // No tocamos el cache de IndexedDB aquí: su cap de 20 es solo para el
+      // cold-start offline, no para la lista viva paginada.
+      return videos;
+    }
+  } catch {
+    // Sin internet: no despachamos FAILED_MEDIA para no borrar el feed actual;
+    // el usuario simplemente no recibe más páginas hasta recuperar conexión.
+  } finally {
+    setTimeout(() => { _feedFetchInFlight = false; }, 3000);
+  }
+};

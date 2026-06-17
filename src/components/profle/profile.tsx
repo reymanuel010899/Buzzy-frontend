@@ -28,6 +28,7 @@ import {
   Facebook,
   Check,
   Trash2,
+  Rocket,
   Loader2,
   Phone,
   LogOut,
@@ -37,6 +38,7 @@ import {
   Users,
   Lock,
   Bookmark,
+  Gem,
 } from "lucide-react"
 import { Button } from "../ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs"
@@ -45,6 +47,7 @@ import { connect, useDispatch, useSelector } from "react-redux"
 import type { RootState } from "../../store"
 import { getUser } from "../../redux/actions/GetUser"
 import { getUserMedia } from "../../redux/actions/GetUserMedia"
+import { RESET_MEDIA_USER } from "../../redux/type"
 import { saveProfileVideos, loadProfileVideos } from "../../services/feedCacheDB"
 import { useWsEvent } from "../../context/WebSocketContext"
 import { createLike } from "../../redux/actions/createLike"
@@ -52,6 +55,8 @@ import { createView } from "../../redux/actions/createView"
 import { getComment } from "../../redux/actions/getComment"
 import { createComment } from "../../redux/actions/createComment"
 import { apiClient, getBaseUrl, getMediaUrl } from "../../redux/client/api-client"
+import StoryLayers from "../stories/StoryLayers"
+import StoryFilterCanvas from "../index/StoryFilterCanvas"
 import { createFollower } from "../../redux/actions/createFollower"
 import SubscriptionModal from "./SubscriptionModal"
 import { getSubscriptionPlans, createCheckoutSession, startCall } from "../../redux/actions/subscriptionActions"
@@ -93,27 +98,54 @@ import { prefetchAudioUrl } from "../../hooks/useVideoAudio"
 
 // Muestra el emoji de fallback hasta que el video esté listo — evita flash negro en Android
 const GiftVideoThumb: React.FC<{ src: string; emoji: string; playing: boolean; thumbnail?: string }> = ({ src, emoji, playing, thumbnail }) => {
-  const [ready, setReady] = React.useState(false);
+  const [videoReady, setVideoReady] = React.useState(false);
+
+  // Reset ready state when play stops so next play starts clean
+  React.useEffect(() => {
+    if (!playing) setVideoReady(false);
+  }, [playing]);
+
   return (
-    <div className="w-full h-full relative">
+    <div className="w-full h-full relative bg-black">
+      {/* Thumbnail or emoji — always visible until video is ready */}
       {thumbnail ? (
         <img
           src={thumbnail}
-          className="absolute inset-0 w-full h-full object-cover transition-opacity duration-200"
-          style={{ opacity: ready ? 0 : 1 }}
+          className="absolute inset-0 w-full h-full object-cover"
+          style={{ opacity: playing && videoReady ? 0 : 1, transition: 'opacity 0.2s' }}
           alt=""
         />
       ) : (
-        <span className="absolute inset-0 flex items-center justify-center text-2xl transition-opacity duration-200" style={{ opacity: ready ? 0 : 1 }}>{emoji}</span>
+        <span
+          className="absolute inset-0 flex items-center justify-center text-2xl"
+          style={{ opacity: playing && videoReady ? 0 : 1, transition: 'opacity 0.2s' }}
+        >{emoji}</span>
       )}
-      <video src={src} autoPlay={playing} loop muted={!playing} playsInline preload="auto"
-        poster={thumbnail}
-        onCanPlayThrough={() => setReady(true)}
-        className="w-full h-full object-cover transition-opacity duration-200"
-        style={{ opacity: ready ? 1 : 0 }}
-      />
+      {/* Video — only loaded and shown when playing */}
+      {playing && (
+        <video
+          src={src}
+          autoPlay
+          loop
+          playsInline
+          preload="auto"
+          onCanPlay={() => setVideoReady(true)}
+          className="absolute inset-0 w-full h-full object-cover"
+          style={{
+            visibility: videoReady ? 'visible' : 'hidden',
+            opacity: videoReady ? 1 : 0,
+            transition: 'opacity 0.2s',
+          }}
+        />
+      )}
     </div>
   );
+};
+
+const resolveGiftThumbnail = (gift: any) => {
+  if (gift?.gift_thumbnail) return getMediaUrl(gift.gift_thumbnail);
+  if (gift?.video_thumbnail) return getMediaUrl(gift.video_thumbnail);
+  return undefined;
 };
 
 // --- Interfaces ---
@@ -136,6 +168,7 @@ interface UserInterface {
   followed_all_acount: number
   subscribers_count: number
   is_following?: boolean
+  am_i_subscribed?: boolean
   has_active_stories?: boolean
   is_buzzy_premium?: boolean
 }
@@ -158,7 +191,7 @@ interface VideoItem {
   media_type?: 'video' | 'image'
   status?: 'pending' | 'processing' | 'ready' | 'blocked'
   thumbnail_url?: string
-  privacy?: 'public' | 'followers' | 'private'
+  privacy?: 'public' | 'followers' | 'subscribers' | 'private'
 }
 
 interface Comment {
@@ -269,7 +302,7 @@ function ProfileSeccion({
   const modalMusicRef = useRef<HTMLAudioElement | null>(null)
 
   // Lógica importada de StreamingUI
-  const [localMedia, setLocalMedia] = useState<VideoItem[]>(media_user || []);
+  const [localMedia, setLocalMedia] = useState<VideoItem[]>([]);
   const [viewedVideos, setViewedVideos] = useState<Set<string>>(new Set());
   const [videoProgress, setVideoProgress] = useState<Record<string, number>>({});
   const [videoDuration, setVideoDuration] = useState<Record<string, number>>({});
@@ -338,6 +371,16 @@ function ProfileSeccion({
     localStorage.setItem('notif_messages', String(notifMessages));
     localStorage.setItem('notif_gifts', String(notifGifts));
     localStorage.setItem('notif_followers', String(notifFollowers));
+
+    // Sincronizar con el backend para que el PUSH (app cerrada) respete el
+    // sonido por categoría. La notificación visual siempre llega igual.
+    try {
+      await apiClient.post(`${getBaseUrl()}api/notifications/sound-prefs/`, {
+        messages: notifMessages,
+        gifts: notifGifts,
+        followers: notifFollowers,
+      });
+    } catch { /* el sonido in-app ya se respeta vía localStorage */ }
 
     // Push: activar → registrar FCM token; desactivar → borrar token del dispositivo
     if (notifPush && !prevPush) {
@@ -420,29 +463,69 @@ function ProfileSeccion({
   const [receivedVideoGifts, setReceivedVideoGifts] = useState<any[]>([]);
   const [receivedUserGifts, setReceivedUserGifts] = useState<any[]>([]);
   const [unseenGiftsCount, setUnseenGiftsCount] = useState(0);
+  const [isGiftsRefreshing, setIsGiftsRefreshing] = useState(false);
   const [playingGiftUuid, setPlayingGiftUuid] = useState<string | null>(null);
   const [playingGiftBlobUrl, setPlayingGiftBlobUrl] = useState<string | null>(null);
+  const [giftVideoReady, setGiftVideoReady] = useState(false);
+  const [giftVideoMounted, setGiftVideoMounted] = useState(false);
+
+  const loadReceivedGifts = useCallback(async () => {
+    if (!isOwnProfile) {
+      setReceivedVideoGifts([]);
+      setReceivedUserGifts([]);
+      setUnseenGiftsCount(0);
+      return;
+    }
+
+    setIsGiftsRefreshing(true);
+    try {
+      const [videoRes, userRes] = await Promise.all([
+        getVideoGiftsReceived()(dispatch),
+        getUserGiftsReceived()(dispatch),
+      ]);
+
+      const videoGifts = Array.isArray(videoRes?.gifts)
+        ? videoRes.gifts
+        : Array.isArray(videoRes)
+          ? videoRes
+          : [];
+      const userGifts = Array.isArray(userRes?.gifts)
+        ? userRes.gifts
+        : Array.isArray(userRes)
+          ? userRes
+          : [];
+
+      setReceivedVideoGifts(videoGifts);
+      setReceivedUserGifts(userGifts);
+
+      const unseenVideo = typeof videoRes?.unseen_count === "number"
+        ? videoRes.unseen_count
+        : videoGifts.filter((g: any) => !g.is_seen).length;
+      const unseenUser = userGifts.filter((g: any) => !g.is_seen).length;
+
+      setUnseenGiftsCount(unseenVideo + unseenUser);
+    } finally {
+      setIsGiftsRefreshing(false);
+    }
+  }, [dispatch, isOwnProfile]);
 
   const openGiftPreview = (uuid: string, videoUrl: string | undefined) => {
-    if (playingGiftBlobRef.current) URL.revokeObjectURL(playingGiftBlobRef.current);
-    setPlayingGiftBlobUrl(null);
-    if (videoUrl) {
-      fetch(getMediaUrl(videoUrl))
-        .then(r => r.blob())
-        .then(blob => {
-          const blobUrl = URL.createObjectURL(blob);
-          playingGiftBlobRef.current = blobUrl;
-          setPlayingGiftBlobUrl(blobUrl);
-          setPlayingGiftUuid(uuid);
-        })
-        .catch(() => setPlayingGiftUuid(uuid));
-    } else {
-      setPlayingGiftUuid(uuid);
+    // Reproducción directa por streaming desde la URL: el <video> empieza apenas
+    // llegan los primeros bytes, sin esperar a descargar el archivo completo (lo
+    // que causaba ~1s de thumbnail congelado). Se evita el paso fetch→blob.
+    if (playingGiftBlobRef.current) {
+      URL.revokeObjectURL(playingGiftBlobRef.current);
+      playingGiftBlobRef.current = null;
     }
+    setGiftVideoReady(false);
+    setGiftVideoMounted(true);
+    setPlayingGiftUuid(uuid);
+    setPlayingGiftBlobUrl(videoUrl ? getMediaUrl(videoUrl) : null);
   };
   const [showUserGiftModal, setShowUserGiftModal] = useState(false);
   const [giftsTab, setGiftsTab] = useState<'video' | 'user'>('video');
   const [sentGiftPreview, setSentGiftPreview] = useState<GiftI | null>(null);
+  const [sentGiftReady, setSentGiftReady] = useState(false);
   const [giftBlackout, setGiftBlackout] = useState(false);
   const [showBankAccountModal, setShowBankAccountModal] = useState(false);
   const [showChatPrivacyModal, setShowChatPrivacyModal] = useState(false);
@@ -458,6 +541,7 @@ function ProfileSeccion({
   const [activeProfileStoryIndex, setActiveProfileStoryIndex] = useState(0);
   const [profileStoryProgresses, setProfileStoryProgresses] = useState<number[]>([]);
   const profileStoryVideoRef = useRef<HTMLVideoElement | null>(null);
+  const profileStoryAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // Social Modal
   const [showSocialModal, setShowSocialModal] = useState(false);
@@ -570,18 +654,8 @@ function ProfileSeccion({
   }, [dispatch]);
 
   useEffect(() => {
-    if (!isOwnProfile) return;
-    Promise.all([
-      getVideoGiftsReceived()(dispatch),
-      getUserGiftsReceived()(dispatch),
-    ]).then(([videoRes, userRes]: any[]) => {
-      if (videoRes?.gifts) setReceivedVideoGifts(videoRes.gifts);
-      if (userRes?.gifts) setReceivedUserGifts(userRes.gifts);
-      const unseenVideo = videoRes?.unseen_count ?? 0;
-      const unseenUser = userRes?.gifts?.filter((g: any) => !g.is_seen).length ?? 0;
-      setUnseenGiftsCount(unseenVideo + unseenUser);
-    });
-  }, [isOwnProfile, dispatch]);
+    loadReceivedGifts();
+  }, [loadReceivedGifts]);
 
   useEffect(() => {
     if (activeGifts !== null) {
@@ -668,19 +742,13 @@ function ProfileSeccion({
         sender: data.sender, amount: data.amount || 1, gift: data.gift_video,
         color_premiun: data.color_premiun,
       };
-      if (data.gift_video) {
-        if (giftAnimBlobRef.current) URL.revokeObjectURL(giftAnimBlobRef.current);
-        fetch(getMediaUrl(data.gift_video))
-          .then(r => r.blob())
-          .then(blob => {
-            const blobUrl = URL.createObjectURL(blob);
-            giftAnimBlobRef.current = blobUrl;
-            setGiftAnimation({ ...entry, blobUrl });
-          })
-          .catch(() => setGiftAnimation(entry));
-      } else {
-        setGiftAnimation(entry);
+      // Reproducción directa por streaming (sin descargar el video entero como
+      // blob): el <video> de la animación usa getMediaUrl(giftAnimation.gift).
+      if (giftAnimBlobRef.current) {
+        URL.revokeObjectURL(giftAnimBlobRef.current);
+        giftAnimBlobRef.current = null;
       }
+      setGiftAnimation(entry);
     }
   }, [currentUser?.id, localMedia, activeModalIndex]));
 
@@ -716,13 +784,15 @@ function ProfileSeccion({
       setIsProfileOffline(true);
     }
 
+    // Limpiar videos del perfil anterior antes de cargar el nuevo
+    dispatch({ type: RESET_MEDIA_USER });
+    setLocalMedia([]);
+
     // Si es perfil propio: mostrar cache inmediatamente, luego sincronizar
     if (isOwnProfile) {
       loadProfileVideos().then((cached) => {
         if (cached.length > 0) setLocalMedia(cached as VideoItem[]);
       });
-    } else {
-      setLocalMedia([]);
     }
 
     // Quitar skeleton en cuanto llega el usuario, sin esperar al grid de videos
@@ -758,17 +828,17 @@ function ProfileSeccion({
 
   // Suscripción al evento global de refresh
   useEffect(() => {
-    const handleRefresh = () => {
+    const handleRefresh = async () => {
       if (username) {
         getUser(username);
         getUserMedia(username);
       }
+      await loadReceivedGifts();
       dispatch(getWallet() as any);
     };
     window.addEventListener("buzzy:refresh", handleRefresh);
     return () => window.removeEventListener("buzzy:refresh", handleRefresh);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [username, dispatch]);
+  }, [username, dispatch, loadReceivedGifts, getUser, getUserMedia]);
 
   // Sincronizar localMedia cuando llegan videos frescos de Redux
   useEffect(() => {
@@ -779,6 +849,15 @@ function ProfileSeccion({
       saveProfileVideos(media_user).catch(() => {});
     }
   }, [media_user, isOwnProfile]);
+
+  // Si el visitante está en una pestaña que no le corresponde (suscriptores sin
+  // estar suscrito, o privado/guardados que son solo del dueño), volver a público.
+  useEffect(() => {
+    if (isOwnProfile) return;
+    const amSubscribed = !!user?.am_i_subscribed;
+    const allowed = ['public', 'followers', ...(amSubscribed ? ['subscribers'] : [])];
+    if (!allowed.includes(activeTab)) setActiveTab('public');
+  }, [activeTab, isOwnProfile, user]);
 
   // Limpiar estados locales al cambiar de perfil
   useEffect(() => {
@@ -912,7 +991,7 @@ function ProfileSeccion({
       const vip_message = typeof giftTypeOrGift !== 'string' ? ((giftTypeOrGift as GiftI & { vip_message?: string }).vip_message || "") : "";
       await sendVideoGift({ video_id: Number(selectedVideoForGift), gift_type: type, vip_message })(dispatch);
       setShowVideoGiftModal(false);
-      if (giftObj?.video) setSentGiftPreview(giftObj);
+      if (giftObj?.video) { setSentGiftReady(false); setSentGiftPreview(giftObj); }
     } catch {
       showProfileToast('No se pudo enviar el regalo. Inténtalo de nuevo.', true);
     }
@@ -936,7 +1015,7 @@ function ProfileSeccion({
       const vip_message = typeof giftTypeOrGift !== 'string' ? ((giftTypeOrGift as GiftI & { vip_message?: string }).vip_message || "") : "";
       await sendUserGift({ recipient_username: user.username, gift_type: type, vip_message })(dispatch);
       setShowUserGiftModal(false);
-      if (giftObj?.video) setSentGiftPreview(giftObj);
+      if (giftObj?.video) { setSentGiftReady(false); setSentGiftPreview(giftObj); }
     } catch {
       showProfileToast('No se pudo enviar el regalo. Inténtalo de nuevo.', true);
     }
@@ -1281,6 +1360,14 @@ function ProfileSeccion({
             storyUuid: media?.uuid || story?.uuid,
             storyId: story?.id,
             username: story?.user?.username,
+            // Capas + audio de la historia padre, para renderizarlas en el visor
+            // del perfil igual que en el feed (antes se descartaban → historia "pelada").
+            text_layers: story?.text_layers ?? [],
+            sticker_layers: story?.sticker_layers ?? [],
+            filter_css: story?.filter_css ?? null,
+            location: story?.location ?? null,
+            audio_track_url: story?.audio_track_url ?? null,
+            audio_track_title: story?.audio_track_title ?? null,
           }))
       );
   }, [stories, user]);
@@ -1379,6 +1466,39 @@ function ProfileSeccion({
     }
   }, [showProfileStoriesViewer, activeProfileStoryIndex, profileStoriesMedia]);
 
+  // Música de la historia del perfil: reproduce audio_track_url cuando existe,
+  // lo cambia al pasar de historia y lo detiene al cerrar el visor.
+  useEffect(() => {
+    const stopAudio = () => {
+      const a = profileStoryAudioRef.current;
+      if (a) {
+        a.pause();
+        a.src = "";
+        profileStoryAudioRef.current = null;
+      }
+    };
+
+    if (!showProfileStoriesViewer || !profileStoriesMedia.length) {
+      stopAudio();
+      return;
+    }
+
+    const activeStory = profileStoriesMedia[activeProfileStoryIndex];
+    const audioUrl = activeStory?.audio_track_url
+      ? getMediaUrl(activeStory.audio_track_url)
+      : null;
+
+    stopAudio();
+    if (audioUrl) {
+      const audio = new Audio(audioUrl);
+      audio.loop = true;
+      audio.play().catch(() => null);
+      profileStoryAudioRef.current = audio;
+    }
+
+    return stopAudio;
+  }, [showProfileStoriesViewer, activeProfileStoryIndex, profileStoriesMedia]);
+
   useEffect(() => {
     if (!showProfileStoriesViewer || !profileStoriesMedia.length) return;
 
@@ -1417,58 +1537,124 @@ function ProfileSeccion({
 
   if (isLoggingOut) {
     return (
-      <div className="min-h-screen w-full bg-[#050718] flex items-center justify-center overflow-hidden">
-        {/* Background glow blobs */}
-        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 w-72 h-72 rounded-full bg-purple-600/20 blur-[80px] pointer-events-none" />
-        <div className="absolute bottom-1/3 left-1/2 -translate-x-1/2 w-56 h-56 rounded-full bg-cyan-500/15 blur-[60px] pointer-events-none" />
+      <div className="fixed inset-0 z-[9999] w-full bg-[#050a1a] flex items-center justify-center overflow-hidden">
+        {/* Aurora background */}
+        <div className="absolute inset-0 pointer-events-none" style={{ animation: "lo-aurora 8s ease-in-out infinite" }}>
+          <div className="absolute top-[20%] left-1/2 -translate-x-1/2 w-[120vw] h-72 rounded-full bg-purple-600/25 blur-[100px]" />
+          <div className="absolute bottom-[18%] left-1/2 -translate-x-1/2 w-[90vw] h-64 rounded-full bg-cyan-500/20 blur-[90px]" />
+          <div className="absolute top-1/2 left-[20%] -translate-y-1/2 w-52 h-52 rounded-full bg-fuchsia-500/15 blur-[80px]" />
+        </div>
 
-        <div className="relative flex flex-col items-center gap-6 text-center px-8">
-          {/* Rings */}
-          <div className="relative flex items-center justify-center w-24 h-24">
-            {/* Outer slow ring */}
-            <div className="absolute inset-0 rounded-full border border-white/5" />
+        {/* Floating particles */}
+        <div className="absolute inset-0 pointer-events-none overflow-hidden">
+          {[...Array(14)].map((_, i) => (
+            <span
+              key={i}
+              className="absolute rounded-full bg-gradient-to-br from-cyan-300 to-purple-400"
+              style={{
+                left: `${(i * 37) % 100}%`,
+                top: `${(i * 53) % 100}%`,
+                width: `${3 + (i % 3)}px`,
+                height: `${3 + (i % 3)}px`,
+                opacity: 0.18 + (i % 4) * 0.12,
+                animation: `lo-float ${5 + (i % 5)}s ease-in-out ${i * 0.4}s infinite`,
+              }}
+            />
+          ))}
+        </div>
+
+        <div className="relative flex flex-col items-center gap-7 text-center px-8">
+          {/* Logo + orbiting rings + ripples */}
+          <div className="relative flex items-center justify-center w-44 h-44">
+            {/* Expanding ripple waves */}
+            {[0, 1, 2].map(i => (
+              <span
+                key={i}
+                className="absolute inset-0 m-auto w-28 h-28 rounded-full border border-cyan-400/30"
+                style={{ animation: `lo-ripple 2.8s ease-out ${i * 0.9}s infinite` }}
+              />
+            ))}
+
+            {/* Outer orbiting gradient ring */}
             <div
               className="absolute inset-0 rounded-full border-2 border-transparent"
               style={{
-                background: "linear-gradient(#050718, #050718) padding-box, linear-gradient(135deg, #7000ff, #00f0ff) border-box",
-                animation: "spin 2.4s linear infinite",
+                background: "linear-gradient(#050a1a,#050a1a) padding-box, conic-gradient(from 0deg, #7000ff, #00f0ff, #ff2d9e, #7000ff) border-box",
+                animation: "lo-spin 3.5s linear infinite",
+                maskImage: "linear-gradient(#000,#000)",
               }}
             />
-            {/* Inner fast ring */}
+            {/* Inner counter-rotating ring */}
             <div
-              className="absolute inset-3 rounded-full border-2 border-transparent"
+              className="absolute inset-[14px] rounded-full border-2 border-transparent"
               style={{
-                background: "linear-gradient(#050718, #050718) padding-box, linear-gradient(225deg, #00f0ff, #7000ff) border-box",
-                animation: "spin 1.1s linear infinite reverse",
+                background: "linear-gradient(#050a1a,#050a1a) padding-box, conic-gradient(from 180deg, #00f0ff, #7000ff, #00f0ff) border-box",
+                animation: "lo-spin 2s linear infinite reverse",
               }}
             />
-            {/* Center dot */}
-            <div className="w-3 h-3 rounded-full bg-gradient-to-br from-purple-400 to-cyan-400 shadow-[0_0_12px_rgba(112,0,255,0.8)]" />
+
+            {/* Glow halo behind logo */}
+            <div className="absolute inset-7 rounded-full bg-gradient-to-br from-purple-500/40 to-cyan-400/40 blur-xl" style={{ animation: "lo-pulse 1.8s ease-in-out infinite" }} />
+
+            {/* App logo */}
+            <img
+              src="/screenshots/buzzy_icon_1024.png"
+              alt="Buzzy"
+              className="relative w-24 h-24 rounded-[1.4rem] object-cover shadow-[0_0_40px_rgba(112,0,255,0.55)]"
+              style={{ animation: "lo-logo-in 0.7s cubic-bezier(0.22,1.4,0.36,1) both, lo-bob 3s ease-in-out 0.7s infinite" }}
+            />
           </div>
 
           {/* Text */}
-          <div className="flex flex-col items-center gap-1">
-            <p className="text-white font-semibold text-base tracking-wide">Cerrando sesión</p>
-            <p className="text-white/30 text-xs">Hasta pronto 👋</p>
+          <div className="flex flex-col items-center gap-1.5" style={{ animation: "lo-fade-up 0.6s ease-out 0.3s both" }}>
+            <p className="text-white font-bold text-xl tracking-tight bg-gradient-to-r from-white via-cyan-100 to-purple-200 bg-clip-text text-transparent">
+              Cerrando sesión
+            </p>
+            <p className="text-white/45 text-sm">Hasta pronto 👋</p>
           </div>
 
-          {/* Animated dots */}
-          <div className="flex gap-1.5">
-            {[0, 1, 2].map(i => (
-              <div
-                key={i}
-                className="w-1.5 h-1.5 rounded-full bg-gradient-to-r from-purple-400 to-cyan-400"
-                style={{ animation: `bounce 1.2s ease-in-out ${i * 0.2}s infinite` }}
-              />
-            ))}
+          {/* Sliding progress bar */}
+          <div className="w-44 h-1 rounded-full bg-white/10 overflow-hidden" style={{ animation: "lo-fade-up 0.6s ease-out 0.45s both" }}>
+            <div
+              className="h-full w-1/3 rounded-full bg-gradient-to-r from-purple-400 via-cyan-300 to-fuchsia-400"
+              style={{ animation: "lo-slide 1.3s ease-in-out infinite" }}
+            />
           </div>
         </div>
 
         <style>{`
-          @keyframes spin { to { transform: rotate(360deg); } }
-          @keyframes bounce {
-            0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
-            40% { transform: translateY(-6px); opacity: 1; }
+          @keyframes lo-spin { to { transform: rotate(360deg); } }
+          @keyframes lo-pulse {
+            0%, 100% { opacity: 0.5; transform: scale(0.95); }
+            50% { opacity: 0.9; transform: scale(1.08); }
+          }
+          @keyframes lo-ripple {
+            0% { transform: scale(0.6); opacity: 0.7; }
+            100% { transform: scale(1.8); opacity: 0; }
+          }
+          @keyframes lo-logo-in {
+            0% { transform: scale(0.3) rotate(-12deg); opacity: 0; }
+            100% { transform: scale(1) rotate(0deg); opacity: 1; }
+          }
+          @keyframes lo-bob {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-7px); }
+          }
+          @keyframes lo-fade-up {
+            from { transform: translateY(10px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+          }
+          @keyframes lo-slide {
+            0% { transform: translateX(-110%); }
+            100% { transform: translateX(330%); }
+          }
+          @keyframes lo-float {
+            0%, 100% { transform: translateY(0) translateX(0); }
+            50% { transform: translateY(-22px) translateX(8px); }
+          }
+          @keyframes lo-aurora {
+            0%, 100% { opacity: 0.85; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.05); }
           }
         `}</style>
       </div>
@@ -1670,7 +1856,7 @@ function ProfileSeccion({
                   size="icon"
                   className="rounded-xl bg-white/5 hover:bg-white/10 text-white border border-white/5 h-10 w-10 relative flex-shrink-0"
                 >
-                  <Gift size={18} />
+                  {isGiftsRefreshing ? <Loader2 size={18} className="animate-spin" /> : <Gift size={18} />}
                   {unseenGiftsCount > 0 && (
                     <motion.span
                       animate={{ scale: [1, 1.3, 1] }}
@@ -1827,19 +2013,30 @@ function ProfileSeccion({
               {/* Botones de acción + Tabs — sticky al hacer scroll */}
               <div className="sticky top-0 z-30 backdrop-blur-sm  pb-3 rounded-xl flex flex-col gap-4">
                 <div className="relative w-full px-2">
-                  <TabsList className={`relative grid gap-1.5 bg-transparent h-auto p-0 w-full ${isOwnProfile ? 'grid-cols-4' : 'grid-cols-2'}`}>
-                    {(isOwnProfile
+                  {(() => {
+                    // Un visitante solo ve la pestaña 'Suscriptores' si está
+                    // suscrito a este perfil (am_i_subscribed). El dueño siempre la ve.
+                    const amSubscribed = isOwnProfile || !!user?.am_i_subscribed;
+                    const visitorTabs = [
+                      { value: 'public',      label: 'Público',      Icon: Globe,  activeColor: 'text-cyan-400',   glowColor: 'shadow-cyan-500/40'   },
+                      { value: 'followers',   label: 'Seguidores',   Icon: Users,  activeColor: 'text-purple-400', glowColor: 'shadow-purple-500/40' },
+                      ...(amSubscribed
+                        ? [{ value: 'subscribers', label: 'Suscriptores', Icon: Gem, activeColor: 'text-emerald-400', glowColor: 'shadow-emerald-500/40' }]
+                        : []),
+                    ];
+                    const tabs = isOwnProfile
                       ? [
-                          { value: 'public',    label: 'Público',    Icon: Globe,     activeColor: 'text-cyan-400',   glowColor: 'shadow-cyan-500/40'   },
-                          { value: 'followers', label: 'Seguidores', Icon: Users,     activeColor: 'text-purple-400', glowColor: 'shadow-purple-500/40' },
-                          { value: 'private',   label: 'Privado',    Icon: Lock,      activeColor: 'text-amber-400',  glowColor: 'shadow-amber-500/40'  },
-                          { value: 'saved',     label: 'Guardados',  Icon: Bookmark,  activeColor: 'text-pink-400',   glowColor: 'shadow-pink-500/40'   },
+                          { value: 'public',      label: 'Público',      Icon: Globe,     activeColor: 'text-cyan-400',   glowColor: 'shadow-cyan-500/40'   },
+                          { value: 'followers',   label: 'Seguidores',   Icon: Users,     activeColor: 'text-purple-400', glowColor: 'shadow-purple-500/40' },
+                          { value: 'subscribers', label: 'Suscriptores', Icon: Gem,       activeColor: 'text-emerald-400',glowColor: 'shadow-emerald-500/40'},
+                          { value: 'private',     label: 'Privado',      Icon: Lock,      activeColor: 'text-amber-400',  glowColor: 'shadow-amber-500/40'  },
+                          { value: 'saved',       label: 'Guardados',    Icon: Bookmark,  activeColor: 'text-pink-400',   glowColor: 'shadow-pink-500/40'   },
                         ]
-                      : [
-                          { value: 'public',    label: 'Público',    Icon: Globe,  activeColor: 'text-cyan-400',   glowColor: 'shadow-cyan-500/40'   },
-                          { value: 'followers', label: 'Seguidores', Icon: Users,  activeColor: 'text-purple-400', glowColor: 'shadow-purple-500/40' },
-                        ]
-                    ).map((tab) => {
+                      : visitorTabs;
+                    const colsClass = isOwnProfile ? 'grid-cols-5' : (tabs.length === 3 ? 'grid-cols-3' : 'grid-cols-2');
+                    return (
+                  <TabsList className={`relative grid gap-1.5 bg-transparent h-auto p-0 w-full ${colsClass}`}>
+                    {tabs.map((tab) => {
                       const isActive = activeTab === tab.value;
                       return (
                         <TabsTrigger
@@ -1867,6 +2064,8 @@ function ProfileSeccion({
                       );
                     })}
                   </TabsList>
+                    );
+                  })()}
                 </div>
               </div>
 
@@ -1905,7 +2104,7 @@ function ProfileSeccion({
                           onClick={() => openModalAtIndex(index, 'saved')}
                         >
                           {video.media_type === 'image' ? (
-                            <img src={video.thumbnail_url || video.video_url} className="w-full h-full object-cover" alt="" />
+                            <img src={video.thumbnail_url || video.video_url} loading="lazy" decoding="async" className="w-full h-full object-cover" alt="" />
                           ) : (
                             <video src={video.video_url} muted playsInline preload="none" poster={video.thumbnail_url || undefined} className="w-full h-full object-cover" />
                           )}
@@ -1924,9 +2123,10 @@ function ProfileSeccion({
                 <div className="grid grid-cols-3 gap-1 md:gap-4">
                   {activeTab === 'saved' ? null : [...localMedia].filter((video) => {
                     const p = video.privacy ?? 'public';
-                    if (activeTab === 'public')    return p === 'public';
-                    if (activeTab === 'followers') return p === 'followers';
-                    if (activeTab === 'private')   return p === 'private';
+                    if (activeTab === 'public')      return p === 'public';
+                    if (activeTab === 'followers')   return p === 'followers';
+                    if (activeTab === 'subscribers') return p === 'subscribers';
+                    if (activeTab === 'private')     return p === 'private';
                     return true;
                   }).sort((a, b) =>
                     new Date(b.create_at || 0).getTime() - new Date(a.create_at || 0).getTime()
@@ -1946,6 +2146,8 @@ function ProfileSeccion({
                         {video.media_type === 'image' ? (
                           <img
                             src={getMediaUrl(video.video_url || video.video)}
+                            loading="lazy"
+                            decoding="async"
                             className="w-full h-full object-cover transform group-hover:scale-105 transition-transform duration-700"
                             alt="Profile Media"
                           />
@@ -1969,6 +2171,11 @@ function ProfileSeccion({
                         {video.privacy === 'private' && (
                           <div className="absolute top-2 right-2 z-20 bg-black/70 backdrop-blur-sm rounded-full p-1.5">
                             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                          </div>
+                        )}
+                        {video.privacy === 'subscribers' && (
+                          <div className="absolute top-2 right-2 z-20 bg-black/70 backdrop-blur-sm rounded-full p-1.5">
+                            <Gem size={12} className="text-emerald-400" />
                           </div>
                         )}
                         {video.privacy === 'followers' && (
@@ -2093,7 +2300,7 @@ function ProfileSeccion({
                         >
                           <div className="relative flex-shrink-0 w-14 h-14 rounded-xl overflow-hidden bg-black/40">
                             {gift.gift_video_url ? (
-                              <GiftVideoThumb src={getMediaUrl(gift.gift_video_url)} emoji={gift.gift_emoji || "🎁"} playing={isPlaying} thumbnail={gift.video_thumbnail ? getMediaUrl(gift.video_thumbnail) : undefined} />
+                              <GiftVideoThumb src={getMediaUrl(gift.gift_video_url)} emoji={gift.gift_emoji || "🎁"} playing={isPlaying} thumbnail={resolveGiftThumbnail(gift)} />
                             ) : (
                               <div className="w-full h-full flex items-center justify-center text-2xl">{gift.gift_emoji || "🎁"}</div>
                             )}
@@ -2152,13 +2359,11 @@ function ProfileSeccion({
                         {/* Miniatura del regalo — al hacer click muestra la animación full */}
                         <div className="relative flex-shrink-0 w-14 h-14 rounded-xl overflow-hidden bg-black/40">
                           {gift.gift_video_url ? (
-                            <video
+                            <GiftVideoThumb
                               src={getMediaUrl(gift.gift_video_url)}
-                              autoPlay={isPlaying}
-                              loop
-                              muted={!isPlaying}
-                              playsInline
-                              className="w-full h-full object-cover"
+                              emoji={gift.gift_emoji || "🎁"}
+                              playing={isPlaying}
+                              thumbnail={resolveGiftThumbnail(gift)}
                             />
                           ) : (
                             <div className="w-full h-full flex items-center justify-center text-2xl">
@@ -2201,11 +2406,11 @@ function ProfileSeccion({
                           </p>
                         </div>
 
-                        {/* Miniatura del video + tiempo */}
+                          {/* Miniatura del video + tiempo */}
                         <div className="flex-shrink-0 flex flex-col items-end gap-1">
-                          {gift.video_thumbnail ? (
+                          {resolveGiftThumbnail(gift) ? (
                             <img
-                              src={getMediaUrl(gift.video_thumbnail)}
+                              src={resolveGiftThumbnail(gift)!}
                               className="w-10 h-14 rounded-lg object-cover border border-white/10"
                               alt=""
                               onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
@@ -2254,28 +2459,19 @@ function ProfileSeccion({
               transition={{ duration: 0.35 }}
               className="fixed inset-0 z-[300] pointer-events-auto"
             >
-              {/* Poster mientras carga el video */}
-              {giftItem.video_thumbnail && (
-                <img
-                  src={getMediaUrl(giftItem.video_thumbnail)}
-                  className="absolute inset-0 w-full h-full object-cover pointer-events-none"
-                  style={{
-                    maskImage: `radial-gradient(ellipse 70% 65% at 50% 45%, black 30%, transparent 75%)`,
-                    WebkitMaskImage: `radial-gradient(ellipse 70% 65% at 50% 45%, black 30%, transparent 75%)`,
-                  }}
-                />
-              )}
-
-              {/* Video a pantalla completa con máscara que disuelve todos los bordes */}
+              {/* Video a pantalla completa — reproducción directa por streaming.
+                  Arranca apenas llegan los primeros bytes (sin descargar el archivo
+                  completo), eliminando el thumbnail congelado de ~1s. */}
+              {giftVideoMounted && playingGiftBlobUrl && (
               <motion.video
                 key={giftItem.uuid}
-                src={playingGiftBlobUrl || getMediaUrl(giftItem.gift_video_url)}
+                src={playingGiftBlobUrl}
                 autoPlay
                 playsInline
                 muted
-                poster={giftItem.video_thumbnail ? getMediaUrl(giftItem.video_thumbnail) : undefined}
+                preload="auto"
                 initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
+                animate={{ opacity: giftVideoReady ? 1 : 0 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.15, ease: "easeOut" }}
                 className="absolute inset-0 w-full h-full object-cover pointer-events-none"
@@ -2284,6 +2480,8 @@ function ProfileSeccion({
                   maskImage: `radial-gradient(ellipse 70% 65% at 50% 45%, black 30%, transparent 75%)`,
                   WebkitMaskImage: `radial-gradient(ellipse 70% 65% at 50% 45%, black 30%, transparent 75%)`,
                 }}
+                onPlaying={() => setGiftVideoReady(true)}
+                onCanPlay={() => setGiftVideoReady(true)}
                 onTimeUpdate={(e) => {
                   const v = e.currentTarget;
                   const slug = giftItem.gift_name?.toLowerCase();
@@ -2307,6 +2505,20 @@ function ProfileSeccion({
                   setPlayingGiftUuid(null);
                 }}
               />
+              )}
+              {/* Thumbnail visible hasta que el video esté listo — tapa el icono de video en móvil */}
+              {resolveGiftThumbnail(giftItem) && (
+                <img
+                  src={resolveGiftThumbnail(giftItem)!}
+                  className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+                  style={{
+                    opacity: giftVideoReady ? 0 : 1,
+                    transition: 'opacity 0.15s ease-out',
+                    maskImage: `radial-gradient(ellipse 70% 65% at 50% 45%, black 30%, transparent 75%)`,
+                    WebkitMaskImage: `radial-gradient(ellipse 70% 65% at 50% 45%, black 30%, transparent 75%)`,
+                  }}
+                />
+              )}
               {/* Nombre + sender centrado abajo */}
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
@@ -2345,11 +2557,13 @@ function ProfileSeccion({
             <motion.video
               key={sentGiftPreview.slug}
               src={getMediaUrl(sentGiftPreview.video) || undefined}
+              poster={sentGiftPreview.thumbnail ? getMediaUrl(sentGiftPreview.thumbnail) : undefined}
               autoPlay
               playsInline
               muted
+              preload="auto"
               initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
+              animate={{ opacity: sentGiftReady ? 1 : 0 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.15, ease: "easeOut" }}
               className="absolute inset-0 w-full h-full object-cover pointer-events-none"
@@ -2358,8 +2572,25 @@ function ProfileSeccion({
                 maskImage: `radial-gradient(ellipse 70% 65% at 50% 45%, black 30%, transparent 75%)`,
                 WebkitMaskImage: `radial-gradient(ellipse 70% 65% at 50% 45%, black 30%, transparent 75%)`,
               }}
-              onEnded={() => setSentGiftPreview(null)}
+              onPlaying={() => setSentGiftReady(true)}
+              onCanPlay={() => setSentGiftReady(true)}
+              onEnded={() => { setSentGiftReady(false); setSentGiftPreview(null); }}
             />
+            {/* Thumbnail visible hasta que el video arranca — tapa el ícono de
+                play gris por defecto del <video> en Android. */}
+            {sentGiftPreview.thumbnail && (
+              <img
+                src={getMediaUrl(sentGiftPreview.thumbnail)}
+                alt=""
+                className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+                style={{
+                  opacity: sentGiftReady ? 0 : 1,
+                  transition: 'opacity 0.15s ease-out',
+                  maskImage: `radial-gradient(ellipse 70% 65% at 50% 45%, black 30%, transparent 75%)`,
+                  WebkitMaskImage: `radial-gradient(ellipse 70% 65% at 50% 45%, black 30%, transparent 75%)`,
+                }}
+              />
+            )}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -2574,15 +2805,17 @@ function ProfileSeccion({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
             className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4"
             onClick={() => { stopRingtonePreview(); setShowRingtonePanel(false); setShowSettingsModal(false); }}
           >
             <motion.div
-              initial={{ scale: 0.88, y: 30, opacity: 0 }}
+              initial={{ scale: 0.96, y: 16, opacity: 0 }}
               animate={{ scale: 1, y: 0, opacity: 1 }}
-              exit={{ scale: 0.88, y: 30, opacity: 0 }}
-              transition={{ type: "spring", bounce: 0.3 }}
-              className="bg-[#0a0a0f] border border-white/10 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col max-h-[88vh]"
+              exit={{ scale: 0.96, y: 16, opacity: 0 }}
+              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+              style={{ willChange: "transform, opacity" }}
+              className="transform-gpu bg-[#0a0a0f] border border-white/10 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col max-h-[88vh]"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="absolute top-0 right-0 w-[400px] h-[400px] bg-purple-600/10 blur-[100px] rounded-full -translate-y-1/2 translate-x-1/2 pointer-events-none"> </div>
@@ -2757,7 +2990,7 @@ function ProfileSeccion({
                                 // El link apunta al backend Django que sirve la página
                                 // inteligente: detecta si la app está instalada → la abre,
                                 // si no → redirige a Play Store
-                                setReferralLink(`${getBaseUrl()}/join?code=${token}`);
+                                setReferralLink(`${getBaseUrl()}join?code=${token}`);
                                 setReferralCopied(false);
                               } catch {
                                 // silently ignore
@@ -3443,6 +3676,7 @@ function ProfileSeccion({
                                 { icon: <Bookmark size={14} className={savedVideos.some(s => s.id === video.id) ? 'fill-pink-400 text-pink-400' : 'text-white/80'} />, label: savedVideos.some(s => s.id === video.id) ? 'Quitar' : 'Guardar', onClick: () => { const isSaved = savedVideos.some(s => s.id === video.id); if (isSaved) { setSavedVideos(prev => prev.filter((v: any) => v.id !== video.id)); unsaveVideo(video.id)(dispatch); closeModal(); } else { setSavedVideos(prev => [...prev, video]); saveVideo(video.id)(dispatch); } setActiveVideoOptions(null); } },
                                 { icon: <Share2 size={14} className="text-cyan-300" />, label: 'Compartir', onClick: () => { if (navigator.share) { navigator.share({ url: video.video_url || '' }); } setActiveVideoOptions(null); } },
                                 { icon: <Download size={14} className="text-violet-300" />, label: 'Descargar', onClick: () => { const a = document.createElement('a'); a.href = video.video_url || ''; a.download = ''; a.click(); setActiveVideoOptions(null); } },
+                                ...(isOwnProfile && (video as any).user_id?.id === (user as any)?.id && (video as any).privacy === 'public' ? [{ icon: <Rocket size={14} className="text-cyan-400" />, label: 'Promocionar', onClick: () => { navigate(`/ads?boost=${(video as any).uuid}`, { state: { boostVideo: { uuid: (video as any).uuid, video_url: video.video_url, thumbnail_url: (video as any).thumbnail_url, description: video.description, media_type: (video as any).media_type } } }); setActiveVideoOptions(null); } }] : []),
                                 ...(isOwnProfile && (video as any).user_id?.id === (user as any)?.id ? [{ icon: <Trash2 size={14} className="text-red-400" />, label: 'Eliminar', onClick: () => { setConfirmDeleteVideoId((video as any).uuid || video.id.toString()); setActiveVideoOptions(null); } }] : []),
                               ].map((opt) => (
                                 <button key={opt.label} onClick={opt.onClick}
@@ -3909,25 +4143,51 @@ function ProfileSeccion({
                 aria-label="Historia siguiente"
               />
 
-              {profileStoriesMedia[activeProfileStoryIndex]?.type === "video" ? (
-                <video
-                  ref={profileStoryVideoRef}
-                  key={`profile-story-${activeProfileStoryIndex}`}
-                  src={getMediaUrl(profileStoriesMedia[activeProfileStoryIndex]?.file)}
-                  className="h-full w-full object-contain"
-                  autoPlay
-                  playsInline
-                  onTimeUpdate={handleProfileStoryVideoProgress}
-                  onEnded={handleNextProfileStory}
-                />
-              ) : (
-                <img
-                  key={`profile-story-${activeProfileStoryIndex}`}
-                  src={getMediaUrl(profileStoriesMedia[activeProfileStoryIndex]?.file)}
-                  className="h-full w-full object-contain"
-                  alt={`Historia de ${user?.username}`}
-                />
-              )}
+              {(() => {
+                const currentStory = profileStoriesMedia[activeProfileStoryIndex];
+                const hasCustomAudio = Boolean(currentStory?.audio_track_url);
+                const hasStoryFilter = Boolean(currentStory?.filter_css && currentStory.filter_css !== "none");
+                const storyMediaSrc = getMediaUrl(currentStory?.file);
+                return (
+                  <>
+                    {currentStory?.type === "video" ? (
+                      <>
+                        <video
+                          ref={profileStoryVideoRef}
+                          key={`profile-story-${activeProfileStoryIndex}`}
+                          src={storyMediaSrc}
+                          className="h-full w-full object-contain"
+                          autoPlay
+                          playsInline
+                          muted={hasCustomAudio}
+                          style={{ opacity: hasStoryFilter ? 0 : 1 }}
+                          onTimeUpdate={handleProfileStoryVideoProgress}
+                          onEnded={handleNextProfileStory}
+                        />
+                        <StoryFilterCanvas
+                          source={storyMediaSrc}
+                          filterCss={currentStory?.filter_css}
+                          active={hasStoryFilter}
+                          kind="video"
+                          videoRef={profileStoryVideoRef}
+                        />
+                      </>
+                    ) : (
+                      <img
+                        key={`profile-story-${activeProfileStoryIndex}`}
+                        src={storyMediaSrc}
+                        className="h-full w-full object-contain"
+                        alt={`Historia de ${user?.username}`}
+                      />
+                    )}
+                    <StoryLayers
+                      textLayers={currentStory?.text_layers ?? []}
+                      stickerLayers={currentStory?.sticker_layers ?? []}
+                      storyLocation={currentStory?.location ?? null}
+                    />
+                  </>
+                );
+              })()}
             </div>
           </motion.div>
         )}

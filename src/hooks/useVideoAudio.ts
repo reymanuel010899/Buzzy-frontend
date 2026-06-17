@@ -36,13 +36,22 @@ interface UseVideoAudioOptions {
 // ─── Audio cache ─────────────────────────────────────────────────────────────
 // One level only: fetch() → ArrayBuffer → blob URL (stays in memory, no re-fetch)
 // Each playback session creates a fresh Howl from the blob — no stale state issues
-const MAX_CACHE = 10
+// Keep enough headroom that the currently-playing track (and its neighbors) are
+// never the ones evicted — eviction only frees blobs the user scrolled past long
+// ago, so revoking them is safe.
+const MAX_CACHE = 16
 const audioCache = new Map<string, Promise<string>>()  // original url → blob URL promise
 
 function evictIfNeeded() {
   if (audioCache.size >= MAX_CACHE) {
     const oldest = audioCache.keys().next().value!
+    const evicted = audioCache.get(oldest)
     audioCache.delete(oldest)
+    // Revoke the blob URL so the underlying bytes are freed. Without this every
+    // evicted track leaks its blob in memory forever (huge over a long session).
+    evicted?.then(blobUrl => {
+      if (blobUrl && blobUrl.startsWith('blob:')) URL.revokeObjectURL(blobUrl)
+    }).catch(() => {})
   }
 }
 

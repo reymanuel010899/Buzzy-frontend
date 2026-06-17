@@ -6,7 +6,7 @@ import { Link, useNavigate, useLocation } from "react-router-dom"
 import sendMessageSound from "../../assets/sounds/sendMessage.mp3";
 import { prefetchAudioUrl } from "../../hooks/useVideoAudio";
 import { Howler } from "howler";
-import { Eye, MessageCircle, Heart, Volume2, VolumeX, Play, Pause, Plus, UserPlus, UserCheck, Loader2, X, MoreVertical, Music2, Camera, Image as ImageIcon, MapPin, Bookmark, Share2, Download, Lock } from "lucide-react"
+import { Eye, MessageCircle, Heart, Volume2, VolumeX, Play, Pause, Plus, UserPlus, UserCheck, Loader2, X, MoreVertical, Music2, Camera, Image as ImageIcon, MapPin, Bookmark, Share2, Download, Lock, Gem } from "lucide-react"
 import AdCard from "../ads/AdCard"
 import StoryEditor from "./StoryEditor"
 import BottomNavbar from "../Layout/ButtonNavar"
@@ -20,6 +20,7 @@ import { createComment } from "../../redux/actions/createComment"
 import { createView } from "../../redux/actions/createView"
 import { createFollower } from "../../redux/actions/createFollower"
 import { createLike } from "../../redux/actions/createLike"
+import { tapHaptic, ImpactStyle } from "../../utils/haptics"
 import { useWsEvent } from "../../context/WebSocketContext"
 import { getActiveStories } from "../../redux/actions/history/listActiveHistory"
 import { viewStory } from "../../redux/actions/history/makeViewed"
@@ -67,7 +68,7 @@ import { getWallet } from "../../redux/actions/getWallet";
 import { useVideoEngagement } from "../../hooks/useVideoEngagement";
 import { deleteStory } from "../../redux/actions/history/deleteHistory";
 import { reportStory, ReportPayload } from "../../redux/actions/history/reportStory";
-import { getRecommendedFeed, refreshFeed } from "../../redux/actions/getMedia";
+import { refreshFeed, loadMoreFeed } from "../../redux/actions/getMedia";
 import { saveVideo, unsaveVideo } from "../../redux/actions/savedVideos";
 import { loadStoriesCache, saveStories } from "../../services/chatCacheDB";
 import { useCallStore } from "../../store/callStore";
@@ -97,6 +98,21 @@ export interface CommentData {
   audio_duration?: number | null;
   image_url?: string | null;
 }
+// Module-level guard — survives re-mounts when navigating away and back
+let _storiesFetched = false;
+
+// Poda un Record a solo las claves presentes en `live`. Devuelve el MISMO objeto
+// si nada cambió (identidad estable → no dispara re-render innecesario).
+function pruneRecord<T>(rec: Record<string, T>, live: Set<string>): Record<string, T> {
+  let changed = false;
+  const next: Record<string, T> = {};
+  for (const k in rec) {
+    if (live.has(k)) next[k] = rec[k];
+    else changed = true;
+  }
+  return changed ? next : rec;
+}
+
 const StreamingUI = ({ media }: StreamingUIProps) => {
   const { t } = useTranslation(['videos', 'common']);
   const dispatch = useDispatch<AppDispatch>();
@@ -115,6 +131,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         if (prev.some(v => v.uuid === video.uuid)) return prev
         return [video, ...prev]
       })
+      activeVideoRef.current = 0;
       setActiveVideo(0)
     }).catch(() => {})
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -136,13 +153,21 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [showTokenPurchaseSuccessModal, setShowTokenPurchaseSuccessModal] = useState(false);
   const [purchasedTokenAmount, setPurchasedTokenAmount] = useState(0);
   const [activeVideo, setActiveVideo] = useState<number | null>(null)
+  const activeVideoRef = useRef<number | null>(null)
   const hasPlayedFirstVideo = useRef(false)
   const hasUserInteracted = useRef(false)
+  const lastClickTimestamp = useRef(0)
+  const isPlayTransitioningRef = useRef(false)
   const hasLeftInitialVideoRef = useRef(false)
   const videosPausedRef = useRef(true)
+  const activeCarouselSlideRef = useRef(0)
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([])
   const [isMuted, setIsMuted] = useState(false)
   const [videosPaused, setVideosPaused] = useState(true)
+  const syncFeedPlaybackState = useCallback((paused: boolean) => {
+    videosPausedRef.current = paused
+    setVideosPaused(paused)
+  }, [])
   // feedLocked = true until the user taps a video for the first time.
   // While locked, scrolling does NOT autoplay — every video stays paused.
   const [feedLocked, setFeedLocked] = useState(true)
@@ -157,9 +182,10 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [shareSending, setShareSending] = useState<string | null>(null);
   const [shareSent, setShareSent] = useState<Record<string, boolean>>({});
   const [followingState, setFollowingState] = useState<Record<string, boolean>>({});
-  const [videoProgress, setVideoProgress] = useState<Record<string, number>>({});
-  const [videoDuration, setVideoDuration] = useState<Record<string, number>>({});
-  const [isGridVideoPlaying, setIsGridVideoPlaying] = useState<Record<string, boolean>>({})
+  const videoProgressRef = useRef<Record<string, number>>({});
+  const videoDurationRef = useRef<Record<string, number>>({});
+  const progressFillRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [, setIsGridVideoPlaying] = useState<Record<string, boolean>>({})
   const [stories, setStories] = useState<StoryList>([]);
   const audioUnlockedRef = useRef(false);
   const [isAudioUnlocked, setIsAudioUnlocked] = useState(false);
@@ -167,15 +193,13 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const activeFeedAudioTrimEndRef = useRef<number>(0);
   const LoginReducer = useSelector((state: RootState) => (state as unknown as Record<string, { user?: Record<string, unknown> }>).LoginReducer);
 
-  const [transientIconState, setTransientIconState] = useState<{
-    videoId: string
-    icon: 'play' | 'pause'
-  } | null>(null)
   const [showCommentsModal, setShowCommentsModal] = useState(false);
   const [selectedStoryLocation, setSelectedStoryLocation] = useState<string | null>(null);
   const [mediaVideo, setMedia] = useState<videoI[] | null>(media);
+  // Separate like state so updating a like never mutates mediaVideo → prevents video src re-assignment on Android
+  const [likeOverrides, setLikeOverrides] = useState<Record<string, { liked: boolean; like_count: number }>>({});
   const { prefetchBatch } = useUserVideos();
-  const { onVideoPlay, onTimeUpdate: trackTimeUpdate, resetVideo } = useVideoMetrics();
+  const { onVideoPlay, onTimeUpdate: trackTimeUpdate, resetVideo, pruneTo } = useVideoMetrics();
   const [currentVideoId, setCurrentVideoId] = useState<string | null>(null);
   const currentVideoIdRef = useRef<string | null>(null);
   const [viewedVideos, setViewedVideos] = useState<Set<string>>(new Set());
@@ -298,7 +322,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [activeAdIndex, setActiveAdIndex] = useState<number | null>(null);
   const [selectedAd, setSelectedAd] = useState<any | null>(null);
   const [shownAds, setShownAds] = useState<Set<string>>(new Set());
-  const [lastAdTimestamp, setLastAdTimestamp] = useState<number>(0);
+  const [lastAdTimestamp, setLastAdTimestamp] = useState<number>(() => Date.now());
   const [adSequenceCount, setAdSequenceCount] = useState<number>(0);
   const [, setVideoLoopCount] = useState<Record<string, number>>({});
   const lastVideoTimeRef = useRef<Record<string, number>>({});
@@ -317,6 +341,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   // Pull-to-refresh — usa el hook compartido
   const { isPulling: isPullRefreshing, pullProgress, onTouchStart: handlePullTouchStart, onTouchMove: handlePullTouchMove, onTouchEnd: handlePullTouchEnd } = usePullToRefresh({
     onRefresh: async () => {
+      activeVideoRef.current = 0;
       setActiveVideo(0);
       lastFetchedLengthRef.current = 0;
       await Promise.all([
@@ -336,8 +361,10 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       })
     }
 
-    // Threshold: Trigger when user reaches the 5th video from the end
-    const threshold = 5;
+    // Threshold: prefetch the next page when the user is 3 videos from the end.
+    // (Lower than before so we don't refetch — which REPLACES the array — while
+    // there's still plenty to watch; fewer fetches = steadier feed.)
+    const threshold = 3;
     const currentLength = mediaVideo?.length || 0;
 
     if (activeVideo !== null && mediaVideo && activeVideo >= currentLength - threshold && !isFetchingFeed) {
@@ -348,7 +375,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         setIsFetchingFeed(true);
         lastFetchedLengthRef.current = currentLength;
 
-        getRecommendedFeed()(dispatch)
+        loadMoreFeed()(dispatch)
           .then((res: any) => {
             setIsFetchingFeed(false);
             if (!res || res.length === 0) {
@@ -371,7 +398,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   // Ad delivery config from backend
   const [adConfig, setAdConfig] = useState({
     ad_every_nth_video: 3,
-    ad_cooldown_seconds: 240,
+    ad_cooldown_seconds: 360,
     ads_refresh_seconds: 300,
   });
   const userGpsRef = useRef<{ lat: number; lng: number } | null>(null);
@@ -430,8 +457,15 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
 
   const isPlayableAd = (ad: any) => {
+    if (!ad?.id) return false;
+    // Boost de video propio: el contenido reproducible viene en promoted_content.
+    if (ad?.is_boost) {
+      const url = ad?.promoted_content?.video_url;
+      return typeof url === "string" && url.trim().length > 0;
+    }
+    // Anuncio externo clásico: el video está en el creative.
     const mediaFile = ad?.creative?.media_file;
-    return Boolean(ad?.id && typeof mediaFile === "string" && mediaFile.trim());
+    return Boolean(typeof mediaFile === "string" && mediaFile.trim());
   };
 
   const pickRandomAd = (pool: any[]) => {
@@ -507,6 +541,58 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
     return feed;
   }, [mediaVideo, ads]);
+
+  // ── Ventana de virtualización (memoria acotada) ──────────────────────────
+  // Solo se montan los slides dentro de [activeVideo - BEHIND, activeVideo + AHEAD].
+  // El resto se renderiza como un placeholder de la MISMA altura para preservar
+  // el scroll-snap y, sobre todo, el índice posicional del que depende el
+  // IntersectionObserver, el audio (mergedFeed[activeVideo]) y los ads.
+  // Ventana de virtualización ajustada para máximo rendimiento en WebView:
+  // solo se montan ~6 slides (2 atrás + actual + 3 adelante) en vez de 21.
+  // Más adelante que atrás porque el scroll natural es hacia abajo → precarga
+  // el siguiente sin cargar peso innecesario. El resto del feed son placeholders.
+  const WINDOW_BEHIND = 2;
+  const WINDOW_AHEAD = 3;
+  const { windowStart, windowEnd } = useMemo(() => {
+    const center = activeVideo ?? 0;
+    const last = Math.max(0, mergedFeed.length - 1);
+    return {
+      windowStart: Math.max(0, center - WINDOW_BEHIND),
+      windowEnd: Math.min(last, center + WINDOW_AHEAD),
+    };
+  }, [activeVideo, mergedFeed.length]);
+
+  // ── Poda de estados por-video (Tier-1, transitorios) ─────────────────────
+  // Acota los Records/refs que crecen 1 entrada por video a solo los de la
+  // ventana visible. NO se podan likeOverrides/savedMap/followingState/viewedVideos
+  // (Tier-2): son acciones del usuario y deben sobrevivir el back-scroll.
+  useEffect(() => {
+    const live = new Set<string>();
+    for (let i = windowStart; i <= windowEnd; i++) {
+      const d = mergedFeed[i];
+      if (!d) continue;
+      live.add(d.type === 'video' ? String(d.id) : `ad-${d.id}`);
+    }
+    setShowLikeAnimation(p => pruneRecord(p, live));
+    setExpandedDescriptions(p => pruneRecord(p, live));
+    setCarouselDots(p => pruneRecord(p, live));
+    setVideoLoopCount(p => pruneRecord(p, live));
+    // refs: borrar in-place las claves fuera de la ventana
+    for (const k in videoProgressRef.current) {
+      if (!live.has(k)) delete videoProgressRef.current[k];
+    }
+    for (const k in videoDurationRef.current) {
+      if (!live.has(k)) delete videoDurationRef.current[k];
+    }
+    for (const k in progressFillRefs.current) {
+      if (!live.has(k)) delete progressFillRefs.current[k];
+    }
+    for (const k in lastVideoTimeRef.current) {
+      if (!live.has(k)) delete lastVideoTimeRef.current[k];
+    }
+    // firedEvents en useVideoMetrics
+    pruneTo(live);
+  }, [windowStart, windowEnd, mergedFeed, pruneTo]);
 
   // Duck video audio if a call is active, otherwise apply volume_original from the feed item
   useEffect(() => {
@@ -584,11 +670,16 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         !musicAudioRef.current ||
         activeAudioTrackRef.current !== trackId
       ) {
-        // Cleanup previous track
+        // Cleanup previous track — fully release the old <audio> so it can be GC'd
+        // (pause, drop listeners, clear src). Leaking these is a big mobile memory
+        // sink over a long feed session.
         if (musicAudioRef.current) {
-          musicAudioRef.current.pause();
-          musicAudioRef.current.onended = null;
-          musicAudioRef.current.ontimeupdate = null;
+          const old = musicAudioRef.current;
+          old.pause();
+          old.onended = null;
+          old.ontimeupdate = null;
+          old.removeAttribute('src');
+          old.load();
           musicAudioRef.current = null;
         }
 
@@ -598,8 +689,13 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
         prefetchAudioUrl(audioUrl)
           .then(blobUrl => {
-            // Discard if user scrolled to a different track while fetching
-            if (activeAudioTrackRef.current !== trackId) return;
+            // Discard if the user scrolled to a different track while fetching.
+            // IMPORTANT: clear the marker so a later return to this track re-fetches
+            // cleanly instead of being stuck "pending" with no audio (this was the
+            // root cause of "some videos have no sound").
+            if (activeAudioTrackRef.current !== trackId) {
+              return;
+            }
 
             const audio = new Audio(blobUrl);
             audio.loop = false;
@@ -623,17 +719,25 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
               audio.currentTime = trimStart;
               audio.play().catch(() => {});
             };
+            // Loop the trimmed window. Guard with a small epsilon so we don't fire
+            // a seek+play on every single timeupdate frame near the end (that
+            // constant restart is what made the audio sound "frozen"/stuttery).
             audio.ontimeupdate = () => {
               const trimEnd = activeFeedAudioTrimEndRef.current;
-              if (trimEnd > trimStart && audio.currentTime >= trimEnd - 0.2) {
+              if (trimEnd > trimStart && audio.currentTime >= trimEnd - 0.05) {
                 audio.currentTime = trimStart;
-                audio.play().catch(() => {});
+                if (audio.paused && videoElement && !videoElement.paused) {
+                  audio.play().catch(() => {});
+                }
               }
             };
 
             musicAudioRef.current = audio;
 
-            // Only play if the video is still playing at this point
+            // Play if the video is currently playing. If it's still buffering, the
+            // video's own "play"/"playing" listeners (ensureAudioForTrack effect)
+            // will re-invoke us and start the audio then — so no track is left
+            // silent just because the fetch finished a frame too early.
             if (videoElement && !videoElement.paused) {
               audio.play().catch(() => {});
             }
@@ -723,23 +827,14 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     };
   }, []);
 
+  // When an ad starts, pause the underlying feed video.
+  // Play/pause for normal feed scrolling is handled by the IntersectionObserver.
+  // Manual tap play/pause is handled exclusively by handleVideoClick.
   useEffect(() => {
-    videoRefs.current.forEach((video, index) => {
-      if (!video) return;
-      if (activeAdIndex !== null && !video.paused) {
-        video.pause();
-        return;
-      }
-      if (index === activeVideo && activeAdIndex === null) {
-        const shouldBlockInitialAutoplay = index === 0 && !hasUserInteracted.current && !hasLeftInitialVideoRef.current;
-        if (video.paused && !videosPaused && !shouldBlockInitialAutoplay) {
-          video.play().catch(() => { })
-        }
-      } else if (!video.paused) {
-        video.pause();
-      }
-    });
-  }, [activeVideo, activeAdIndex, videosPaused]);
+    if (activeAdIndex !== null) {
+      videoRefs.current.forEach(v => { if (v && !v.paused) v.pause(); });
+    }
+  }, [activeAdIndex]);
 
   // Pause active feed video when upload modal opens
   useEffect(() => {
@@ -795,14 +890,21 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     const groups = new Map();
     stories.forEach((story: any) => {
       const userId = story?.user?.id;
+      const isSub = story?.privacy === 'subscribers';
+      console.log("[STORY PRIVACY]", story?.user?.username, "→", JSON.stringify(story?.privacy));
+      // Etiquetar cada media con el privacy de SU historia, para que el label
+      // dentro del visor dependa de la media actual, no del grupo entero.
+      const taggedMedia = (story.media || []).map((m: any) => ({ ...m, privacy: story.privacy }));
       if (!groups.has(userId)) {
-        groups.set(userId, { ...story, user: story.user, media: story.media ? [...story.media] : [] });
+        groups.set(userId, { ...story, user: story.user, media: taggedMedia, hasSubscriberStory: isSub });
       } else {
         const existing = groups.get(userId);
-        if (story.media) existing.media.push(...story.media);
+        existing.media.push(...taggedMedia);
+        if (isSub) existing.hasSubscriberStory = true;
       }
     });
-    return Array.from(groups.values());
+    const result = Array.from(groups.values());
+    return result;
   }, [stories]);
 
   // ── Story Audio — direct, clean approach ──────────────────────────────────
@@ -937,43 +1039,42 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   }, []);
 
   useEffect(() => {
+    const removeListeners = () => {
+      window.removeEventListener("click", unlockAudio);
+      window.removeEventListener("keydown", unlockAudio);
+      window.removeEventListener("touchstart", unlockAudio);
+      window.removeEventListener("touchend", unlockAudio);
+    };
+
     const unlockAudio = () => {
       if (audioUnlockedRef.current) return;
 
-      // Resume Howler AudioContext directly — works even without the sendAudio element
+      // A real user gesture IS the browser's autoplay authorization. The feed
+      // plays plain HTML5 <audio>, so once a gesture happened we can mark audio
+      // unlocked unconditionally — don't gate it on Howler's ctx reaching
+      // "running", which can lag indefinitely in Android WebView and was the
+      // reason some videos never played their music.
+      audioUnlockedRef.current = true;
+      setIsAudioUnlocked(true);
+      removeListeners();
+
+      // Best-effort: resume Howler's AudioContext (used by the editor/preview).
       const howlerCtx = (Howler as any).ctx as AudioContext | undefined;
       if (howlerCtx && howlerCtx.state === "suspended") {
         howlerCtx.resume().catch(() => {});
       }
 
-      // Also try the sendAudio element as secondary unlock
+      // Best-effort: prime the small SFX elements within the gesture so later
+      // programmatic .play() calls are already allowed.
       const sa = sendAudioRef.current;
-      const tryUnlock = (success: boolean) => {
-        if (!success) return;
-        audioUnlockedRef.current = true;
-        setIsAudioUnlocked(true);
-        window.removeEventListener("click", unlockAudio);
-        window.removeEventListener("keydown", unlockAudio);
-        window.removeEventListener("touchstart", unlockAudio);
-        window.removeEventListener("touchend", unlockAudio);
-        const ta = typingAudioRef.current;
-        if (ta) {
-          ta.volume = 0;
-          ta.play().then(() => { ta.pause(); ta.currentTime = 0; ta.volume = 1; }).catch(() => {});
-        }
-      };
-
       if (sa) {
         sa.volume = 0;
-        sa.play()
-          .then(() => { sa.pause(); sa.currentTime = 0; sa.volume = 1; tryUnlock(true); })
-          .catch(() => {
-            // sendAudio failed but Howler ctx may be resumed — mark unlocked anyway
-            if (!howlerCtx || howlerCtx.state === "running") tryUnlock(true);
-          });
-      } else {
-        // No sendAudio element yet — rely solely on Howler ctx
-        if (!howlerCtx || howlerCtx.state === "running") tryUnlock(true);
+        sa.play().then(() => { sa.pause(); sa.currentTime = 0; sa.volume = 1; }).catch(() => {});
+      }
+      const ta = typingAudioRef.current;
+      if (ta) {
+        ta.volume = 0;
+        ta.play().then(() => { ta.pause(); ta.currentTime = 0; ta.volume = 1; }).catch(() => {});
       }
     };
 
@@ -982,12 +1083,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     window.addEventListener("touchstart", unlockAudio, { passive: true });
     window.addEventListener("touchend", unlockAudio, { passive: true });
 
-    return () => {
-      window.removeEventListener("click", unlockAudio);
-      window.removeEventListener("keydown", unlockAudio);
-      window.removeEventListener("touchstart", unlockAudio);
-      window.removeEventListener("touchend", unlockAudio);
-    };
+    return removeListeners;
   }, []);
 
   useEffect(() => {
@@ -1001,16 +1097,12 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   // ─── WebSocket events (via singleton context) ─────────────────────────────
 
   useWsEvent("like_updated", useCallback((data: any) => {
-    setMedia(prev =>
-      prev
-        ? prev.map(video =>
-          video.id === data.video_id
-            ? { ...video, like_count: data.likes, liked: data.liked }
-            : video
-        )
-        : prev
-    );
-  }, [setMedia]));
+    // Update likeOverrides instead of mediaVideo to avoid re-assigning video src on Android
+    setLikeOverrides(prev => ({
+      ...prev,
+      [String(data.video_id)]: { liked: data.liked, like_count: data.likes },
+    }));
+  }, []));
 
   useWsEvent("gift_received", useCallback((data: any) => {
     const giftEntry = {
@@ -1020,19 +1112,13 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     };
     const normalizeGiftList = (value: any) => (Array.isArray(value) ? value : []);
     if (user.id == data.from_user) {
-      if (data.gift_video) {
-        if (giftAnimBlobRef.current) URL.revokeObjectURL(giftAnimBlobRef.current);
-        fetch(getMediaUrl(data.gift_video))
-          .then(r => r.blob())
-          .then(blob => {
-            const blobUrl = URL.createObjectURL(blob);
-            giftAnimBlobRef.current = blobUrl;
-            setGiftAnimation({ ...giftEntry, blobUrl });
-          })
-          .catch(() => setGiftAnimation(giftEntry));
-      } else {
-        setGiftAnimation(giftEntry);
+      // Reproducción directa por streaming (sin descargar el video entero como
+      // blob): el <video> usa getMediaUrl(giftAnimation.gift) y arranca al instante.
+      if (giftAnimBlobRef.current) {
+        URL.revokeObjectURL(giftAnimBlobRef.current);
+        giftAnimBlobRef.current = null;
       }
+      setGiftAnimation(giftEntry);
     } else {
       setIsGift(prev => {
         const current = normalizeGiftList(prev);
@@ -1183,11 +1269,10 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     setShowStoriesBar(true);
   }, []);
 
-  const hasFetchedStories = useRef(false);
-  // Cargar stories solo una vez al montar el componente
+  // Cargar stories solo una vez por sesión de app — el ref local muere con el desmonte
   useEffect(() => {
-    if (hasFetchedStories.current) return;
-    hasFetchedStories.current = true;
+    if (_storiesFetched) return;
+    _storiesFetched = true;
 
     // 1. Mostrar cache inmediatamente
     loadStoriesCache().then((cached) => {
@@ -1197,14 +1282,16 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       }
     }).catch(() => {});
 
-    // 2. Pedir al servidor y actualizar
-    getActiveStories()(dispatch).then((res: any) => {
-      const fresh = Array.isArray(res) ? res : [];
-      if (fresh.length > 0) {
-        setStories(fresh);
-        saveStories(fresh).catch(() => {});
-        fresh.forEach((s: Story) => { if (s.audio_track_url) prefetchAudioUrl(s.audio_track_url); });
-      }
+    // 2. Pedir al servidor y actualizar. El servidor es la fuente de verdad:
+    //    si devuelve [] (todas las historias expiraron a las 24h) hay que
+    //    REEMPLAZAR el caché y vaciar la barra, no conservar historias muertas.
+    //    Solo un fallo de red (res === undefined) preserva lo que ya se ve.
+    getActiveStories()(dispatch).then((res: unknown) => {
+      if (!Array.isArray(res)) return; // fallo de red: no tocar la barra
+      const fresh = res as Story[];
+      setStories(fresh);
+      saveStories(fresh).catch(() => {});
+      fresh.forEach((s: Story) => { if (s.audio_track_url) prefetchAudioUrl(s.audio_track_url); });
     });
   }, [dispatch]); // Solo depende de dispatch que es estable
 
@@ -1216,9 +1303,14 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         return;
       }
       refreshFeed()(dispatch);
-      getActiveStories()(dispatch).then((res: any) => {
-        const refreshed = Array.isArray(res) ? res : [];
+      getActiveStories()(dispatch).then((res: unknown) => {
+        // El servidor manda: una respuesta real (aunque sea []) reemplaza la barra,
+        // así si las historias expiran a las 24h se vacían al refrescar. Solo un
+        // fallo de red (res no-array) preserva lo que ya se ve.
+        if (!Array.isArray(res)) return;
+        const refreshed = res as Story[];
         setStories(refreshed);
+        saveStories(refreshed).catch(() => {});
         refreshed.forEach((s: Story) => { if (s.audio_track_url) prefetchAudioUrl(s.audio_track_url); });
       });
     };
@@ -1314,20 +1406,18 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     // Monetization tracking — 50% mark, min 10s for monetizable
     trackTimeUpdate(videoId, currentTime, duration);
 
-    // Solo actualizar si el cambio es significativo (más de 0.5 segundos)
-    const currentProgress = videoProgress[videoId] || 0;
-    if (Math.abs(currentTime - currentProgress) > 0.5 || currentTime === 0) {
-      setVideoProgress(prev => ({
-        ...prev,
-        [videoId]: currentTime
-      }));
+    const currentProgress = videoProgressRef.current[videoId] || 0;
+    if (Math.abs(currentTime - currentProgress) > 0.25 || currentTime === 0) {
+      videoProgressRef.current[videoId] = currentTime;
+      const progressFill = progressFillRefs.current[videoId];
+      if (progressFill) {
+        const safeDuration = isFinite(duration) && duration > 0 ? duration : 1;
+        progressFill.style.width = `${Math.min(100, (currentTime / safeDuration) * 100)}%`;
+      }
     }
 
-    if (videoDuration[videoId] !== duration && isFinite(duration)) {
-      setVideoDuration(prev => ({
-        ...prev,
-        [videoId]: duration
-      }));
+    if (isFinite(duration) && duration > 0) {
+      videoDurationRef.current[videoId] = duration;
     }
     const viewThreshold = isFinite(duration) && duration > 0 && duration < 10
       ? duration * 0.8
@@ -1342,23 +1432,13 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         return newSet;
       });
     }
-  }, [videoProgress, videoDuration, viewedVideos, dispatch, trackTimeUpdate]);
-  const handleSeek = (videoId: string, newTime: number) => {
-    const index = mediaVideo?.findIndex(v => v.id?.toString() === videoId);
-    if (index === undefined || index === -1) return;
-    const videoElement = videoRefs.current[index];
-    if (videoElement) {
-      videoElement.currentTime = newTime;
-      setVideoProgress(prev => ({
-        ...prev,
-        [videoId]: newTime
-      }));
-    }
-  };
+  }, [viewedVideos, dispatch, trackTimeUpdate]);
   const handleFollowClick = (userIdToFollow: number, userIdAsString: string, actions: "create" | "delete") => {
     if (!userIdToFollow) {
       return;
     }
+    // Feedback háptico al seguir/dejar de seguir (ligeramente más marcado).
+    tapHaptic(ImpactStyle.Medium);
     createFollower({ follower_user_id: userIdToFollow.toString() })(dispatch)
       .then(() => {
         setFollowingState((prev) => ({
@@ -1395,12 +1475,24 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
             }
 
             const shouldBlockInitialAutoplay = index === 0 && !hasUserInteracted.current && !hasLeftInitialVideoRef.current;
-            video.currentTime = 0;
-            if (activeAdIndex !== index && !videosPausedRef.current && !shouldBlockInitialAutoplay && !feedLockedRef.current) {
-              video.play().catch(() => {/* Autoplay ignored */ })
-            } else {
-              video.pause()
+            const isSameFirstVideo = index === 0 && activeVideoRef.current === 0 && hasUserInteracted.current;
+            // If returning to a video whose carousel is on a slide > 0, the feed
+            // video (slide 0) should stay paused — the carousel slide is the active media.
+            const carouselIsOnExtraSlide = index === activeVideoRef.current && activeCarouselSlideRef.current > 0;
+            if (!isSameFirstVideo && !carouselIsOnExtraSlide) {
+              video.currentTime = 0;
+              syncFeedPlaybackState(false);
+              if (activeAdIndex !== index && !shouldBlockInitialAutoplay && !feedLockedRef.current) {
+                video.play().catch(() => {/* Autoplay ignored */ })
+              } else {
+                video.pause()
+              }
             }
+            // When scrolling away from a carousel video, reset its slide to 0
+            if (activeVideoRef.current !== null && activeVideoRef.current !== index) {
+              activeCarouselSlideRef.current = 0;
+            }
+            activeVideoRef.current = index;
             setActiveVideo(index)
             setActiveOptionsVideoId(null)
             // Reset loop count for this video when it comes into view
@@ -1421,7 +1513,11 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
           }
         })
       },
-      { threshold: 0.6 },
+      // threshold 0.3: el video se considera "activo" y arranca cuando solo el
+      // 30% está visible (no el 60%), así reproduce mucho antes durante el desliz.
+      // rootMargin vertical: pre-dispara el play un poco antes de que entre en
+      // pantalla, eliminando el frame congelado al cambiar de video.
+      { threshold: 0.3, rootMargin: "20% 0px" },
     )
     videoRefs.current.forEach((video) => {
       if (video) observer.observe(video)
@@ -1431,34 +1527,41 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         if (video) observer.unobserve(video)
       })
     }
-  }, [mergedFeed, activeAdIndex, onIntersectionChange])
-  // --- New Effect to Pause Videos When Story Modal Opens ---
+    // windowStart/windowEnd: al deslizar la ventana se montan nuevos <video>;
+    // re-crear el observer asegura que esos slides recién montados se observen.
+  }, [mergedFeed, activeAdIndex, onIntersectionChange, windowStart, windowEnd])
+  // --- Pause the feed (video + music) whenever a story surface is open ---
+  // Covers BOTH viewing someone's stories AND opening the "add story" picker.
+  // Without pausing musicAudioRef too, the feed track kept playing over the modal.
   useEffect(() => {
-    if (viewingStoryUserIndex !== null) {
-      // Pause all main videos when story modal opens
+    const storyOpen = viewingStoryUserIndex !== null || showStoryPicker || storyEditorFile !== null;
+    if (storyOpen) {
       videoRefs.current.forEach((video) => {
-        if (video && !video.paused) {
-          video.pause();
-        }
+        if (video && !video.paused) video.pause();
       });
+      musicAudioRef.current?.pause();
       setIsGridVideoPlaying({});
+    } else {
+      // Returned to the feed — resume the active video (and its music) unless the
+      // user had it manually paused.
+      if (!videosPausedRef.current && activeVideoRef.current !== null) {
+        const v = videoRefs.current[activeVideoRef.current];
+        if (v && v.paused) v.play().catch(() => {});
+      }
     }
-  }, [viewingStoryUserIndex]);
+  }, [viewingStoryUserIndex, showStoryPicker, storyEditorFile]);
   const handleVideoClick = (index: number) => {
+    if (isPlayTransitioningRef.current) return;
+    const now = Date.now();
+    if (now - lastClickTimestamp.current < 800) return;
+    lastClickTimestamp.current = now;
     if (activeAdIndex !== null) return;
     const videoElement = videoRefs.current[index];
     if (!videoElement) return;
+
     hasUserInteracted.current = true;
-    videosPausedRef.current = false;
-    setVideosPaused(false);
 
-    // First tap unlocks the feed — from here on, scrolling autoplays normally
-    if (feedLockedRef.current) {
-      feedLockedRef.current = false;
-      setFeedLocked(false);
-    }
-
-    // Unlock audio context on this user gesture — guaranteed to run inside a tap event
+    // Unlock audio context on first user gesture
     if (!audioUnlockedRef.current) {
       audioUnlockedRef.current = true;
       setIsAudioUnlocked(true);
@@ -1468,12 +1571,36 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       }
     }
 
-    if (videoElement.paused) {
+    // First tap on a locked feed just unlocks — don't toggle play/pause
+    if (feedLockedRef.current) {
+      feedLockedRef.current = false;
+      setFeedLocked(false);
       if (index === 0) hasPlayedFirstVideo.current = true;
-      videoElement.play().catch(error => {
-        console.error("Error al reproducir el video:", error);
-      });
+      syncFeedPlaybackState(false);
+      isPlayTransitioningRef.current = true;
+      videoElement.play().catch(() => {}).finally(() => { isPlayTransitioningRef.current = false; });
+      return;
+    }
+
+    // Decide intent from the live <video> state only. videosPausedRef is React
+    // mirror state that can lag behind the element (and behind a pending play()
+    // promise), so OR-ing it in caused the 3rd tap to misread the state.
+    const isCurrentlyPaused = videoElement.paused;
+
+    if (isCurrentlyPaused) {
+      // Resume. The music track is started/stopped by the <video> "play"/"pause"
+      // listeners (see ensureAudioForTrack effect), so we do NOT start it here —
+      // doing so let the music play even when play() was rejected/interrupted,
+      // which is exactly the "only music, video frozen" bug.
+      if (index === 0) hasPlayedFirstVideo.current = true;
+      isPlayTransitioningRef.current = true;
+      videoElement.play()
+        .then(() => { syncFeedPlaybackState(false); })
+        .catch(() => { syncFeedPlaybackState(true); })
+        .finally(() => { isPlayTransitioningRef.current = false; });
     } else {
+      // Pause. onPause handler + the pauseAudio listener stop the music track.
+      syncFeedPlaybackState(true);
       videoElement.pause();
     }
   };
@@ -1534,14 +1661,26 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   };
 
   const handleLikeClick = (videoId: string, index: number) => {
+    // Feedback háptico inmediato al tocar (se siente nativo). No-op en web.
+    tapHaptic(ImpactStyle.Light);
     // Record interaction for recommendation system
     const videoItem = mediaVideo?.[index];
     if (videoItem) {
       recordInteraction(videoItem.category || null);
     }
 
-    createLike({ video_id: videoId })(dispatch).then(() => {
-    }).catch((error: any) => {
+    // Optimistic update — flip liked state immediately without touching mediaVideo
+    setLikeOverrides(prev => {
+      const current = prev[videoId];
+      const currentLiked = current ? current.liked : (mediaVideo?.find(v => String(v.id) === videoId)?.liked ?? false);
+      const currentCount = current ? current.like_count : (mediaVideo?.find(v => String(v.id) === videoId)?.like_count ?? 0);
+      return {
+        ...prev,
+        [videoId]: { liked: !currentLiked, like_count: currentLiked ? currentCount - 1 : currentCount + 1 },
+      };
+    });
+
+    createLike({ video_id: videoId })(dispatch).catch((error: any) => {
       console.error("Error dispatching like action for video ID:", videoId, error);
     });
     setShowLikeAnimation((prev) => ({
@@ -1554,42 +1693,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         [videoId]: false,
       }));
     }, 450);
-  };
-  const iconTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const handleGridVideoToggle = (videoId: string, videoElement: HTMLVideoElement | null) => {
-    if (!videoElement) return;
-    const isActuallyPlaying = isGridVideoPlaying[videoId] ?? !videoElement.paused;
-    if (iconTimeoutRef.current) {
-      clearTimeout(iconTimeoutRef.current);
-      iconTimeoutRef.current = null;
-      setTransientIconState(null);
-    }
-    const newPlayingState = !isActuallyPlaying;
-    const iconToShow = newPlayingState ? 'play' : 'pause';
-    if (newPlayingState) {
-      videoRefs.current.forEach((ref, index) => {
-        const currentVideoId = mediaVideo?.[index]?.id?.toString();
-        if (ref && currentVideoId && currentVideoId !== videoId && isGridVideoPlaying[currentVideoId]) {
-          ref.pause();
-          setIsGridVideoPlaying(prev => ({ ...prev, [currentVideoId]: false }));
-        }
-      });
-    }
-    if (newPlayingState) {
-      videoElement.play().catch(error => {
-        console.error("Error al reproducir el video:", error);
-      });
-    } else {
-      videoElement.pause();
-    }
-    setIsGridVideoPlaying((prev) => ({
-      ...prev,
-      [videoId]: newPlayingState,
-    }));
-    setTransientIconState({ videoId: videoId, icon: iconToShow });
-    iconTimeoutRef.current = setTimeout(() => {
-      setTransientIconState(null);
-    }, 1000);
   };
   const toggleMute = () => setIsMuted(!isMuted)
   // --- Logic for Create History ---
@@ -1643,11 +1746,13 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     stickerLayers: any[] = [],
     location?: string,
     stickerFiles: { id: string; file: File }[] = [],
+    privacy: 'public' | 'subscribers' = 'public',
   ) => {
     setIsUploadingStory(true);
     const formData = new FormData();
     formData.append('video', file);
     formData.append('description', caption || '');
+    formData.append('privacy', privacy);
     if (filterCss && filterCss !== "none") {
       formData.append('filter_css', filterCss);
     }
@@ -1698,10 +1803,9 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     setCurrentStoryItemIndex(0);
     setIsStoryPaused(false);
   };
-  const closeStoryViewer = () => {
+  const closeStoryViewer = useCallback(() => {
     stopStoryAudio(true);
     setViewingStoryUserIndex(null);
-    // Resume feed video
     const shouldBlockInitialAutoplay = activeVideo === 0 && !hasUserInteracted.current && !hasLeftInitialVideoRef.current;
     if (activeVideo !== null && !shouldBlockInitialAutoplay) {
       const v = videoRefs.current[activeVideo];
@@ -1719,7 +1823,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     setShowGiftMenu(false);
     setShowFullGiftMenu(false);
     setGiftAnimation(null);
-  };
+  }, [activeVideo, stopStoryAudio]);
   const getCurrentProgress = useMemo(() => {
     if (viewingStoryUserIndex === null) return [];
     const currentGroup = groupedStories[viewingStoryUserIndex];
@@ -2337,30 +2441,14 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         .catch(() => {});
     }
 
-    // Precargar video en memoria para reproducción instantánea sin freeze
-    const videoUrl = g.gift ? getMediaUrl(g.gift) : null;
-    if (!videoUrl) {
-      setViewerGiftOverlay({ gift_video: g.gift, gift_type: g.type, sender: senderUsername, uuid: g.uuid });
-      return;
-    }
-
-    // Liberar blob anterior si existe
+    // Reproducción directa por streaming: el <video> del overlay usa
+    // getMediaUrl(viewerGiftOverlay.gift_video) y arranca apenas llegan los
+    // primeros bytes, sin descargar el archivo completo (sin freeze de ~1s).
     if (viewerGiftBlobRef.current) {
       URL.revokeObjectURL(viewerGiftBlobRef.current);
       viewerGiftBlobRef.current = null;
     }
-
-    fetch(videoUrl)
-      .then(r => r.blob())
-      .then(blob => {
-        const blobUrl = URL.createObjectURL(blob);
-        viewerGiftBlobRef.current = blobUrl;
-        setViewerGiftOverlay({ gift_video: g.gift, gift_type: g.type, sender: senderUsername, uuid: g.uuid, blobUrl });
-      })
-      .catch(() => {
-        // Si falla el precache, mostrar igual con URL directa
-        setViewerGiftOverlay({ gift_video: g.gift, gift_type: g.type, sender: senderUsername, uuid: g.uuid });
-      });
+    setViewerGiftOverlay({ gift_video: g.gift, gift_type: g.type, sender: senderUsername, uuid: g.uuid });
   };
 
   const showGiftRecived = (viewer: any) => {
@@ -2392,7 +2480,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
   return (
     <>
-    <div className="relative min-h-screen overflow-hidden bg-black text-white font-sans">
+    <div className="relative min-h-dvh overflow-hidden bg-black text-white font-sans">
       {/* Story Editor */}
       <AnimatePresence>
         {storyEditorFile && (
@@ -2421,7 +2509,11 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       </div>
       <main
         ref={mainRef}
-        className="flex h-screen w-full flex-col overflow-hidden pt-24 pb-[calc(env(safe-area-inset-bottom)+3rem)]"
+        // h-dvh (dynamic viewport height) en vez de h-screen (100vh): en el WebView
+        // de Android 100vh es inestable (cambia con las barras del sistema), lo que
+        // colapsa la cadena de alturas y hace que el video del feed arranque
+        // "mochado" a media pantalla. 100dvh da una base de altura estable.
+        className="flex h-dvh w-full flex-col overflow-hidden pt-24 pb-[calc(env(safe-area-inset-bottom)+3rem)]"
       >
         {/* Stories Bar */}
         <div
@@ -2437,7 +2529,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 	                onClick={handleAddHistory}
 	              >
 	                <div className="relative">
-                  <div className={`relative h-[40px] w-[40px] rounded-full p-[2px] bg-[#0c1033] ${isUploadingStory ? 'animate-pulse' : ''}`}>
+                  <div className={`relative h-[40px] w-[40px] rounded-full p-[2px] bg-[#0c1033] overflow-hidden ${isUploadingStory ? 'animate-pulse' : ''}`}>
                     <img
                       src={getMediaUrl(user.profile_picture as string)}
                       className={`w-full h-full rounded-full object-cover filter ${isUploadingStory ? 'brightness-50' : 'brightness-90 group-hover:brightness-100'} transition-all`}
@@ -2510,12 +2602,15 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                     onClick={() => handleStoryClick(i)}
                   >
                     <div className="relative">
-                      {!seen ? (
+                      {story.hasSubscriberStory ? (
+                        // Historia para suscriptores → anillo dorado/esmeralda premium + brillo
+                        <div className="absolute -inset-[3px] rounded-full bg-gradient-to-tr from-[#ffd700] via-[#34d399] to-[#10b981] opacity-90 group-hover:opacity-100 blur-[0.5px] animate-spin-slow shadow-[0_0_10px_rgba(16,185,129,0.55)]"></div>
+                      ) : !seen ? (
                         <div className="absolute -inset-[3px] rounded-full bg-gradient-to-tr from-[#7000ff] via-[#ff0099] to-[#00f0ff] opacity-80 group-hover:opacity-100 blur-[0.5px] animate-spin-slow"></div>
                       ) : (
                         <div className="absolute inset-0 rounded-full border border-[#2a2f5e]"></div>
                       )}
-                      <div className="relative h-[40px] w-[40px] rounded-full p-[2px] bg-[#050718]">
+                      <div className="relative h-[40px] w-[40px] rounded-full p-[2px] bg-[#050718] overflow-hidden">
                         <img
                           src={getMediaUrl(story.user.profile_picture)}
                           className="w-full h-full rounded-full object-cover group-hover:scale-105 transition-transform duration-300"
@@ -2523,6 +2618,12 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                           loading="lazy"
                         />
                       </div>
+                      {story.hasSubscriberStory && (
+                        // Badge 💎 — distintivo de contenido para suscriptores
+                        <div className="absolute -bottom-0.5 -right-0.5 z-10 flex h-[15px] w-[15px] items-center justify-center rounded-full bg-[#050718] ring-[1.5px] ring-[#10b981] shadow-[0_0_6px_rgba(16,185,129,0.7)]">
+                          <Gem size={9} className="text-emerald-400" />
+                        </div>
+                      )}
                     </div>
                     <span
                       className={`text-[9px] font-medium truncate w-[52px] text-center ${seen
@@ -2541,7 +2642,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         <section className="flex-1 min-h-0">
           <div
             ref={feedScrollRef}
-            className="flex h-full flex-col overflow-y-auto overscroll-y-contain scroll-smooth snap-y snap-mandatory"
+            className="flex h-full flex-col overflow-y-auto overscroll-y-contain snap-y snap-mandatory"
             onScroll={handleFeedScroll}
             onTouchStart={handlePullTouchStart}
             onTouchMove={handlePullTouchMove}
@@ -2624,7 +2725,25 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
             )}
             {mergedFeed.map((data, index) => {
               const videoId = data.type === 'video' ? data.id?.toString() : `ad-${data.id}`;
+
+              // Virtualización: fuera de la ventana se monta un placeholder vacío
+              // de la misma altura/snap. Preserva el índice posicional (videoRefs,
+              // observer, audio, ads) y la altura total del scroll → sin saltos.
+              if (index < windowStart || index > windowEnd) {
+                return (
+                  <div
+                    key={videoId}
+                    data-feed-index={index}
+                    className="relative h-full w-full min-h-full snap-start snap-always flex-shrink-0"
+                  />
+                );
+              }
+
               const isExpanded = expandedDescriptions[videoId];
+              // While an ad plays on this slide, hide ALL the video's own UI
+              // (like/comment/gift/avatar/music/progress/description/dots…) so the
+              // ad shows clean with only its own buttons.
+              const adActive = activeAdIndex === index;
 
               const renderDescriptionWithMentions = (description: string, truncate = false) => {
                 if (!description) {
@@ -2690,7 +2809,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
               return (
                 <div
                   key={videoId}
-                  className="relative h-full min-h-full snap-start snap-always rounded-t-xl rounded-b-none border border-[#2a2f5e]/30 shadow-2xl shadow-black/50"
+                  className="transform-gpu relative h-full min-h-full snap-start snap-always rounded-t-xl rounded-b-none border border-[#2a2f5e]/30 shadow-2xl shadow-black/50"
                   style={{ contain: "layout style" }}
                 >
                   <HorizontalCarousel
@@ -2699,7 +2818,19 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                     isActive={activeVideo === index}
                     isMuted={isMuted}
                     isExpanded={!!expandedDescriptions[videoId]}
+                    isPaused={videosPaused && activeVideo === index}
+                    adActive={adActive}
                     feedScrollRef={feedScrollRef}
+                    onCarouselAudio={(playing) => {
+                      // Belt-and-suspenders: when a slide's track actually starts
+                      // (async), make sure the feed music is silenced. Resuming the
+                      // feed music is handled by onSlideChange when returning to
+                      // slide 0, so we never re-start it here (that caused two tracks
+                      // to overlap).
+                      if (playing) {
+                        musicAudioRef.current?.pause();
+                      }
+                    }}
                     onLike={(_uuid, id) => createLike({ video_id: id })(dispatch)}
                     onComment={(uuid, id) => {
                       setComments(null)
@@ -2711,7 +2842,27 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                       })
                     }}
                     onGift={(id) => handleVideoGiftClick(id)}
-                    onSlideChange={(idx, total) => setCarouselDots(prev => ({ ...prev, [videoId]: { index: idx, total } }))}
+                    onMoreOptions={() => setActiveOptionsVideoId(videoId)}
+                    onSlideChange={(idx, total) => {
+                      setCarouselDots(prev => ({ ...prev, [videoId]: { index: idx, total } }));
+                      if (activeVideo === index) {
+                        activeCarouselSlideRef.current = idx;
+                        // Coordinate the feed (slide 0) audio/video with the carousel.
+                        // On an extra slide, the SlideVideo owns playback — fully stop
+                        // the feed video AND its music so they don't play on top of the
+                        // slide's track ("two songs at once" bug).
+                        const feedVideo = videoRefs.current[index];
+                        if (idx > 0) {
+                          if (feedVideo && !feedVideo.paused) feedVideo.pause();
+                          musicAudioRef.current?.pause();
+                        } else {
+                          // Back on the main slide — resume unless the feed is paused.
+                          if (!videosPausedRef.current && feedVideo && feedVideo.paused) {
+                            feedVideo.play().catch(() => {});
+                          }
+                        }
+                      }
+                    }}
                   >
                     <div className="absolute inset-0 rounded-t-xl rounded-b-none overflow-hidden pt-0 group">
 
@@ -2720,83 +2871,118 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                           <img
                             src={data.video?.startsWith("http") ? data.video : getMediaUrl(data.video)}
                             className="h-full w-full object-cover border-[#00f0ff]/5"
-                            alt="Feed Content"
-                            onClick={() => handleVideoClick(index)}
+                            alt=""
                             loading="lazy"
                           />
                         ) : (
-                          <video
-                            ref={(el) => { if (el) videoRefs.current[index] = el }}
-                            src={activeVideo === index || Math.abs((activeVideo ?? 0) - index) <= 1 ? (data.video?.startsWith("http") ? data.video : getMediaUrl(data.video)) : undefined}
-                            poster={data.thumbnail_url?.startsWith("http") ? data.thumbnail_url : getMediaUrl(data.thumbnail_url)}
-                            preload={activeVideo === index ? "auto" : "none"}
-                            muted={isMuted || activeAdIndex === index}
-                            loop
-                            playsInline
-                            className="object-cover border-[#00f0ff]/5"
-                            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
-                            onClick={() => handleVideoClick(index)}
-                            onPlay={() => {
-                              onVideoPlay(videoId);
-                              // Unlock audio context on first video play (Capacitor/Android)
-                              if (!audioUnlockedRef.current) {
-                                const howlerCtx = (Howler as any).ctx as AudioContext | undefined;
-                                if (howlerCtx && howlerCtx.state === "suspended") {
-                                  howlerCtx.resume().catch(() => {});
-                                }
-                                audioUnlockedRef.current = true;
-                                setIsAudioUnlocked(true);
-                              }
-                            }}
-                            onEnded={() => resetVideo(videoId)}
-                            onTimeUpdate={(e) => {
-                              handleVideoProgress(e, videoId);
-                              // Trigger ad logic: if video is at 5s, we have an ad, cooldown passed (4m), and not shown yet
-                              const now = Date.now();
-                              const cooldownPassed = now - lastAdTimestamp > adConfig.ad_cooldown_seconds * 1000;
-                              const currentTime = e.currentTarget.currentTime;
-                              const prevTime = lastVideoTimeRef.current[videoId] || 0;
-                              lastVideoTimeRef.current[videoId] = currentTime;
-
-                              // Loop detection: if time jumped backwards significantly
-                              if (prevTime > currentTime + 1) {
-                                const videoElement = e.currentTarget;
-                                setVideoLoopCount(prev => {
-                                  const currentCount = (prev[videoId] || 0) + 1;
-                                  if (currentCount >= 3) {
-                                    if (ads.length > 0 && activeAdIndex === null) {
-                                      const nextAd = pickRandomAd(ads);
-                                      if (nextAd) {
-                                        setSelectedAd(nextAd);
-                                        setActiveAdIndex(index);
-                                        videoElement.pause();
-                                        setIsMuted(false); // Force unmute for ad
-                                        setAdSequenceCount(1); // Start sequence
-                                      }
-                                    }
-                                    return { ...prev, [videoId]: 0 }; // Reset count
+                          <div className="absolute inset-0 overflow-hidden bg-black">
+                            <img
+                              src={data.thumbnail_url?.startsWith("http") ? data.thumbnail_url : getMediaUrl(data.thumbnail_url)}
+                              alt=""
+                              aria-hidden="true"
+                              decoding="async"
+                              {...{ fetchpriority: activeVideo === index ? "high" : "auto" }}
+                              className="absolute inset-0 h-full w-full object-cover border-[#00f0ff]/5 opacity-100"
+                            />
+                            <video
+                              ref={(el) => { videoRefs.current[index] = el }}
+                              src={Math.abs((activeVideo ?? 0) - index) <= 2 ? (data.video?.startsWith("http") ? data.video : getMediaUrl(data.video)) : undefined}
+                              poster={data.thumbnail_url?.startsWith("http") ? data.thumbnail_url : getMediaUrl(data.thumbnail_url)}
+                              preload={activeVideo === index ? "auto" : (Math.abs((activeVideo ?? 0) - index) <= 1 ? "metadata" : "none")}
+                              muted={isMuted || activeAdIndex === index}
+                              loop
+                              playsInline
+                              // Capa GPU propia para decodificación por hardware en el
+                              // WebView de Android. NO usamos fade de opacity en el video:
+                              // animar opacity sobre la surface de video fuerza al WebView
+                              // a recomponer la pila de capas → repinta por tiles (el video
+                              // aparece "por cuadritos"). El video va SIEMPRE opaco; el
+                              // thumbnail (<img> detrás) cubre el área hasta que el video
+                              // pinta su primer frame encima, de golpe y sin recomposición.
+                              style={{ transform: "translateZ(0)", backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden" }}
+                              className={`absolute inset-0 h-full w-full object-cover border-[#00f0ff]/5`}
+                              onPlay={() => {
+                                syncFeedPlaybackState(false);
+                                onVideoPlay(videoId);
+                                // Unlock audio context on first video play (Capacitor/Android)
+                                if (!audioUnlockedRef.current) {
+                                  const howlerCtx = (Howler as any).ctx as AudioContext | undefined;
+                                  if (howlerCtx && howlerCtx.state === "suspended") {
+                                    howlerCtx.resume().catch(() => {});
                                   }
-                                  return { ...prev, [videoId]: currentCount };
-                                });
-                              }
-
-                              if (!isPremiumUser && currentTime >= 5 && currentTime < 6 && ads.length > 0 && activeAdIndex === null && index % adConfig.ad_every_nth_video === 0 && !shownAds.has(videoId) && cooldownPassed) {
-                                // Pick a random ad from the pool
-                                const nextAd = pickRandomAd(ads);
-                                if (nextAd) {
-                                  setSelectedAd(nextAd);
-                                  setActiveAdIndex(index);
-                                  setShownAds(prev => new Set(prev instanceof Set ? prev : []).add(videoId));
-                                  e.currentTarget.pause();
-                                  setIsMuted(false); // Force unmute for ad
-                                  setAdSequenceCount(1); // Start sequence
-                                  // Auto-collapse description if it's open
-                                  setExpandedDescriptions(prev => ({ ...prev, [videoId]: false }));
+                                  audioUnlockedRef.current = true;
+                                  setIsAudioUnlocked(true);
                                 }
-                              }
-                            }}
-                          >
-                          </video>
+                              }}
+                              onPlaying={() => {
+                                syncFeedPlaybackState(false);
+                              }}
+                              onPause={() => {
+                                syncFeedPlaybackState(true);
+                              }}
+                              onLoadedMetadata={(e) => {
+                                // Populate duration as soon as metadata is ready so the
+                                // progress bar shows immediately, even before playback.
+                                const d = e.currentTarget.duration;
+                                if (isFinite(d) && d > 0 && videoDurationRef.current[videoId] !== d) {
+                                  videoDurationRef.current[videoId] = d;
+                                }
+                              }}
+                              onEnded={() => {
+                                videoProgressRef.current[videoId] = 0;
+                                const progressFill = progressFillRefs.current[videoId];
+                                if (progressFill) progressFill.style.width = '0%';
+                                resetVideo(videoId);
+                              }}
+                              onTimeUpdate={(e) => {
+                                handleVideoProgress(e, videoId);
+                                // Trigger ad logic: if video is at 5s, we have an ad, cooldown passed (4m), and not shown yet
+                                const now = Date.now();
+                                const cooldownPassed = now - lastAdTimestamp > adConfig.ad_cooldown_seconds * 1000;
+                                const currentTime = e.currentTarget.currentTime;
+                                const prevTime = lastVideoTimeRef.current[videoId] || 0;
+                                lastVideoTimeRef.current[videoId] = currentTime;
+
+                                // Loop detection: if time jumped backwards significantly
+                                if (prevTime > currentTime + 1) {
+                                  const videoElement = e.currentTarget;
+                                  setVideoLoopCount(prev => {
+                                    const currentCount = (prev[videoId] || 0) + 1;
+                                    if (currentCount >= 5) {
+                                      if (ads.length > 0 && activeAdIndex === null) {
+                                        const nextAd = pickRandomAd(ads);
+                                        if (nextAd) {
+                                          setSelectedAd(nextAd);
+                                          setActiveAdIndex(index);
+                                          videoElement.pause();
+                                          setIsMuted(false); // Force unmute for ad
+                                          setAdSequenceCount(1); // Start sequence
+                                        }
+                                      }
+                                      return { ...prev, [videoId]: 0 }; // Reset count
+                                    }
+                                    return { ...prev, [videoId]: currentCount };
+                                  });
+                                }
+
+                                if (!isPremiumUser && currentTime >= 5 && currentTime < 6 && ads.length > 0 && activeAdIndex === null && index % adConfig.ad_every_nth_video === 0 && !shownAds.has(videoId) && cooldownPassed) {
+                                  // Pick a random ad from the pool
+                                  const nextAd = pickRandomAd(ads);
+                                  if (nextAd) {
+                                    setSelectedAd(nextAd);
+                                    setActiveAdIndex(index);
+                                    setShownAds(prev => new Set(prev instanceof Set ? prev : []).add(videoId));
+                                    e.currentTarget.pause();
+                                    setIsMuted(false); // Force unmute for ad
+                                    setAdSequenceCount(1); // Start sequence
+                                    // Auto-collapse description if it's open
+                                    setExpandedDescriptions(prev => ({ ...prev, [videoId]: false }));
+                                  }
+                                }
+                              }}
+                            >
+                            </video>
+                          </div>
                         )}
 
 
@@ -2840,61 +3026,46 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                             />
                           )}
                         </AnimatePresence>
-                        <div className="absolute inset-0 bg-gradient-to-t from-[#050718] via-[#050718]/10 to-transparent pointer-events-none"></div>
-                        <div className="absolute inset-0 bg-gradient-to-r from-[#7000ff]/10 to-[#00f0ff]/10 opacity-0 group-hover:opacity-100 transition-opacity duration-500" onClick={() => handleGridVideoToggle(videoId, videoRefs.current[index])}>
+                        {/* Subtle bottom scrim only — just enough to keep controls
+                            readable without tinting the whole video. */}
+                        <div className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-[#050718]/70 to-transparent pointer-events-none"></div>
+                        <div className="absolute inset-0 bg-gradient-to-r from-[#7000ff]/10 to-[#00f0ff]/10 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none">
                         </div>
-                        {/* Lock overlay — shown while feed is locked. Clickable so the tap reaches handleVideoClick even on mobile. */}
+                        {/* Single tap capture zone — only source of play/pause taps.
+                            Disabled while an ad is active so it never sits over the ad. */}
+                        {!adActive && (
+                          <div
+                            className="absolute inset-0 z-10"
+                            onTouchEnd={(e) => { e.preventDefault(); handleVideoClick(index); }}
+                            onClick={() => handleVideoClick(index)}
+                          />
+                        )}
+
+                        {/* Lock overlay — visual only, no onClick (tap zone above handles it) */}
                         <AnimatePresence>
-                          {feedLocked && activeVideo === index && data.media_type === 'video' && (
+                          {feedLocked && activeVideo === index && data.media_type === 'video' && !adActive && (
                             <motion.div
                               key="feed-lock"
                               initial={{ opacity: 0, scale: 0.8 }}
                               animate={{ opacity: 1, scale: 1 }}
                               exit={{ opacity: 0, scale: 0.8 }}
                               transition={{ duration: 0.2 }}
-                              className="absolute inset-0 flex flex-col items-center justify-center z-20"
-                              onClick={() => handleVideoClick(index)}
+                              className="absolute inset-0 flex flex-col items-center justify-center z-20 pointer-events-none"
                             >
-                              <div className="flex flex-col items-center gap-2 pointer-events-none">
+                              <div className="flex items-center justify-center">
                                 <div className="flex h-16 w-16 items-center justify-center rounded-full bg-black/60 backdrop-blur-md border border-white/20">
                                   <Lock className="h-7 w-7 text-white" />
                                 </div>
-                                <span className="text-white/80 text-xs font-medium tracking-wide drop-shadow">
-                                  Toca para reproducir
-                                </span>
                               </div>
                             </motion.div>
                           )}
                         </AnimatePresence>
 
-                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                          <AnimatePresence>
-                            {transientIconState?.videoId === videoId && (
-                              <motion.div
-                                key={`transient-icon-${data.id}`}
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: 1 }}
-                                exit={{ opacity: 0 }}
-                                transition={{ duration: 0.15 }}
-                                className="absolute inset-0 flex items-center justify-center pointer-events-none"
-                              >
-                                <motion.div
-                                  className="flex h-12 w-12 items-center justify-center rounded-full bg-black/50 backdrop-blur-md"
-                                >
-                                  {transientIconState!.icon === 'play' ? (
-                                    <Play className="h-6 w-6 text-white" fill="white" />
-                                  ) : (
-                                    <Pause className="h-6 w-6 text-white" fill="white" />
-                                  )}
-                                </motion.div>
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
-                        </div>
+                        {/* Play/Pause icon overlay */}
                         {/* PERFIL + DESCRIPCIÓN — esquina superior izquierda */}
                         {/* Pill central — siempre visible arriba, tap para expandir descripción */}
                         <div
-                          className={`absolute top-0 left-0 right-0 z-[60] flex justify-center pointer-events-auto cursor-pointer ${isExpanded || !data.description ? 'invisible' : ''}`}
+                          className={`absolute top-0 left-0 right-0 z-[60] flex justify-center pointer-events-auto cursor-pointer ${isExpanded || !data.description || adActive ? 'invisible' : ''}`}
                           style={{ paddingTop: 6, paddingBottom: 10 }}
                           onClick={(e) => { e.stopPropagation(); handleToggleDescription(videoId); }}
                         >
@@ -2902,7 +3073,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                         </div>
 
                         {/* Descripción pegada al borde superior — solo visible cuando expandida */}
-                        {data.description && isExpanded && (
+                        {data.description && isExpanded && !adActive && (
                           <motion.div
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
@@ -2928,14 +3099,14 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                         )}
 
                         {/* Avatar + follow — encima del contenedor de descripción */}
-                        <div className="absolute top-2 left-3 right-3 z-50 flex items-center justify-between pointer-events-auto">
+                        <div className={`absolute top-2 left-3 right-3 z-50 flex items-center justify-between transition-opacity ${adActive ? 'opacity-0 pointer-events-none' : 'pointer-events-auto'}`}>
                           <Link
                             to={`/profile/${data.user_id?.username}`}
                             onClick={e => e.stopPropagation()}
-                            className="relative h-9 w-9 flex-shrink-0 block"
+                            className="relative h-9 w-9 flex-shrink-0 block rounded-full overflow-hidden"
                           >
                             <img
-                              className="h-full w-full object-cover rounded-full border border-white/20"
+                              className="h-full w-full object-cover"
                               src={getMediaUrl(data.user_id?.profile_picture) || getMediaUrl("profile_pics/avatar.webp")}
                               onError={(e) => { (e.target as HTMLImageElement).src = `https://picsum.photos/100/100?random=${index}`; }}
                               alt={data.user_id?.username}
@@ -2949,34 +3120,28 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                               />
                             )}
                           </Link>
-                          <AnimatePresence mode="wait">
-                            {data.user_id.username !== user.username && (
-                              (!followingState[data.user_id.id.toString()] && !data.current_user_followered) ? (
-                                <motion.button
-                                  key="top-follow"
-                                  initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.8 }}
-                                  whileTap={{ scale: 0.95 }}
-                                  className="flex h-7 w-7 flex-shrink-0 items-center justify-center text-white/95"
-                                  onClick={(e) => { e.stopPropagation(); handleFollowClick(Number(data.user_id.id), data.user_id.id.toString(), "create"); }}
-                                >
-                                  <UserPlus className="h-4 w-4 text-white" strokeWidth={2.4} />
-                                </motion.button>
+                          {/* Disco de música (movido aquí arriba a la derecha) */}
+                          {data.audio_track_title && (
+                            <motion.div
+                              animate={{ rotate: videosPaused ? 0 : 360 }}
+                              transition={videosPaused ? { duration: 0 } : { duration: 4, repeat: Infinity, ease: 'linear' }}
+                              className="relative h-9 w-9 flex-shrink-0 rounded-full overflow-hidden border-2 border-white/20 shadow-lg pointer-events-none"
+                            >
+                              {data.audio_track_cover ? (
+                                <img src={data.audio_track_cover} className="h-full w-full object-cover" alt="" />
                               ) : (
-                                <motion.button
-                                  key="top-following"
-                                  initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1, transition: { delay: 0.1 } }} exit={{ opacity: 0, scale: 0.8 }}
-                                  className="flex h-7 w-7 flex-shrink-0 items-center justify-center text-white/95"
-                                  onClick={(e) => { e.stopPropagation(); handleFollowClick(Number(data.user_id.id), data.user_id.id.toString(), "delete"); }}
-                                >
-                                  <UserCheck className="h-4 w-4 text-white" strokeWidth={2.4} />
-                                </motion.button>
-                              )
-                            )}
-                          </AnimatePresence>
+                                <div className="h-full w-full bg-gradient-to-br from-cyan-500 to-purple-600 flex items-center justify-center">
+                                  <Music2 className="h-4 w-4 text-white" />
+                                </div>
+                              )}
+                              {/* Agujero central tipo CD/vinilo */}
+                              <div className="absolute left-1/2 top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-black/60 border border-white/30 backdrop-blur-sm" />
+                            </motion.div>
+                          )}
                         </div>
 
 {/* FOOTER INFERIOR — música + audio + dots */}
-                        <div className={`absolute -bottom-6 left-0 right-0 px-3 pb-[calc(env(safe-area-inset-bottom)+2.85rem)] pt-10 pointer-events-none flex flex-col justify-end gap-2 bg-gradient-to-t from-black/70 via-black/20 to-transparent ${isExpanded ? 'z-[80]' : 'z-20'}`}>
+                        <div className={`absolute -bottom-6 left-0 right-0 px-3 pb-[calc(env(safe-area-inset-bottom)+2.85rem)] pt-10 pointer-events-none flex flex-col justify-end gap-2 bg-gradient-to-t from-black/70 via-black/20 to-transparent transition-opacity ${isExpanded ? 'z-[80]' : 'z-20'} ${adActive ? 'opacity-0 pointer-events-none' : ''}`}>
 
                           {/* Dots carrusel */}
                           {carouselDots[videoId] && carouselDots[videoId].total > 1 && (
@@ -2996,46 +3161,71 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                             </div>
                           )}
 
-                          {/* Fila: mute izquierda + música centrada + disco derecha */}
-                          <div className="relative flex items-center justify-center w-full pointer-events-auto">
+                          {/* Fila: botón seguir izquierda + música centro + mute derecha.
+                              items-center → los 3 alineados en la misma línea.
+                              Bajada pegada al borde inferior (mt-2 mb-[-22px]). */}
+                          <div
+                            className="relative flex items-center justify-between w-full pointer-events-auto mt-2 mb-[-22px]"
+                            style={{
+                              transform: 'translateZ(0)',
+                              backfaceVisibility: 'hidden',
+                              willChange: 'transform, opacity',
+                              isolation: 'isolate',
+                              contain: 'paint',
+                            }}
+                          >
+                            {/* Botón seguir (movido aquí abajo a la izquierda) */}
+                            <div className="h-9 w-9 flex-shrink-0 flex items-center justify-center">
+                              <AnimatePresence mode="wait">
+                                {data.user_id.username !== user.username && (
+                                  (!followingState[data.user_id.id.toString()] && !data.current_user_followered) ? (
+                                    <motion.button
+                                      key="bottom-follow"
+                                      initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.8 }}
+                                      whileTap={{ scale: 0.95 }}
+                                      className="flex h-9 w-9 items-center justify-center rounded-full  text-white/95 pointer-events-auto"
+                                      onClick={(e) => { e.stopPropagation(); handleFollowClick(Number(data.user_id.id), data.user_id.id.toString(), "create"); }}
+                                    >
+                                      <UserPlus className="h-4 w-4 text-white" strokeWidth={2.4} />
+                                    </motion.button>
+                                  ) : (
+                                    <motion.button
+                                      key="bottom-following"
+                                      initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1, transition: { delay: 0.1 } }} exit={{ opacity: 0, scale: 0.8 }}
+                                      className="flex h-9 w-9 items-center justify-center rounded-full  text-white/95 pointer-events-auto"
+                                      onClick={(e) => { e.stopPropagation(); handleFollowClick(Number(data.user_id.id), data.user_id.id.toString(), "delete"); }}
+                                    >
+                                      <UserCheck className="h-4 w-4 text-white" strokeWidth={2.4} />
+                                    </motion.button>
+                                  )
+                                )}
+                              </AnimatePresence>
+                            </div>
+
                             {data.media_type === 'video' && data.audio_track_title && activeVideo === index && !isExpanded && (
-                              <div className="flex items-center gap-2 px-2 py-1 rounded-full">
+                              <div className="mx-auto flex max-w-[70%] items-center gap-2 rounded-full bg-black/20 px-2 py-1 border border-white/10">
                                 <Music2 className="h-3 w-3 text-cyan-400 shrink-0" />
-                                <span className="text-[10px] font-bold uppercase tracking-widest text-white/80 truncate">
+                                <span className="truncate text-[10px] font-bold uppercase tracking-widest text-white/80">
                                   {clampWords(data.audio_track_title, 4)}
                                 </span>
                                 {data.audio_track_artist && (
                                   <>
                                     <span className="text-white/30 text-[10px] shrink-0">·</span>
-                                    <span className="text-[9px] font-semibold uppercase tracking-widest text-white/60 truncate">
+                                    <span className="truncate text-[9px] font-semibold uppercase tracking-widest text-white/60">
                                       {clampWords(data.audio_track_artist, 3)}
                                     </span>
                                   </>
                                 )}
                               </div>
                             )}
+
                             <motion.button
                               whileTap={{ scale: 0.9 }}
-                              className="absolute left-0 h-9 w-9 flex items-center justify-center rounded-full text-white drop-shadow-lg"
+                              className="h-9 w-9 flex items-center justify-center rounded-full text-white drop-shadow-lg"
                               onClick={(e) => { e.stopPropagation(); toggleMute(); }}
                             >
                               {isMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
                             </motion.button>
-                            {data.audio_track_title && (
-                              <motion.div
-                                animate={{ rotate: 360 }}
-                                transition={{ duration: 4, repeat: Infinity, ease: 'linear' }}
-                                className="absolute right-0 h-9 w-9 rounded-full overflow-hidden border-2 border-white/20 shadow-lg pointer-events-none"
-                              >
-                                {data.audio_track_cover ? (
-                                  <img src={data.audio_track_cover} className="h-full w-full object-cover" alt="" />
-                                ) : (
-                                  <div className="h-full w-full bg-gradient-to-br from-cyan-500 to-purple-600 flex items-center justify-center">
-                                    <Music2 className="h-4 w-4 text-white" />
-                                  </div>
-                                )}
-                              </motion.div>
-                            )}
                           </div>
 
 
@@ -3193,12 +3383,21 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
                           {/* BARRA VERTICAL PEGADA AL BORDE DERECHO - estilo TikTok real */}
                           {/* 3. COLUMNA DE INTERACCIONES (DERECHA) */}
-                          <div className={`
+                          <div
+                            className={`
                               absolute right-1 bottom-[calc(env(safe-area-inset-bottom)+5.5rem)] flex flex-col items-center gap-3
                               pb-[env(safe-area-inset-bottom)+50px]
                               transition-all duration-300
-                              ${isExpanded ? 'pointer-events-none z-[65] opacity-0' : 'pointer-events-auto z-[70] opacity-100'}
-                            `}>
+                              ${isExpanded || adActive ? 'pointer-events-none z-[65] opacity-0' : 'pointer-events-auto z-[70] opacity-100'}
+                            `}
+                            style={{
+                              transform: 'translateZ(0)',
+                              backfaceVisibility: 'hidden',
+                              willChange: 'transform, opacity',
+                              isolation: 'isolate',
+                              contain: 'paint',
+                            }}
+                          >
 
                             {/* Like */}
                             <motion.button
@@ -3209,20 +3408,23 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                               }}
                               className="relative flex flex-col items-center gap-1"
                             >
-                              <motion.div
-                                animate={{ scale: data.liked ? [1, 1.4, 0.9, 1] : 1 }}
-                                transition={{ duration: 0.25, ease: [0.34, 1.56, 0.64, 1] }}
-                                className={`flex h-10 w-10 items-center justify-center rounded-full ${data.liked
-                                  ? "bg-red-500/20 text-red-500"
-                                  : "bg-white/10 text-white"
-                                  }`}
-                              >
-                                <Heart
-                                  className={`h-5 w-5 ${data.liked ? "fill-red-500 text-red-500" : "text-white"
-                                    }`}
-                                />
-                              </motion.div>
-                              <span className="text-xs text-white">{data.like_count || 0}</span>
+                              {(() => {
+                                const lo = likeOverrides[videoId];
+                                const isLiked = lo ? lo.liked : data.liked;
+                                const likeCount = lo ? lo.like_count : (data.like_count || 0);
+                                return (
+                                  <>
+                                    <motion.div
+                                      animate={{ scale: isLiked ? [1, 1.4, 0.9, 1] : 1 }}
+                                      transition={{ duration: 0.25, ease: [0.34, 1.56, 0.64, 1] }}
+                                      className={`flex h-10 w-10 items-center justify-center rounded-full ${isLiked ? "bg-red-500/20 text-red-500" : "bg-white/10 text-white"}`}
+                                    >
+                                      <Heart className={`h-5 w-5 ${isLiked ? "fill-red-500 text-red-500" : "text-white"}`} />
+                                    </motion.div>
+                                    <span className="text-xs text-white">{likeCount}</span>
+                                  </>
+                                );
+                              })()}
                               <AnimatePresence>
                                 {showLikeAnimation[data.id || "1"] && (
                                   <>
@@ -3309,20 +3511,11 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                               }}
                               className="flex flex-col items-center relative"
                               whileTap={{ scale: 0.9 }}
-                              animate={{
-                                scale: [1, 1.04, 1],
-                                rotate: [0, -4, 4, -4, 4, 0],
-                              }}
-                              transition={{
-                                duration: 1.4,
-                                repeat: Infinity,
-                                repeatDelay: 12,
-                              }}
                             >
                               <div className={`
                                   flex h-7 w-8 items-center justify-center rounded-full
                                   bg-gradient-to-br from-pink-500/35 to-purple-500/25
-                                  backdrop-blur-md border border-pink-400/40 shadow-md
+                                  border border-pink-400/40 shadow-md
                                 `}>
                                 {/* Tu SVG del gift (más pequeño) */}
                                 <svg data-v-92f2660e width="20" height="20" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg"><g id="giftbox" data-v-92f2660e=""><g id="Base" data-v-92f2660e=""><g id="bottom" data-v-92f2660e=""><path id="Rectangle 15 Copy 2" d="M94 58H26V104H94V58Z" fill="#FF4F64" data-v-92f2660e=""></path><path id="Rectangle 3 Copy" opacity="0.05" d="M94 101.294H26V104H94V101.294Z" fill="black" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 5" opacity="0.1" d="M28.6842 58H26V104H28.6842V58Z" fill="white" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 6" opacity="0.05" d="M94 58H91.3158V104H94V58Z" fill="black" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 3" opacity="0.05" d="M73.8684 58H71.1842V104H73.8684V58Z" fill="black" data-v-92f2660e=""></path><path id="Rectangle Copy" d="M71.1842 58H48.5921V104H71.1842V58Z" fill="#FFD4D9" data-v-92f2660e=""></path><path id="Rectangle 2" opacity="0.1" d="M94 58H26V63.8627H94V58Z" fill="url(#paint0_linear_740_3020)" data-v-92f2660e=""></path></g></g><g id="top" data-v-92f2660e=""><path id="Rectangle 15 Copy 3" d="M100 42.665H20V60.0001H100V42.665Z" fill="#FF4F64" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 7" opacity="0.05" d="M100 42.665H97.2881V60.0001H100V42.665Z" fill="black" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 4" opacity="0.1" d="M22.7119 42.665H20V59.775H22.7119V42.665Z" fill="white" data-v-92f2660e=""></path><path id="ribbon" d="M60.0077 31.2585C59.9498 31.1677 58.6909 29.2544 58.0916 28.4143C55.4283 24.6809 52.6562 21.6866 49.7588 19.6882C45.9232 17.0425 41.9395 16.2219 38.0786 17.8014C35.6247 18.8053 33.3914 20.7344 31.3719 23.5749C27.177 29.4752 27.4011 34.7531 31.83 38.2919C34.9369 40.7745 39.8498 42.1747 46.1869 42.8621C50.835 43.3663 55.0298 43.2435 59.6147 43.3624L60.0077 31.2585ZM46.7269 37.0423C41.3928 36.4628 37.3603 35.3117 35.3278 33.6852C34.4441 32.978 34.0493 32.2813 34.0144 31.4588C33.9664 30.3263 34.5486 28.7649 35.9595 26.7772C37.3893 24.7631 38.8028 23.5403 40.1691 22.9805C43.7795 21.5011 48.4661 24.7386 53.3703 31.624C54.6954 33.4844 55.9353 35.4716 57.0626 37.4757C53.6591 37.5264 50.0985 37.4086 46.7269 37.0423ZM66.6306 31.624C71.5348 24.7386 76.2213 21.5011 79.8318 22.9805C81.1981 23.5403 82.6115 24.7631 84.0413 26.7772C85.4522 28.7649 86.0344 30.3263 85.9864 31.4588C85.9515 32.2813 85.5567 32.978 84.673 33.6852C82.6406 35.3117 78.608 36.4628 73.2739 37.0423C69.9024 37.4086 66.3417 37.5264 62.9383 37.4757C64.0656 35.4716 65.3054 33.4844 66.6306 31.624ZM59.6147 43.3626C64.0607 43.3626 69.1658 43.3663 73.8139 42.8621C80.1511 42.1747 85.0639 40.7745 88.1708 38.2919C92.5997 34.7531 92.8238 29.4752 88.6289 23.5749C86.6095 20.7344 84.3761 18.8053 81.9222 17.8014C78.0613 16.2219 74.0777 17.0425 70.242 19.6882C67.3447 21.6866 64.5725 24.6809 61.9092 28.4143C61.2369 29.3568 60.6251 30.2764 60.0004 31.2585" fill="url(#paint1_linear_740_3020)" data-v-92f2660e=""></path><path id="Rectangle" d="M76.9491 42.665H42.8248V60.0001H76.9491V42.665Z" fill="#FFD4D9" data-v-92f2660e=""></path><path id="Rectangle 4 Copy 8" opacity="0.1" d="M100 42.665H20V45.3666H100V42.665Z" fill="white" data-v-92f2660e=""></path><path id="Rectangle 4 Copy" opacity="0.05" d="M79.661 42.665H76.9492V60.0001H79.661V42.665Z" fill="black" data-v-92f2660e=""></path></g></g><defs data-v-92f2660e=""><linearGradient id="paint0_linear_740_3020" x1="60" y1="58" x2="60" y2="63.8627" gradientUnits="userSpaceOnUse" data-v-92f2660e=""><stop data-v-92f2660e=""></stop><stop offset="1" stopOpacity="0" data-v-92f2660e=""></stop></linearGradient><linearGradient id="paint1_linear_740_3020" x1="60.0004" y1="18.9264" x2="60.0004" y2="43.3626" gradientUnits="userSpaceOnUse" data-v-92f2660e=""><stop stopColor="#FF879D" data-v-92f2660e=""></stop><stop offset="0.326625" stopColor="#FF4F64" data-v-92f2660e=""></stop><stop offset="1" stopColor="#E54659" data-v-92f2660e=""></stop></linearGradient></defs></svg>
@@ -3351,30 +3544,22 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
 
                         </div>
-                        {/* 4. BARRA DE PROGRESO DE VIDEO PEGADA ABAJO */}
-                        {videoDuration[videoId] > 0 && (
-                          (() => {
-                            const progressPercentage = ((videoProgress[videoId] || 0) / (videoDuration[videoId] || 1)) * 100;
-                            const progressStyle = {
-                              '--progress': `${progressPercentage}%`
-                            } as React.CSSProperties;
-                            return (
-                              <div className="pointer-events-none absolute -bottom-1 left-1 right-1 z-30">
-                                <input
-                                  type="range"
-                                  min="0"
-                                  max={videoDuration[videoId] || 0}
-                                  value={videoProgress[videoId] || 0}
-                                  step="0.1"
-                                  className="pointer-events-auto h-1.5 w-full appearance-none cursor-pointer range-slider !bg-transparent hover:h-2 transition-height duration-150"
-                                  onChange={(e) => handleSeek(videoId, parseFloat(e.target.value))}
-                                  onClick={(e) => e.stopPropagation()}
-                                  style={progressStyle}
-                                />
-                              </div>
-                            );
-                          })()
-                        )}
+                        {/* 4. BARRA DE PROGRESO DE VIDEO — OCULTA a propósito.
+                            Diseño: que el usuario se enfoque en el contenido y no en
+                            cuánto falta del video. El tracking interno (videoProgressRef)
+                            sigue activo para loops/ads; solo no se pinta la barra.
+                            Para reactivarla, descomentar este bloque. */}
+                        {/* {!adActive && data.media_type === 'video' && (
+                          <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-30">
+                            <div className="h-1 w-full overflow-hidden bg-white/15">
+                              <div
+                                ref={(el) => { progressFillRefs.current[videoId] = el; }}
+                                className="h-full bg-gradient-to-r from-cyan-400 to-purple-500 transition-[width] duration-75 ease-linear"
+                                style={{ width: `${Math.min(100, ((videoProgressRef.current[videoId] || 0) / (videoDurationRef.current[videoId] || 1)) * 100)}%` }}
+                              />
+                            </div>
+                          </div>
+                        )} */}
                         {/* FIN DEL CONTENEDOR DE METADATOS INFERIOR UNIFICADO */}
 
                       </div>
@@ -3452,7 +3637,14 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                     />
                   </div>
                   <div className="flex flex-col">
-                    <span className="text-sm font-bold text-white">{groupedStories[viewingStoryUserIndex].user.username}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm font-bold text-white">{groupedStories[viewingStoryUserIndex].user.username}</span>
+                      {groupedStories[viewingStoryUserIndex]?.media?.[currentStoryItemIndex]?.privacy === 'subscribers' && (
+                        <span className="flex items-center gap-1 px-1.5 py-[1px] rounded-full bg-emerald-500/15 border border-emerald-400/40 text-emerald-300 text-[9px] font-semibold">
+                          <Gem size={9} className="text-emerald-400" /> Suscriptores
+                        </span>
+                      )}
+                    </div>
                     <span className="text-xs text-gray-300">Hace {groupedStories[viewingStoryUserIndex].formatted_created_at}</span>
                   </div>
                 </div>
@@ -4603,7 +4795,8 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 maskImage: 'radial-gradient(ellipse 70% 65% at 50% 45%, black 30%, transparent 75%)',
                 WebkitMaskImage: 'radial-gradient(ellipse 70% 65% at 50% 45%, black 30%, transparent 75%)',
               }}
-              onCanPlayThrough={() => setViewerGiftReady(true)}
+              onPlaying={() => setViewerGiftReady(true)}
+              onCanPlay={() => setViewerGiftReady(true)}
               onTimeUpdate={(e) => {
                 const v = e.currentTarget;
                 const type = viewerGiftOverlay.gift_type?.toLowerCase();

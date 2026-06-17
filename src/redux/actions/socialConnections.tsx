@@ -10,16 +10,22 @@ import {
     FAILED_GET_SUGGESTIONS
 } from '../type';
 
-export const getFollowers = (username: string) => async (dispatch: any, getState: any) => {
-    const { socialConnections } = getState();
-    if (socialConnections.followers[username]) {
-        return socialConnections.followers[username];
-    }
+const dedupeByUserId = (list: any[]) => {
+    const seen = new Set<string>();
+    return list.filter((item: any) => {
+        const id = item.user?.id?.toString();
+        if (!id || seen.has(id)) return false;
+        seen.add(id);
+        return true;
+    });
+};
 
+export const getFollowers = (username: string) => async (dispatch: any) => {
     try {
         const response = await apiClient.get(`/api/followers/${username}/`);
-        dispatch({ type: SUCCESS_GET_FOLLOWERS, payload: response.data, username });
-        return response.data;
+        const data = dedupeByUserId(response.data);
+        dispatch({ type: SUCCESS_GET_FOLLOWERS, payload: data, username });
+        return data;
     } catch (error) {
         dispatch({ type: FAILED_GET_FOLLOWERS, payload: (error as any)?.message ?? 'error' });
         console.error("Error fetching followers:", error);
@@ -27,16 +33,12 @@ export const getFollowers = (username: string) => async (dispatch: any, getState
     }
 };
 
-export const getFollowing = (username: string) => async (dispatch: any, getState: any) => {
-    const { socialConnections } = getState();
-    if (socialConnections.following[username]) {
-        return socialConnections.following[username];
-    }
-
+export const getFollowing = (username: string) => async (dispatch: any) => {
     try {
         const response = await apiClient.get(`/api/following/${username}/`);
-        dispatch({ type: SUCCESS_GET_FOLLOWING, payload: response.data, username });
-        return response.data;
+        const data = dedupeByUserId(response.data);
+        dispatch({ type: SUCCESS_GET_FOLLOWING, payload: data, username });
+        return data;
     } catch (error) {
         dispatch({ type: FAILED_GET_FOLLOWING, payload: (error as any)?.message ?? 'error' });
         console.error("Error fetching following:", error);
@@ -44,16 +46,12 @@ export const getFollowing = (username: string) => async (dispatch: any, getState
     }
 };
 
-export const getSubscribers = (username: string) => async (dispatch: any, getState: any) => {
-    const { socialConnections } = getState();
-    if (socialConnections.subscribers[username]) {
-        return socialConnections.subscribers[username];
-    }
-
+export const getSubscribers = (username: string) => async (dispatch: any) => {
     try {
         const response = await apiClient.get(`/api/subscriptions/${username}/`);
-        dispatch({ type: SUCCESS_GET_SUBSCRIBERS, payload: response.data, username });
-        return response.data;
+        const data = dedupeByUserId(response.data);
+        dispatch({ type: SUCCESS_GET_SUBSCRIBERS, payload: data, username });
+        return data;
     } catch (error) {
         dispatch({ type: FAILED_GET_SUBSCRIBERS, payload: (error as any)?.message ?? 'error' });
         console.error("Error fetching subscribers:", error);
@@ -61,16 +59,12 @@ export const getSubscribers = (username: string) => async (dispatch: any, getSta
     }
 };
 
-export const getSuggestions = (username: string) => async (dispatch: any, getState: any) => {
-    const { socialConnections } = getState();
-    if (socialConnections.suggestions[username]) {
-        return socialConnections.suggestions[username];
-    }
-
+export const getSuggestions = (username: string) => async (dispatch: any) => {
     try {
         const response = await apiClient.get(`/api/suggestions/${username}/`);
-        dispatch({ type: SUCCESS_GET_SUGGESTIONS, payload: response.data, username });
-        return response.data;
+        const data = dedupeByUserId(response.data);
+        dispatch({ type: SUCCESS_GET_SUGGESTIONS, payload: data, username });
+        return data;
     } catch (error) {
         dispatch({ type: FAILED_GET_SUGGESTIONS, payload: (error as any)?.message ?? 'error' });
         console.error("Error fetching suggestions:", error);

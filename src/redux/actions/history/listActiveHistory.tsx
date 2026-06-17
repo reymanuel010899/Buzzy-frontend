@@ -4,8 +4,9 @@ import { saveStories, loadStoriesCache } from "../../../services/chatCacheDB";
 
 export const getActiveStories = () => async (dispatch: any) => {
   // 1. Mostrar cache inmediatamente
+  let cached: any[] = [];
   try {
-    const cached = await loadStoriesCache();
+    cached = await loadStoriesCache();
     if (cached.length > 0) {
       dispatch({ type: SUCCEES_ACTIVE_STORIES, payload: cached });
     }
@@ -14,18 +15,22 @@ export const getActiveStories = () => async (dispatch: any) => {
   // 2. Pedir al servidor
   try {
     const response = await apiClient.get("/api/stories/active/");
+    const stories = Array.isArray(response.data) ? response.data : [];
     dispatch({
       type: SUCCEES_ACTIVE_STORIES,
-      payload: response.data,
+      payload: stories,
     });
-    // 3. Guardar en cache
-    const stories = Array.isArray(response.data) ? response.data : [];
-    if (stories.length > 0) saveStories(stories).catch(console.error);
-    return response.data;
+    // 3. El servidor es la fuente de verdad: persistimos SIEMPRE, incluso si
+    //    viene vacío. Así, cuando las historias expiran a las 24h, el caché
+    //    queda vacío y no se vuelven a pintar historias muertas al reabrir.
+    saveStories(stories).catch(console.error);
+    return stories;
   } catch (error: any) {
     dispatch({
       type: FAILED_ACTIVE_STORIES,
       payload: error?.message ?? 'error',
     });
+    // Ante un fallo de red, devolver el cache para que la barra no se vacíe.
+    return cached;
   }
 };

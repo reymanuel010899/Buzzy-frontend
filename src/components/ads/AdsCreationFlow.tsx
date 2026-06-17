@@ -4,6 +4,7 @@ import { CheckCircle2, ChevronLeft, Rocket } from "lucide-react";
 import StepObjective from "./StepObjective";
 import StepAudience from "./StepAudience";
 import StepCreative from "./StepCreative";
+import StepBoostPreview from "./StepBoostPreview";
 import StepBudget from "./StepBudget";
 
 interface AdsCreationFlowProps {
@@ -14,27 +15,35 @@ interface AdsCreationFlowProps {
     setData: (data: any) => void;
     onLaunch: () => void;
     loading: boolean;
+    isBoost?: boolean;
+    boostVideo?: any | null;
 }
 
-const STEPS = ['Objetivo', 'Audiencia', 'Contenido', 'Presupuesto']
+// En un boost el video ES el contenido: el paso 3 muestra la vista previa real
+// del video promocionado en vez del formulario de creative.
+const STEPS_EXTERNAL = ['Objetivo', 'Audiencia', 'Contenido', 'Presupuesto']
+const STEPS_BOOST    = ['Objetivo', 'Audiencia', 'Vista previa', 'Presupuesto']
 
 const shake = {
     x: [0, -8, 8, -8, 8, -4, 4, 0],
     transition: { duration: 0.45 }
 }
 
-function validate(step: number, data: any): Record<string, boolean> {
+function validate(step: number, data: any, isBoost: boolean): Record<string, boolean> {
     if (step === 1) {
         return {
             name: !data.name?.trim(),
         }
     }
     if (step === 2) {
+        // En boost no se pide ubicación (el video se muestra a todos),
+        // por eso no se valida que haya ubicaciones.
         return {
-            locations: (data.audience?.locations ?? []).length === 0,
+            locations: !isBoost && (data.audience?.locations ?? []).length === 0,
         }
     }
-    if (step === 3) {
+    // Paso "Contenido" solo existe en anuncios externos.
+    if (step === 3 && !isBoost) {
         return {
             title:           !data.creative.title?.trim(),
             description:     !data.creative.description?.trim(),
@@ -46,13 +55,16 @@ function validate(step: number, data: any): Record<string, boolean> {
 }
 
 const AdsCreationFlow: React.FC<AdsCreationFlowProps> = ({
-    step, nextStep, prevStep, data, setData, onLaunch, loading
+    step, nextStep, prevStep, data, setData, onLaunch, loading, isBoost = false, boostVideo = null
 }) => {
     const [errors, setErrors] = useState<Record<string, boolean>>({})
     const [shakeTrigger, setShakeTrigger] = useState(0)
 
+    const STEPS = isBoost ? STEPS_BOOST : STEPS_EXTERNAL
+    const isLastStep = step === 4
+
     const handleNext = () => {
-        const errs = validate(step, data)
+        const errs = validate(step, data, isBoost)
         const hasErrors = Object.values(errs).some(Boolean)
         if (hasErrors) {
             setErrors(errs)
@@ -102,8 +114,11 @@ const AdsCreationFlow: React.FC<AdsCreationFlowProps> = ({
                         className="h-full overflow-y-auto"
                     >
                         {step === 1 && <StepObjective data={data} setData={setData} errors={errors} shakeTrigger={shakeTrigger} />}
-                        {step === 2 && <StepAudience  data={data} setData={setData} errors={errors} shakeTrigger={shakeTrigger} />}
-                        {step === 3 && <StepCreative  data={data} setData={setData} errors={errors} shakeTrigger={shakeTrigger} />}
+                        {step === 2 && <StepAudience  data={data} setData={setData} errors={errors} shakeTrigger={shakeTrigger} hideLocation={isBoost} />}
+                        {step === 3 && (isBoost
+                            ? <StepBoostPreview boostVideo={boostVideo} authorUsername={boostVideo?.author?.username || boostVideo?.user_id?.username} />
+                            : <StepCreative data={data} setData={setData} errors={errors} shakeTrigger={shakeTrigger} />
+                        )}
                         {step === 4 && <StepBudget    data={data} setData={setData} />}
                     </motion.div>
                 </AnimatePresence>
@@ -130,7 +145,7 @@ const AdsCreationFlow: React.FC<AdsCreationFlowProps> = ({
                 </motion.button>
 
                 {/* Forward / Launch */}
-                {step < 4 ? (
+                {!isLastStep ? (
                     <motion.button
                         onClick={handleNext}
                         key={shakeTrigger}

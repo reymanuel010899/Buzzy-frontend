@@ -104,5 +104,16 @@ export function useVideoMetrics() {
         firedEvents.current.delete(videoId);
     }, []);
 
-    return { onVideoPlay, onTimeUpdate, triggerViewFromInteraction, resetVideo };
+    /**
+     * Poda en bloque: borra del Map todos los videoIds que NO estén en `liveIds`.
+     * Se llama cuando la ventana de virtualización se desliza, para que firedEvents
+     * no crezca indefinidamente al scrollear cientos de videos.
+     */
+    const pruneTo = useCallback((liveIds: Set<string>) => {
+        for (const id of firedEvents.current.keys()) {
+            if (!liveIds.has(id)) firedEvents.current.delete(id);
+        }
+    }, []);
+
+    return { onVideoPlay, onTimeUpdate, triggerViewFromInteraction, resetVideo, pruneTo };
 }

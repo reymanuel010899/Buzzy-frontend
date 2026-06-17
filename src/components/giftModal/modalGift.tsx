@@ -155,12 +155,12 @@ const GiftCarousel: React.FC<{
     const prevGift = () => setSelectedIndex((selectedIndex - 1 + displayGifts.length) % displayGifts.length);
 
     return (
-        <div className="relative w-full max-w-5xl flex justify-center items-center h-56 mt-12 mb-8 z-10 select-none">
+        <div className="relative w-full max-w-5xl flex justify-center items-center h-40 md:h-56 mt-4 md:mt-12 mb-4 md:mb-8 z-10 select-none">
             <button onClick={prevGift} className="absolute left-0 p-1.5 bg-white/5 rounded-full hover:bg-white/10 transition-all z-20">
                 <ChevronLeft size={40} className="text-white/30 hover:text-white" />
             </button>
 
-            <div className="flex items-center justify-center gap-4 md:gap-10 w-full overflow-hidden px-10 py-15">
+            <div className="flex items-center justify-center gap-4 md:gap-10 w-full overflow-hidden px-10 py-6 md:py-15">
                 {displayGifts.map((gift, index) => {
                     const isSelected = index === selectedIndex;
                     const distance = Math.abs(index - selectedIndex);
@@ -213,7 +213,7 @@ const GiftCarousel: React.FC<{
                                     </div>
                                 )}
                             </div>
-                            <span className={`mt-5 text-[10px] font-bold uppercase tracking-[0.3em] ${isSelected ? theme.primaryColor : 'text-gray-500'
+                            <span className={`mt-2 md:mt-5 text-[10px] font-bold uppercase tracking-[0.3em] ${isSelected ? theme.primaryColor : 'text-gray-500'
                                 }`}>
                                 {gift.name}
                             </span>
@@ -236,14 +236,14 @@ const GiftPanel: React.FC<{
     walletTokens: number;
     theme: any;
 }> = ({ message, setMessage, cost, walletTokens, theme }) => (
-    <div className="relative w-full max-w-2xl bg-white/5 backdrop-blur-sm border border-white/10 rounded-[2rem] p-5 md:p-6 shadow-2xl z-10 mx-4">
-        <h2 className="text-lg md:text-2xl font-black text-center mb-6 text-gray-100/90 tracking-[0.4em] uppercase drop-shadow-lg">
+    <div className="relative w-full max-w-2xl bg-white/5 backdrop-blur-sm border border-white/10 rounded-3xl md:rounded-[2rem] p-3.5 md:p-6 shadow-2xl z-10 mx-4">
+        <h2 className="text-base md:text-2xl font-black text-center mb-3 md:mb-6 text-gray-100/90 tracking-[0.3em] md:tracking-[0.4em] uppercase drop-shadow-lg">
             Gift Presential
         </h2>
 
-        <div className="space-y-4">
-            <div className="relative bg-black/40 border-2 border-white/5 rounded-xl p-4 md:p-5 shadow-inner flex flex-col">
-                <span className="text-[9px] font-black uppercase tracking-[0.3em] text-gray-500 mb-2">Mensaje VIP Personalizado...</span>
+        <div className="space-y-3 md:space-y-4">
+            <div className="relative bg-black/40 border-2 border-white/5 rounded-xl p-3 md:p-5 shadow-inner flex flex-col">
+                <span className="text-[9px] font-black uppercase tracking-[0.3em] text-gray-500 mb-1.5 md:mb-2">Mensaje VIP Personalizado...</span>
                 <textarea
                     value={message}
                     onChange={(e) => {
@@ -251,26 +251,26 @@ const GiftPanel: React.FC<{
                         if (words.length <= 50) setMessage(e.target.value);
                     }}
                     placeholder="ESCRIBE AQUÍ TU DEDICATORIA DE PODER"
-                    className={`w-full bg-transparent text-white font-bold placeholder:text-gray-600 focus:outline-none transition-all resize-none h-16 text-xs md:text-sm tracking-widest uppercase italic`}
+                    className={`w-full bg-transparent text-white font-bold placeholder:text-gray-600 focus:outline-none transition-all resize-none h-10 md:h-16 text-xs md:text-sm tracking-widest uppercase italic`}
                 />
                 <span className={`text-[9px] self-end mt-1 ${(message.trim() === '' ? 0 : message.trim().split(/\s+/).length) >= 50 ? 'text-red-400' : 'text-gray-600'}`}>
                     {message.trim() === '' ? 0 : message.trim().split(/\s+/).length}/50 palabras
                 </span>
             </div>
 
-            <div className="flex gap-4">
-                <div className="flex-1 flex flex-col justify-center items-center bg-black/30 rounded-xl border border-white/5 p-4 shadow-inner">
-                    <span className="text-gray-500 uppercase text-[9px] font-black tracking-[0.2em] mb-1.5 text-center">Costo de Regalo:</span>
-                    <span className={`text-xl md:text-2xl font-black ${theme.tokenColor} drop-shadow-[0_0_10px_${theme.glowColor}] uppercase`}>
+            <div className="flex gap-3 md:gap-4">
+                <div className="flex-1 flex flex-col justify-center items-center bg-black/30 rounded-xl border border-white/5 p-2.5 md:p-4 shadow-inner">
+                    <span className="text-gray-500 uppercase text-[9px] font-black tracking-[0.2em] mb-1 md:mb-1.5 text-center">Costo de Regalo:</span>
+                    <span className={`text-lg md:text-2xl font-black ${theme.tokenColor} drop-shadow-[0_0_10px_${theme.glowColor}] uppercase`}>
                         {cost} TOKENS
                     </span>
                 </div>
-                <div className="flex-1 flex flex-col justify-center items-center bg-white/5 rounded-xl border border-white/10 p-4 shadow-inner">
-                    <div className="flex items-center gap-1.5 mb-1.5">
+                <div className="flex-1 flex flex-col justify-center items-center bg-white/5 rounded-xl border border-white/10 p-2.5 md:p-4 shadow-inner">
+                    <div className="flex items-center gap-1.5 mb-1 md:mb-1.5">
                         <Zap size={12} className="text-cyan-400 fill-cyan-400" />
                         <span className="text-gray-400 uppercase text-[9px] font-black tracking-[0.2em]">Disponibles:</span>
                     </div>
-                    <span className={`text-xl md:text-2xl font-black uppercase ${walletTokens >= cost ? 'text-cyan-400 drop-shadow-[0_0_10px_rgba(34,211,238,0.5)]' : 'text-red-500 drop-shadow-[0_0_10px_rgba(239,68,68,0.5)]'}`}>
+                    <span className={`text-lg md:text-2xl font-black uppercase ${walletTokens >= cost ? 'text-cyan-400 drop-shadow-[0_0_10px_rgba(34,211,238,0.5)]' : 'text-red-500 drop-shadow-[0_0_10px_rgba(239,68,68,0.5)]'}`}>
                         {walletTokens} TOKENS
                     </span>
                 </div>
@@ -286,7 +286,7 @@ const VipPowerButton: React.FC<{
     onPressEnd: () => void;
     theme: any;
 }> = ({ progress, isPressing, onPressStart, onPressEnd, theme }) => (
-    <div className="mt-6 flex justify-center w-full">
+    <div className="mt-2 md:mt-6 flex justify-center w-full">
         <button
             onMouseDown={onPressStart}
             onMouseUp={onPressEnd}
@@ -433,11 +433,11 @@ const VipGiftExperience: React.FC<VipGiftExperienceProps> = ({ onClose, onSendGi
     const needsTokens = walletTokens < (selectedGift.token_price || 0);
 
     return (
-        <div className="fixed inset-0 z-[100] bg-[#020408] text-white font-sans overflow-hidden flex flex-col items-center justify-center p-4">
+        <div className="fixed inset-0 z-[100] bg-[#020408] text-white font-sans overflow-y-auto overflow-x-hidden flex flex-col items-center p-4 pt-20 pb-8">
             <SpaceBackground />
             <Header onClose={onClose} title={t('videos:giftExperience.specialGiftsTitle' as any)} />
 
-            <div className="flex flex-col items-center w-full max-w-2xl z-10 scale-[0.9] md:scale-100 transition-transform">
+            <div className="flex flex-col items-center w-full max-w-2xl z-10 my-auto">
                 <GiftCarousel
                     displayGifts={displayGifts}
                     selectedIndex={selectedIndex}
@@ -445,7 +445,7 @@ const VipGiftExperience: React.FC<VipGiftExperienceProps> = ({ onClose, onSendGi
                     theme={theme}
                 />
 
-                <div className="w-full flex flex-col items-center gap-4">
+                <div className="w-full flex flex-col items-center gap-3">
                     <GiftPanel
                         message={message}
                         setMessage={setMessage}
@@ -461,41 +461,34 @@ const VipGiftExperience: React.FC<VipGiftExperienceProps> = ({ onClose, onSendGi
                         onPressEnd={stopPress}
                         theme={theme}
                     />
+
+                    {/* Buy Tokens — chip discreto en el flujo normal, debajo del
+                        botón de enviar regalo. Antes era absolute bottom-0 y tapaba
+                        el VipPowerButton en pantallas pequeñas. */}
+                    {needsTokens && onBuyTokens && (
+                        <motion.button
+                            initial={{ y: 12, opacity: 0 }}
+                            animate={{ y: 0, opacity: 1 }}
+                            transition={{ duration: 0.15, ease: "easeOut" }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={onBuyTokens}
+                            className="group relative flex items-center gap-2 rounded-full bg-white/5 backdrop-blur-md border px-5 py-2.5 shadow-inner transition-colors hover:bg-white/10"
+                            style={{
+                                borderColor: theme.glowColor,
+                                boxShadow: `0 0 16px ${theme.glowColor}`,
+                            }}
+                        >
+                            <Zap size={14} className={`${theme.primaryColor} fill-current`} />
+                            <span className="text-white/90 font-black uppercase tracking-[0.2em] text-xs">
+                                Comprar Tokens
+                            </span>
+                            <span className="bg-white/10 text-white/90 text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                                +💎
+                            </span>
+                        </motion.button>
+                    )}
                 </div>
             </div>
-
-            {/* Buy Tokens — pegado al fondo, solo visible cuando no hay saldo suficiente */}
-            {needsTokens && onBuyTokens && (
-                <div className="absolute bottom-0 left-0 right-0 z-20 px-4 pb-6 pt-10 bg-gradient-to-t from-[#020408] via-[#020408]/90 to-transparent">
-                    <motion.button
-                        initial={{ y: 40, opacity: 0 }}
-                        animate={{ y: 0, opacity: 1 }}
-                        transition={{ duration: 0.15, ease: "easeOut" }}
-                        whileTap={{ scale: 0.97 }}
-                        onClick={onBuyTokens}
-                        className="relative w-full overflow-hidden rounded-2xl py-4 flex items-center justify-center gap-3"
-                        style={{
-                            background: 'linear-gradient(135deg, #06b6d4 0%, #3b82f6 50%, #8b5cf6 100%)',
-                            boxShadow: '0 0 30px rgba(99,102,241,0.5), 0 0 60px rgba(6,182,212,0.2)',
-                        }}
-                    >
-                        {/* Shimmer */}
-                        <motion.div
-                            className="absolute inset-0 opacity-20"
-                            style={{ background: 'linear-gradient(90deg, transparent 0%, white 50%, transparent 100%)', backgroundSize: '200% 100%' }}
-                            animate={{ backgroundPosition: ['200% 0', '-200% 0'] }}
-                            transition={{ duration: 2.5, repeat: Infinity, ease: 'linear' }}
-                        />
-                        <Zap size={18} className="text-white fill-white relative z-10" />
-                        <span className="relative z-10 text-white font-black uppercase tracking-[0.2em] text-sm">
-                            Comprar Tokens
-                        </span>
-                        <span className="relative z-10 bg-white/20 text-white text-xs font-bold px-2 py-0.5 rounded-full backdrop-blur-sm">
-                            +💎
-                        </span>
-                    </motion.button>
-                </div>
-            )}
         </div>
     );
 };

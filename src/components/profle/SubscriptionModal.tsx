@@ -6,6 +6,7 @@ interface SubscriptionBenefit {
     benefit_type: string;
     limit: number;
     description: string;
+    order?: number;
 }
 
 interface SubscriptionPlan {
@@ -99,11 +100,10 @@ const SubscriptionModal: React.FC<SubscriptionModalProps> = ({ isOpen, onClose, 
                         initial={{ scale: 0.9, opacity: 0, y: 20 }}
                         animate={{ scale: 1, opacity: 1, y: 0 }}
                         exit={{ scale: 0.9, opacity: 0, y: 20 }}
-                        className="relative w-full max-w-lg bg-[#0a0a0f] border border-white/10 rounded-[3rem] overflow-hidden shadow-2xl z-10 flex flex-col"
+                        className="relative w-full max-w-lg  rounded-[3rem] overflow-hidden shadow-2xl z-10 flex flex-col"
                     >
-                        {/* Decorative background orbs */}
+                        {/* Decorative background orb */}
                         <div className="absolute top-0 right-0 w-[400px] h-[400px] bg-purple-600/10 blur-[100px] rounded-full -translate-y-1/2 translate-x-1/2 pointer-events-none" />
-                        <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-blue-600/10 blur-[100px] rounded-full translate-y-1/2 -translate-x-1/2 pointer-events-none" />
 
                         {/* Close button */}
                         <button

@@ -2,18 +2,27 @@ import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Rocket, ArrowLeft, AlertTriangle } from "lucide-react";
 import axios from "axios";
+import { useSearchParams, useLocation } from "react-router-dom";
 import { getBaseUrl } from "../../redux/client/api-client";
 import AdsDashboard from "../../components/ads/AdsDashboard";
 import AdsCreationFlow from "../../components/ads/AdsCreationFlow";
 import BottomNavbar from "../../components/Layout/ButtonNavar";
 
 const AdsPage: React.FC = () => {
+    const [searchParams, setSearchParams] = useSearchParams();
+    const location = useLocation();
     const [activeTab, setActiveTab] = useState<"dashboard" | "create">("dashboard");
     const [step, setStep] = useState(1);
     const [loading, setLoading] = useState(false);
-    const [success, setSuccess] = useState(false);
     const [campaigns, setCampaigns] = useState<any[]>([]);
     const [stats, setStats] = useState<any>(null);
+
+    // Boost de un video propio: cuando se entra con ?boost=<uuid> el flujo
+    // promociona ese video en vez de crear un anuncio externo (sin paso de creative).
+    const [boostVideoUuid, setBoostVideoUuid] = useState<string | null>(null);
+    // Datos del video para mostrar su preview dentro del wizard.
+    const [boostVideo, setBoostVideo] = useState<any | null>(null);
+    const isBoost = Boolean(boostVideoUuid);
 
     const [campaignData, setCampaignData] = useState({
         name: "",
@@ -46,18 +55,47 @@ const AdsPage: React.FC = () => {
     useEffect(() => {
         fetchCampaigns();
         fetchStats();
-
-        // Handle Stripe Return
-        const params = new URLSearchParams(window.location.search);
-        if (params.get('success')) {
-            const campaignId = params.get('campaign_id');
-            const sessionId = params.get('session_id');
-            handlePaymentSuccess(campaignId, sessionId);
-        }
-        if (params.get('canceled')) {
-            alert("Pago cancelado. Puedes intentar de nuevo cuando gustes.");
-        }
     }, []);
+
+    // Handle Stripe canceled return
+    useEffect(() => {
+        if (searchParams.get('canceled')) {
+            alert("Pago cancelado. Puedes intentar de nuevo cuando gustes.");
+            setSearchParams({}, { replace: true });
+        }
+    }, [searchParams]);
+
+    // Entrar en modo "promocionar video" si llega ?boost=<uuid>
+    useEffect(() => {
+        const boost = searchParams.get('boost');
+        if (!boost) return;
+
+        setBoostVideoUuid(boost);
+        setActiveTab("create");
+        setStep(1);
+        // Objetivo por defecto más natural para boost de contenido propio.
+        setCampaignData(prev => ({ ...prev, objective: "AWARENESS" }));
+
+        // 1. Preview inmediato: el video viene en el state de navegación.
+        const fromState = (location.state as any)?.boostVideo;
+        if (fromState?.uuid === boost) {
+            setBoostVideo(fromState);
+            return;
+        }
+
+        // 2. Fallback (entrada por URL directa): traer el video por uuid.
+        (async () => {
+            const b = base();
+            if (!b) return;
+            try {
+                const token = localStorage.getItem("accessToken");
+                const res = await axios.get(`${b}/api/videos/${boost}/`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                setBoostVideo(res.data);
+            } catch { /* sin preview si falla; el flujo sigue funcionando */ }
+        })();
+    }, [searchParams, location.state]);
 
     useEffect(() => {
         const handleRefresh = () => {
@@ -73,37 +111,6 @@ const AdsPage: React.FC = () => {
         return url?.startsWith('http') ? url.replace(/\/+$/, '') : null;
     };
 
-    const handlePaymentSuccess = async (campaignId: string | null, sessionId: string | null) => {
-        if (!campaignId || !sessionId) return;
-
-        try {
-            setLoading(true);
-            const token = localStorage.getItem("accessToken");
-            // Verify with backend
-            const b = base();
-            if (!b) return;
-            const response = await axios.get(`${b}/api/ads/campaigns/${campaignId}/verify_payment/?session_id=${sessionId}`, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-
-            if (response.data.status === 'paid') {
-                setSuccess(true);
-                setTimeout(() => {
-                    setSuccess(false);
-                    setActiveTab("dashboard");
-                    fetchCampaigns();
-                    fetchStats();
-                    window.history.replaceState({}, '', '/ads');
-                }, 3000);
-            } else {
-                alert("El pago aún no se ha procesado. Si ya pagaste, espera unos segundos e intenta recargar.");
-            }
-        } catch (error) {
-            alert("Error al verificar el pago.");
-        } finally {
-            setLoading(false);
-        }
-    };
 
     const fetchCampaigns = async () => {
         const b = base();
@@ -153,12 +160,17 @@ const AdsPage: React.FC = () => {
             complexFormData.append("audience.radius", (campaignData.audience.radius || 50).toString());
             complexFormData.append("audience.max_frequency", (campaignData.audience.max_frequency || 3).toString());
 
-            complexFormData.append("creative.title", campaignData.creative.title);
-            complexFormData.append("creative.description", campaignData.creative.description);
-            complexFormData.append("creative.cta_text", campaignData.creative.cta_text);
-            complexFormData.append("creative.destination_url", campaignData.creative.destination_url);
-            if (campaignData.creative.media) {
-                complexFormData.append("creative.media_file", campaignData.creative.media);
+            if (isBoost) {
+                // Boost de video propio: el video es el creative, no se manda creative externo.
+                complexFormData.append("promoted_video_uuid", boostVideoUuid as string);
+            } else {
+                complexFormData.append("creative.title", campaignData.creative.title);
+                complexFormData.append("creative.description", campaignData.creative.description);
+                complexFormData.append("creative.cta_text", campaignData.creative.cta_text);
+                complexFormData.append("creative.destination_url", campaignData.creative.destination_url);
+                if (campaignData.creative.media) {
+                    complexFormData.append("creative.media_file", campaignData.creative.media);
+                }
             }
 
             complexFormData.append("budget.daily_budget", campaignData.budget.daily_budget.toString());
@@ -251,21 +263,7 @@ const AdsPage: React.FC = () => {
                 {/* Content Area */}
                 <div className="flex-1 overflow-hidden relative min-h-0 h-full">
                     <AnimatePresence mode="wait" initial={false}>
-                        {success ? (
-                            <motion.div
-                                key="success"
-                                initial={{ opacity: 0, scale: 0.9 }}
-                                animate={{ opacity: 1, scale: 1 }}
-                                exit={{ opacity: 0, scale: 0.9 }}
-                                className="py-20 flex flex-col items-center justify-center text-center space-y-4"
-                            >
-                                <div className="w-24 h-24 bg-emerald-500/20 rounded-full flex items-center justify-center mb-6">
-                                    <Rocket className="w-12 h-12 text-emerald-400 animate-bounce" />
-                                </div>
-                                <h3 className="text-4xl font-bold text-white">¡Pago Exitoso!</h3>
-                                <p className="text-gray-400 max-w-sm">Tu campaña está en revisión. Nuestro equipo la aprobará en menos de 24 horas y comenzará a mostrarse pronto.</p>
-                            </motion.div>
-                        ) : activeTab === "dashboard" ? (
+                        {activeTab === "dashboard" ? (
                             <motion.div
                                 key="dashboard"
                                 initial={{ opacity: 0, y: 10 }}
@@ -303,6 +301,8 @@ const AdsPage: React.FC = () => {
                                     setData={setCampaignData}
                                     onLaunch={handleLaunch}
                                     loading={loading}
+                                    isBoost={isBoost}
+                                    boostVideo={boostVideo}
                                 />
                             </motion.div>
                         )}

@@ -14,8 +14,13 @@ import { usePushNotifications } from "./hooks/usePushNotifications";
 function DeepLinkHandler() {
   useEffect(() => {
     const listener = CapacitorApp.addListener("appUrlOpen", ({ url }) => {
-      const path = url.replace(/^buzzy:\/\/app/, "");
-      if (path) router.navigate(path);
+      // Handles both buzzy://app/path?q=1 and buzzy://some-path?q=1
+      // Strip the scheme and optional host, keep /path?query
+      let path = url.replace(/^buzzy:\/\/app/, "");          // buzzy://app/...
+      path = path.replace(/^buzzy:\/\/[^/]+/, "");           // buzzy://host/...
+      path = path.replace(/^buzzy:\/\//, "");                 // buzzy://path (no host)
+      if (!path.startsWith("/")) path = "/" + path;
+      if (path && path !== "/") router.navigate(path);
     });
     return () => { listener.then(h => h.remove()); };
   }, []);

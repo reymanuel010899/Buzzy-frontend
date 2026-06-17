@@ -2,7 +2,7 @@
 
 import React, { useRef, useState, useEffect, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { X, Type, ChevronLeft, ChevronRight, Check, Loader2, Music2, VolumeX, Volume2, MapPin, Smile, Sparkles, Images } from "lucide-react"
+import { X, Type, ChevronLeft, ChevronRight, Check, Loader2, Music2, VolumeX, Volume2, MapPin, Smile, Sparkles, Images, Globe, Gem } from "lucide-react"
 
 const MY_STICKERS_KEY = "buzzy_my_stickers"
 interface SavedSticker { id: string; src: string; name: string }
@@ -17,6 +17,7 @@ import { Howler } from "howler"
 import MusicSelectorModal from "../CreateVideo/components/MusicSelectorModal"
 import type { MusicSelectorResult } from "../CreateVideo/components/MusicSelectorModal"
 import { useVideoAudio, preloadTracks } from "../../hooks/useVideoAudio"
+import { pickMedia } from "../../hooks/useMediaPicker"
 import { useAudioTracks } from "../../hooks/useAudioTracks"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -80,6 +81,7 @@ interface StoryEditorProps {
     stickerLayers?: StickerLayer[],
     location?: string,
     stickerFiles?: { id: string; file: File }[],
+    privacy?: 'public' | 'subscribers',
   ) => void
   onClose: () => void
   isUploading: boolean
@@ -165,6 +167,7 @@ export default function StoryEditor({ file, onPublish, onClose, isUploading }: S
   const [mediaSrc, setMediaSrc] = useState("")
 
   const [filterIdx, setFilterIdx] = useState(DEFAULT_FILTER_INDEX)
+  const [storyPrivacy, setStoryPrivacy] = useState<"public" | "subscribers">("public")
   const [tool, setTool] = useState<"none" | "text" | "sticker">("none")
   const [stickerTab, setStickerTab] = useState<"featured" | "emoji" | "location" | "my">("featured")
 
@@ -195,8 +198,6 @@ export default function StoryEditor({ file, onPublish, onClose, isUploading }: S
   const [location, setLocation] = useState("")
   const [locationDraft, setLocationDraft] = useState("")
   const [locationAutocomplete, setLocationAutocomplete] = useState<google.maps.places.Autocomplete | null>(null)
-  const stickerFileInputRef = useRef<HTMLInputElement>(null)
-  const videoStickerInputRef = useRef<HTMLInputElement>(null)
   const locationInputRef = useRef<HTMLInputElement>(null)
   const { isLoaded: isMapsLoaded } = useLoadScript({
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "",
@@ -370,6 +371,17 @@ export default function StoryEditor({ file, onPublish, onClose, isUploading }: S
     setSelectedStickerId(id)
     setStickerTab("my")
     setTool("none")
+  }
+
+  // Selectores nativos (Capacitor) para los stickers — en el celular abren la
+  // galería/cámara nativa en vez del input web crudo (que no abre bien en Android).
+  const pickImageSticker = async () => {
+    const picked = await pickMedia("image", 50)
+    if (picked) addImageStickerFromFile(picked.file)
+  }
+  const pickVideoSticker = async () => {
+    const picked = await pickMedia("video", 50)
+    if (picked) addVideoStickerFromFile(picked.file)
   }
 
   const addStickerFromSaved = (saved: SavedSticker) => {
@@ -716,6 +728,26 @@ export default function StoryEditor({ file, onPublish, onClose, isUploading }: S
           </div>
         </div>
 
+        {/* ── Privacy selector: Público / Suscriptores ── */}
+        <div className="flex items-center justify-center gap-2 px-4 pt-2 bg-black">
+          <button
+            type="button"
+            onClick={() => setStoryPrivacy("public")}
+            className={`flex items-center gap-1.5 h-9 px-4 rounded-full text-xs font-semibold border transition-all ${storyPrivacy === "public" ? "bg-white/15 border-white/30 text-white" : "bg-transparent border-white/10 text-white/60"}`}
+          >
+            <Globe size={14} className={storyPrivacy === "public" ? "text-cyan-400" : "text-white/50"} />
+            Público
+          </button>
+          <button
+            type="button"
+            onClick={() => setStoryPrivacy("subscribers")}
+            className={`flex items-center gap-1.5 h-9 px-4 rounded-full text-xs font-semibold border transition-all ${storyPrivacy === "subscribers" ? "bg-white/15 border-white/30 text-white" : "bg-transparent border-white/10 text-white/60"}`}
+          >
+            <Gem size={14} className={storyPrivacy === "subscribers" ? "text-emerald-400" : "text-white/50"} />
+            Suscriptores
+          </button>
+        </div>
+
         {/* ── Publish button ── */}
         <div className="flex items-center justify-between px-4 pb-8 pt-2 bg-black">
           {/* Mute toggle — solo si es video */}
@@ -733,7 +765,7 @@ export default function StoryEditor({ file, onPublish, onClose, isUploading }: S
 
           <motion.button
             whileTap={{ scale: 0.96 }}
-            onClick={() => onPublish(file, "", appliedMusic ?? undefined, currentFilter, textLayers, stickerLayers, location || undefined, pendingStickerFiles)}
+            onClick={() => onPublish(file, "", appliedMusic ?? undefined, currentFilter, textLayers, stickerLayers, location || undefined, pendingStickerFiles, storyPrivacy)}
             disabled={isUploading}
             className="flex items-center gap-2 h-12 px-7 rounded-full font-bold text-white text-sm bg-gradient-to-r from-pink-500 to-orange-400 shadow-lg shadow-pink-500/30 disabled:opacity-50"
           >
@@ -788,14 +820,14 @@ export default function StoryEditor({ file, onPublish, onClose, isUploading }: S
                   </div>
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={() => videoStickerInputRef.current?.click()}
+                      onClick={pickVideoSticker}
                       className="h-8 px-3 rounded-full bg-white/8 border border-white/10 flex items-center gap-1.5 text-white/80 text-[11px] font-semibold hover:bg-white/12 transition-colors"
                     >
                       <span className="text-xs">🎬</span>
                       Video
                     </button>
                     <button
-                      onClick={() => stickerFileInputRef.current?.click()}
+                      onClick={pickImageSticker}
                       className="h-8 px-3 rounded-full bg-white/8 border border-white/10 flex items-center gap-1.5 text-white/80 text-[11px] font-semibold hover:bg-white/12 transition-colors"
                     >
                       <span className="text-xs">＋</span>
@@ -907,7 +939,7 @@ export default function StoryEditor({ file, onPublish, onClose, isUploading }: S
                           <p className="text-white/40 text-sm font-semibold">No tienes stickers guardados</p>
                           <p className="text-white/25 text-xs">Sube una imagen con el botón "Subir" y se guardará aquí</p>
                           <button
-                            onClick={() => stickerFileInputRef.current?.click()}
+                            onClick={pickImageSticker}
                             className="px-4 py-2 rounded-full bg-white/8 border border-white/10 text-white/70 text-xs font-semibold hover:bg-white/12"
                           >
                             Subir sticker
@@ -925,7 +957,7 @@ export default function StoryEditor({ file, onPublish, onClose, isUploading }: S
                             </button>
                           ))}
                           <button
-                            onClick={() => stickerFileInputRef.current?.click()}
+                            onClick={pickImageSticker}
                             className="aspect-square rounded-2xl border-2 border-dashed border-white/15 flex items-center justify-center text-white/30 hover:border-white/30 hover:text-white/50 transition-all"
                           >
                             <span className="text-2xl font-light">＋</span>
@@ -1031,28 +1063,6 @@ export default function StoryEditor({ file, onPublish, onClose, isUploading }: S
           )}
         </AnimatePresence>
 
-        <input
-          ref={stickerFileInputRef}
-          type="file"
-          accept="image/*"
-          className="hidden"
-          onChange={e => {
-            const file = e.target.files?.[0]
-            if (file) addImageStickerFromFile(file)
-            e.currentTarget.value = ""
-          }}
-        />
-        <input
-          ref={videoStickerInputRef}
-          type="file"
-          accept="video/*"
-          className="hidden"
-          onChange={e => {
-            const file = e.target.files?.[0]
-            if (file) addVideoStickerFromFile(file)
-            e.currentTarget.value = ""
-          }}
-        />
 
         {/* ── Inline text editor ── */}
         <AnimatePresence>

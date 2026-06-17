@@ -12,12 +12,20 @@ interface AdOverlayProps {
     isVisible?: boolean; // New prop to track visibility in feed
 }
 
+// Segundos mínimos de visualización para que la impresión cuente como facturable.
+// Si el usuario scrollea/cierra antes de esto, no se cobra (aparición fugaz).
+const MIN_VIEW_SECONDS = 2;
+
 const AdOverlay: React.FC<AdOverlayProps> = ({ ad, onClose, isMuted, toggleMute, isVisible = true }) => {
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(0);
     const [isSkippable, setIsSkippable] = useState(false);
     const videoRef = useRef<HTMLVideoElement>(null);
     const timerRef = useRef<NodeJS.Timeout | null>(null);
+    // Cuenta la impresión (facturable) una sola vez, en cuanto el usuario ve el
+    // mínimo, aunque luego scrollee/cierre la app sin llegar a saltar.
+    const impressionSentRef = useRef(false);
+    const currentTimeRef = useRef(0);
     const creative = ad?.creative;
     const mediaFile = creative?.media_file;
     const destinationUrl = creative?.destination_url;
@@ -69,10 +77,26 @@ const AdOverlay: React.FC<AdOverlayProps> = ({ ad, onClose, isMuted, toggleMute,
     const skipTime = Math.floor(duration / 6) || 5; // Default to 5s if duration is unknown yet
 
     useEffect(() => {
+        currentTimeRef.current = currentTime;
         if (currentTime >= skipTime) {
             setIsSkippable(true);
         }
+        // En cuanto vio el mínimo, contar la impresión (facturable). Se envía aquí
+        // —no al desmontar— para no perderla si el usuario cierra la app de golpe.
+        if (currentTime >= MIN_VIEW_SECONDS) {
+            trackImpression();
+        }
     }, [currentTime, skipTime]);
+
+    // Respaldo: si se desmonta (scroll) habiendo visto el mínimo pero sin que el
+    // tick alcanzara a enviarla, la contamos igual. Si vio menos, no se cuenta.
+    useEffect(() => {
+        return () => {
+            if (currentTimeRef.current >= MIN_VIEW_SECONDS) {
+                trackImpression();
+            }
+        };
+    }, []);
 
     useEffect(() => {
         if (!hasValidAd) {
@@ -94,22 +118,27 @@ const AdOverlay: React.FC<AdOverlayProps> = ({ ad, onClose, isMuted, toggleMute,
             }
         }, 1000);
 
-        // Track impression
-        trackImpression();
-
         return () => {
             if (timerRef.current) clearInterval(timerRef.current);
         };
     }, [hasValidAd, isImage, onClose]);
 
+    // Cuenta la impresión (facturable). Se envía una sola vez por montaje, en
+    // cuanto el usuario vio el mínimo (MIN_VIEW_SECONDS), aunque luego scrollee
+    // o cierre la app sin llegar a saltar el anuncio.
     const trackImpression = async () => {
-        if (!ad?.id) return;
+        if (!ad?.id || impressionSentRef.current) return;
+        impressionSentRef.current = true;
         try {
             const token = localStorage.getItem("accessToken");
-            await axios.post(`${getBaseUrl()}api/ads/campaigns/${ad.id}/track_impression/`, {}, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
+            await axios.post(
+                `${getBaseUrl()}api/ads/campaigns/${ad.id}/track_impression/`,
+                {},
+                { headers: { Authorization: `Bearer ${token}` } }
+            );
         } catch (error) {
+            // Permitir reintento (p.ej. desde el cleanup) si falló el envío
+            impressionSentRef.current = false;
             console.error("Error tracking impression:", error);
         }
     };
@@ -143,7 +172,7 @@ const AdOverlay: React.FC<AdOverlayProps> = ({ ad, onClose, isMuted, toggleMute,
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 z-[40] flex flex-col items-center justify-center overflow-hidden group"
+            className="absolute inset-0 z-[100] flex flex-col items-center justify-center overflow-hidden group bg-black"
         >
             {/* No more dark background overlays */}
 

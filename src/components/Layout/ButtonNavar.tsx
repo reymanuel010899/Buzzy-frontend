@@ -9,11 +9,13 @@ import ProfileIconC from "./ProfileIcon";
 import CreateActionModal from "../CreateVideo/components/create-action-modal";
 import { useChat } from "../../context/ChatContext";
 import { useUnreadMessages } from "../../context/UnreadAcount";
+import { useRefreshPage } from "../../hooks/useRefreshPage";
 
 const BottomNavbar: React.FC = () => {
   const location = useLocation()
   const [isModalOpen, setIsModalOpen] = useState(false)
   const { setShowMessages } = useChat()
+  const { triggerRefresh } = useRefreshPage();
   const currentUser = useSelector((state: { LoginReducer: { user?: { username?: string } } }) => state.LoginReducer?.user);
   const totalUnread = useUnreadMessages(state => state.getTotalUnread());
   const profilePath = `/profile/${currentUser?.username || 'user'}`;
@@ -31,7 +33,16 @@ const BottomNavbar: React.FC = () => {
         <div className="flex h-11 items-center justify-around px-4 max-w-lg mx-auto">
 
           {/* Home */}
-          <Link to="/" className="relative flex flex-col items-center gap-0.5 group">
+          <Link
+            to="/"
+            onClick={(e) => {
+              if (isActive("/")) {
+                e.preventDefault();
+                triggerRefresh();
+              }
+            }}
+            className="relative flex flex-col items-center gap-0.5 group"
+          >
             <motion.div whileTap={{ scale: 0.85 }} className="flex flex-col items-center gap-0.5">
               <Home className={`h-5 w-5 transition-colors duration-200 ${isActive("/") ? "text-[#00f0ff]" : "text-white/40 group-hover:text-white/70"}`} />
               <span className={`text-[9px] font-medium transition-colors duration-200 ${isActive("/") ? "text-[#00f0ff]" : "text-white/30"}`}>Home</span>

@@ -1,4 +1,4 @@
-import { SUCCEES_GET_MEDIA_USER, FAILED_GET_MEDIA_USER } from "../type";
+import { SUCCEES_GET_MEDIA_USER, FAILED_GET_MEDIA_USER, RESET_MEDIA_USER } from "../type";
 
 const inicializerState = {
     media_user: null,
@@ -19,6 +19,8 @@ const getMediaByUser = (state = inicializerState, action: {type: string, payload
                 ...state,
                 error: payload,
             };
+        case RESET_MEDIA_USER:
+            return { ...inicializerState };
         default:
             return state;
     }

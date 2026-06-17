@@ -129,3 +129,13 @@ export async function loadProfileVideos(): Promise<object[]> {
     return [];
   }
 }
+
+export async function clearFeedCache(): Promise<void> {
+  try {
+    const db = await openDB();
+    const tx = db.transaction([STORE, STORE_PROFILE], "readwrite");
+    tx.objectStore(STORE).clear();
+    tx.objectStore(STORE_PROFILE).clear();
+    return new Promise((res) => { tx.oncomplete = () => res(); tx.onerror = () => res(); });
+  } catch { /* silent */ }
+}

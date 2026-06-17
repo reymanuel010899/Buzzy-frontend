@@ -33,6 +33,9 @@ import { startCall } from "../../redux/actions/subscriptionActions"
 import { useTypingUsers } from "../../context/useTyping";
 import { useUnreadMessages } from "../../context/UnreadAcount";
 import { apiClient, getBaseUrl, getMediaUrl } from "../../redux/client/api-client";
+import StoryLayers from "../stories/StoryLayers";
+import StoryFilterCanvas from "../index/StoryFilterCanvas";
+import type { Story } from "../index/main.interface";
 import { isNotifEnabled } from "../../utils/notifPrefs";
 import { useAgora } from "../../hooks/useAgora";
 import { useCallStore } from "../../store/callStore";
@@ -95,7 +98,51 @@ const ChatModal: React.FC = () => {
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const { typingByChat, setTypingUser, removeTypingUser } = useTypingUsers();
   const [activePreview, setActivePreview] = useState<{ url: string; type: 'image' | 'video'; audioUrl?: string } | null>(null);
+  // Visor de historia completa (capas + audio) al abrir un story_reply desde el chat
+  const [storyViewer, setStoryViewer] = useState<Story | null>(null);
+  const [storyViewerError, setStoryViewerError] = useState<string | null>(null);
+  const storyViewerVideoRef = useRef<HTMLVideoElement | null>(null);
+  const storyViewerAudioRef = useRef<HTMLAudioElement | null>(null);
   const [showContactModal, setShowContactModal] = useState(false);
+
+  // Abre la historia COMPLETA a partir del identificador guardado en el mensaje
+  // (id del StoryMedia). Si ya expiró o no existe, muestra un aviso.
+  const openStoryFromReply = useCallback(async (mediaRef: string) => {
+    setStoryViewerError(null);
+    try {
+      const res = await apiClient.get(`/api/stories/by-media/${mediaRef}/`);
+      if (res.status === 200 && res.data) {
+        setStoryViewer(res.data);
+      } else {
+        setStoryViewerError("Historia no disponible");
+      }
+    } catch {
+      setStoryViewerError("Historia no disponible");
+    }
+  }, []);
+
+  const closeStoryViewer = useCallback(() => {
+    const a = storyViewerAudioRef.current;
+    if (a) { a.pause(); a.src = ""; storyViewerAudioRef.current = null; }
+    setStoryViewer(null);
+  }, []);
+
+  // Reproduce la música de la historia abierta en el visor del chat
+  useEffect(() => {
+    const audioUrl = storyViewer?.audio_track_url ? getMediaUrl(storyViewer.audio_track_url) : null;
+    const prev = storyViewerAudioRef.current;
+    if (prev) { prev.pause(); prev.src = ""; storyViewerAudioRef.current = null; }
+    if (storyViewer && audioUrl) {
+      const audio = new Audio(audioUrl);
+      audio.loop = true;
+      audio.play().catch(() => null);
+      storyViewerAudioRef.current = audio;
+    }
+    return () => {
+      const a = storyViewerAudioRef.current;
+      if (a) { a.pause(); a.src = ""; storyViewerAudioRef.current = null; }
+    };
+  }, [storyViewer]);
   // Search inside chat
   const [showChatSearch, setShowChatSearch] = useState(false);
   const [chatSearchQuery, setChatSearchQuery] = useState("");
@@ -1133,7 +1180,7 @@ const ChatModal: React.FC = () => {
                       </button>
                     </div>
                   )}
-                  <div className="h-[52vh] overflow-hidden relative">
+                  <div className="h-[70vh] overflow-hidden relative">
                     <AnimatePresence mode="wait" initial={false}>
                       <motion.div
                         key={chatFolder}
@@ -1832,7 +1879,12 @@ const ChatModal: React.FC = () => {
                                 <div
                                   className="rounded-xl overflow-hidden min-w-[180px] max-w-[240px] cursor-pointer group"
                                   onClick={() => {
-                                    if (msg.story_media_url) {
+                                    // Abrir la historia COMPLETA (capas + audio) recuperándola del
+                                    // backend por el id de StoryMedia guardado en el mensaje.
+                                    if (msg.story_uuid) {
+                                      openStoryFromReply(String(msg.story_uuid));
+                                    } else if (msg.story_media_url) {
+                                      // Respaldo: mensajes viejos sin story_uuid → preview plano
                                       const url = msg.story_media_url.startsWith('http') ? msg.story_media_url : `${getBaseUrl()}media/${msg.story_media_url}`;
                                       const isVideo = /\.(mp4|mov|webm|ogg)$/i.test(url);
                                       setActivePreview({ url, type: isVideo ? 'video' : 'image', audioUrl: msg.story_audio_url ?? undefined });
@@ -2253,6 +2305,78 @@ const ChatModal: React.FC = () => {
           activePreview={activePreview}
           onClose={() => setActivePreview(null)}
         />
+
+        {/* Visor de historia completa (capas + audio) abierto desde un story_reply */}
+        <AnimatePresence>
+          {storyViewer && (() => {
+            const media = storyViewer?.media?.[0];
+            const mediaSrc = media?.file ? getMediaUrl(media.file) : "";
+            const isVideo = media?.type === "video" || /\.(mp4|mov|webm|ogg)$/i.test(mediaSrc);
+            const hasStoryFilter = Boolean(storyViewer?.filter_css && storyViewer.filter_css !== "none");
+            const hasCustomAudio = Boolean(storyViewer?.audio_track_url);
+            return (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-[300] flex items-center justify-center bg-black"
+                onClick={closeStoryViewer}
+              >
+                <button
+                  onClick={(e) => { e.stopPropagation(); closeStoryViewer(); }}
+                  className="absolute top-4 right-4 z-[310] p-2 rounded-full bg-white/10 hover:bg-white/20"
+                >
+                  <X size={22} className="text-white" />
+                </button>
+                <div className="relative h-full w-full max-w-md flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
+                  {isVideo ? (
+                    <>
+                      <video
+                        ref={storyViewerVideoRef}
+                        src={mediaSrc}
+                        className="absolute inset-0 h-full w-full object-contain"
+                        autoPlay
+                        playsInline
+                        loop
+                        muted={hasCustomAudio}
+                        style={{ opacity: hasStoryFilter ? 0 : 1 }}
+                      />
+                      <StoryFilterCanvas
+                        source={mediaSrc}
+                        filterCss={storyViewer?.filter_css}
+                        active={hasStoryFilter}
+                        kind="video"
+                        videoRef={storyViewerVideoRef}
+                      />
+                    </>
+                  ) : (
+                    <img src={mediaSrc} className="absolute inset-0 h-full w-full object-contain" alt="Historia" />
+                  )}
+                  <StoryLayers
+                    textLayers={storyViewer?.text_layers ?? []}
+                    stickerLayers={storyViewer?.sticker_layers ?? []}
+                    storyLocation={storyViewer?.location ?? null}
+                  />
+                </div>
+              </motion.div>
+            );
+          })()}
+        </AnimatePresence>
+
+        {/* Aviso: historia expirada / no disponible */}
+        <AnimatePresence>
+          {storyViewerError && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+              className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[320] px-4 py-2 rounded-full bg-black/85 border border-white/15 backdrop-blur-md"
+              onAnimationComplete={() => setTimeout(() => setStoryViewerError(null), 2200)}
+            >
+              <span className="text-sm font-semibold text-white/90">{storyViewerError}</span>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <ContactSelectionModal
           isOpen={showContactModal}

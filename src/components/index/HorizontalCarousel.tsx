@@ -2,12 +2,17 @@
 
 import React, { useRef, useState, useEffect, useCallback } from "react"
 import { AnimatePresence, motion } from "framer-motion"
-import { Heart, MessageCircle, Eye } from "lucide-react"
+import { Heart, MessageCircle, Eye, Music2, MoreVertical } from "lucide-react"
 import { Link } from "react-router-dom"
 import { Video } from "./main.interface"
 import { useUserVideos } from "../../hooks/useUserVideos"
 import { getMediaUrl } from "../../redux/client/api-client"
 import { prefetchAudioUrl } from "../../hooks/useVideoAudio"
+
+const clampWords = (text: string, maxWords = 4): string => {
+  const words = text.trim().split(/\s+/)
+  return words.length <= maxWords ? text : words.slice(0, maxWords).join(' ') + '…'
+}
 
 const HINT_KEY = "buzzy_swipe_hint_seen"
 const SWIPE_COMMIT = 60
@@ -18,10 +23,11 @@ interface SlideActionsProps {
   onLike: (uuid: string, id: number) => void
   onComment: (uuid: string, id: number) => void
   onGift: (id: number) => void
+  onMoreOptions?: () => void
 }
 
 // Panel de acciones — copia exacta del video principal
-function SlideActions({ video, onLike, onComment, onGift }: SlideActionsProps) {
+function SlideActions({ video, onLike, onComment, onGift, onMoreOptions }: SlideActionsProps) {
   const [liked, setLiked] = useState(video.liked ?? false)
   const [likeCount, setLikeCount] = useState(video.like_count ?? 0)
 
@@ -80,6 +86,16 @@ function SlideActions({ video, onLike, onComment, onGift }: SlideActionsProps) {
         </div>
         <span className="text-[10px] mt-0.5 text-pink-300/90 font-medium drop-shadow-md">Regalos</span>
       </motion.button>
+
+      <motion.button
+        whileTap={{ scale: 0.85 }}
+        onClick={onMoreOptions}
+        className="flex flex-col items-center gap-1"
+      >
+        <div className="flex h-8 w-8 items-center justify-center">
+          <MoreVertical className="h-5 w-5 text-white/70" />
+        </div>
+      </motion.button>
     </div>
   )
 }
@@ -90,37 +106,70 @@ interface Props {
   isActive: boolean
   isMuted: boolean
   isExpanded: boolean
+  isPaused: boolean
+  adActive?: boolean
   feedScrollRef: React.RefObject<HTMLDivElement>
   onLike: (uuid: string, id: number) => void
   onComment: (uuid: string, id: number) => void
   onGift: (id: number) => void
   onSlideChange?: (index: number, total: number) => void
+  onCarouselAudio?: (playing: boolean) => void
+  onMoreOptions?: () => void
   children: React.ReactNode
 }
 
-const SlideVideo = React.memo(function SlideVideo({ video, isMuted, isVisible, isNear }: { video: Video; isMuted: boolean; isVisible: boolean; isNear: boolean }) {
+const SlideVideo = React.memo(function SlideVideo({ video, isMuted, isVisible, isNear, onCarouselAudio }: { video: Video; isMuted: boolean; isVisible: boolean; isNear: boolean; onCarouselAudio?: (playing: boolean) => void }) {
   const ref = useRef<HTMLVideoElement>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
+  const [isFrameReady, setIsFrameReady] = useState(false)
   const src = video.video?.startsWith("http") ? video.video : getMediaUrl(video.video)
   const thumb = video.thumbnail_url?.startsWith("http") ? video.thumbnail_url : getMediaUrl(video.thumbnail_url)
 
   useEffect(() => {
+    setIsFrameReady(false)
+  }, [src, video.id])
+
+  useEffect(() => {
     const el = ref.current
     if (!el) return
-    if (isVisible) {
+
+    const tryPlay = () => {
       el.volume = Math.min(Math.max(video.volume_original ?? 1.0, 0), 1)
-      el.currentTime = 0
-      el.play().catch(() => {})
+      el.play().catch(() => {
+        requestAnimationFrame(() => {
+          if (isVisible && el.paused) {
+            el.play().catch(() => {})
+          }
+        })
+      })
+    }
+
+    if (isVisible) {
+      if (el.readyState >= 2) {
+        tryPlay()
+      } else {
+        el.addEventListener("canplay", tryPlay, { once: true })
+      }
     } else {
       el.pause()
     }
-  }, [isVisible])
+
+    return () => {
+      el.removeEventListener("canplay", tryPlay)
+    }
+  }, [isVisible, video.volume_original])
 
   // Audio track con cache, volumen y trim
   useEffect(() => {
     if (audioRef.current) {
-      audioRef.current.pause()
+      const old = audioRef.current
+      old.pause()
+      old.onended = null
+      old.ontimeupdate = null
+      old.removeAttribute('src')
+      old.load()
       audioRef.current = null
+      onCarouselAudio?.(false)
     }
     if (!isVisible || !video.audio_track_url || isMuted) return
 
@@ -148,10 +197,11 @@ const SlideVideo = React.memo(function SlideVideo({ video, isMuted, isVisible, i
       }
       audio.play().catch(() => {})
       audioRef.current = audio
+      onCarouselAudio?.(true)
     }).catch(() => {})
 
     return () => {
-      if (audioRef.current) { audioRef.current.pause(); audioRef.current = null }
+      if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; onCarouselAudio?.(false) }
     }
   }, [isVisible, video.audio_track_url, isMuted])
 
@@ -159,30 +209,43 @@ const SlideVideo = React.memo(function SlideVideo({ video, isMuted, isVisible, i
     return <img src={isNear ? src : undefined} className="h-full w-full object-cover" alt="" />
 
   return (
-    <video
-      ref={ref}
-      src={isNear ? src : undefined}
-      poster={thumb}
-      preload={isVisible ? "auto" : "none"}
-      muted={isMuted}
-      loop
-      playsInline
-      className="h-full w-full object-cover"
-    />
+    <div className="relative h-full w-full overflow-hidden bg-black">
+      <img
+        src={thumb}
+        alt=""
+        aria-hidden="true"
+        className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-150 ${isFrameReady ? "opacity-0" : "opacity-100"}`}
+      />
+      <video
+        ref={ref}
+        src={isNear ? src : undefined}
+        poster={thumb}
+        preload={isVisible ? "auto" : "none"}
+        muted={isMuted}
+        loop
+        playsInline
+        onLoadedData={() => setIsFrameReady(true)}
+        onCanPlay={() => setIsFrameReady(true)}
+        onPlay={() => setIsFrameReady(true)}
+        className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-150 ${isFrameReady ? "opacity-100" : "opacity-0"}`}
+      />
+    </div>
   )
 })
 
-function SlideWithUI({ video: s, isMuted, isVisible, isNear, onLike, onComment, onGift }: {
-  video: Video; isMuted: boolean; isVisible: boolean; isNear: boolean;
+function SlideWithUI({ video: s, isMuted, isVisible, isNear, isPaused, onLike, onComment, onGift, onCarouselAudio, onMoreOptions }: {
+  video: Video; isMuted: boolean; isVisible: boolean; isNear: boolean; isPaused: boolean;
   onLike: (uuid: string, id: number) => void;
   onComment: (uuid: string, id: number) => void;
   onGift: (id: number) => void;
+  onCarouselAudio?: (playing: boolean) => void;
+  onMoreOptions?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false)
 
   return (
     <div className="relative h-full w-full bg-black">
-      <SlideVideo video={s} isMuted={isMuted} isVisible={isVisible} isNear={isNear} />
+      <SlideVideo video={s} isMuted={isMuted} isVisible={isVisible} isNear={isNear} onCarouselAudio={onCarouselAudio} />
 
       {/* Gradiente inferior */}
       <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-black/70 to-transparent pointer-events-none" />
@@ -230,44 +293,49 @@ function SlideWithUI({ video: s, isMuted, isVisible, isNear, onLike, onComment, 
             loading="lazy"
           />
         </Link>
-      </div>
 
-      {/* Footer — mute izquierda + música centrada + disco derecha */}
-      <div className="absolute bottom-[calc(env(safe-area-inset-bottom)+2.5rem)] left-3 right-3 z-30 flex items-center justify-center pointer-events-auto">
-        {s.audio_track_title && (
-          <div className="flex items-center gap-2 px-2 py-1 rounded-full">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-white/80 truncate">
-              ♪ {s.audio_track_title}
-            </span>
-            {s.audio_track_artist && (
-              <>
-                <span className="text-white/30 text-[10px] shrink-0">·</span>
-                <span className="text-[9px] font-semibold uppercase tracking-widest text-white/60 truncate">
-                  {s.audio_track_artist}
-                </span>
-              </>
-            )}
-          </div>
-        )}
+        {/* Disco de música — arriba a la derecha */}
         {s.audio_track_title && (
           <motion.div
-            animate={{ rotate: 360 }}
-            transition={{ duration: 4, repeat: Infinity, ease: 'linear' }}
-            className="absolute right-0 h-9 w-9 rounded-full overflow-hidden border-2 border-white/20 shadow-lg pointer-events-none"
+            animate={{ rotate: isVisible && !isPaused ? 360 : 0 }}
+            transition={isVisible && !isPaused ? { duration: 4, repeat: Infinity, ease: 'linear' } : { duration: 0 }}
+            className="h-9 w-9 shrink-0 rounded-full overflow-hidden border-2 border-white/20 shadow-lg pointer-events-none"
           >
             {s.audio_track_cover ? (
               <img src={s.audio_track_cover} className="h-full w-full object-cover" alt="" />
             ) : (
-              <div className="h-full w-full bg-gradient-to-br from-cyan-500 to-purple-600 flex items-center justify-center">
-                <span className="text-white text-[10px]">♪</span>
+              <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-cyan-500 to-purple-600">
+                <Music2 className="h-4 w-4 text-white" />
               </div>
             )}
           </motion.div>
         )}
       </div>
 
+      {/* Footer — pill de música centrado (el disco se movió arriba a la derecha) */}
+      <div className="absolute bottom-[calc(env(safe-area-inset-bottom)+2.5rem)] left-3 right-3 z-30 pointer-events-none">
+        <div className="relative flex items-center justify-center w-full">
+          {s.audio_track_title && (
+            <div className="flex max-w-[80%] items-center gap-2 rounded-full bg-black/15 px-2 py-1 backdrop-blur-sm">
+              <Music2 className="h-3 w-3 shrink-0 text-cyan-400" />
+              <span className="truncate text-[10px] font-bold uppercase tracking-widest text-white/80">
+                {clampWords(s.audio_track_title, 4)}
+              </span>
+              {s.audio_track_artist && (
+                <>
+                  <span className="shrink-0 text-[10px] text-white/30">·</span>
+                  <span className="truncate text-[9px] font-semibold uppercase tracking-widest text-white/60">
+                    {clampWords(s.audio_track_artist, 3)}
+                  </span>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Panel de acciones */}
-      <SlideActions video={s} onLike={onLike} onComment={onComment} onGift={onGift} />
+      <SlideActions video={s} onLike={onLike} onComment={onComment} onGift={onGift} onMoreOptions={onMoreOptions} />
     </div>
   )
 }
@@ -293,7 +361,7 @@ function SwipeHint({ show }: { show: boolean }) {
   )
 }
 
-export default function HorizontalCarousel({ video, isActive, isMuted, isExpanded: _isExpanded, onLike, onComment, onGift, onSlideChange, children }: Props) {
+export default function HorizontalCarousel({ video, isActive, isMuted, isExpanded: _isExpanded, isPaused, adActive, onLike, onComment, onGift, onSlideChange, onCarouselAudio, onMoreOptions, children }: Props) {
   const { getFromCache, expandInBackground } = useUserVideos()
 
   // Cargar desde cache inmediatamente — sin esperar fetch
@@ -339,6 +407,18 @@ export default function HorizontalCarousel({ video, isActive, isMuted, isExpande
     setDragging(false)
     setUserVideos(getFromCache(video.user_id.username))
   }, [video.id, video.user_id.username, getFromCache])
+
+  // When the feed item leaves the viewport, reset the carousel so that
+  // coming back to the same post restarts from the main slide instead of
+  // preserving a hidden horizontal position.
+  useEffect(() => {
+    if (isActive) return
+    setSlideIndex(0)
+    setDragPct(0)
+    setDragging(false)
+    touchStart.current = null
+    directionRef.current = null
+  }, [isActive])
 
   // Hint primera vez
   useEffect(() => {
@@ -442,9 +522,7 @@ export default function HorizontalCarousel({ video, isActive, isMuted, isExpande
   // Translate is in units of container width (100% = one full slide)
   // When on slide 0: translate = 0 (main video stays fixed)
   // When on slide N: translate = -N * 100%
-  const baseTranslate = -(slideIndex * 100)
   const dragTranslate = dragPct
-  const totalTranslate = baseTranslate + dragTranslate
 
   return (
     <div
@@ -452,44 +530,51 @@ export default function HorizontalCarousel({ video, isActive, isMuted, isExpande
       className="relative h-full w-full overflow-hidden rounded-t-xl rounded-b-none"
       style={{ contain: "layout style" }}
     >
-      {/* Slide 0 — main video, always fixed at full size, never resizes */}
-      <div className="absolute inset-0">
-        {children}
-      </div>
-
-      {/* Extra slides overlay strip — only rendered if there are more slides */}
-      {extraCount > 0 && (
+      {/* All slides in one strip — slide 0 is children (main feed video + buttons) */}
+      <div
+        className="absolute inset-0 flex"
+        style={{
+          width: extraCount > 0 ? `${(extraCount + 1) * 100}%` : "100%",
+          height: "100%",
+          // `translateX` works relative to the strip width, so normalize by
+          // the number of slides to keep each swipe aligned one-by-one.
+          transform: extraCount > 0 ? `translateX(${(dragTranslate - (slideIndex * 100)) / (extraCount + 1)}%)` : undefined,
+          // 0.18s + easeOutQuint: el deslizamiento horizontal entre slides es más
+          // rápido y seco (igual que la transición vertical del feed), sin perder
+          // suavidad. Antes 0.28s se sentía algo lento.
+          transition: extraCount > 0 && !dragging ? "transform 0.18s cubic-bezier(0.22, 1, 0.36, 1)" : "none",
+          willChange: extraCount > 0 ? "transform" : undefined,
+        }}
+      >
+        {/* Slide 0 — main video with all its feed buttons */}
         <div
-          className="absolute inset-0 flex"
-          style={{
-            width: `${(extraCount + 1) * 100}%`,
-            height: "100%",
-            transform: `translateX(${totalTranslate / (extraCount + 1)}%)`,
-            transition: dragging ? "none" : "transform 0.28s cubic-bezier(0.33, 1, 0.68, 1)",
-            willChange: "transform",
-          }}
+          className="relative h-full flex-shrink-0"
+          style={{ width: extraCount > 0 ? `${100 / (extraCount + 1)}%` : "100%" }}
         >
-          {/* Transparent spacer for slide 0 */}
-          <div style={{ width: `${100 / (extraCount + 1)}%`, flexShrink: 0 }} />
-          {extraSlides.map((s, i) => (
-            <div
-              key={s.id}
-              className="relative h-full flex-shrink-0"
-              style={{ width: `${100 / (extraCount + 1)}%` }}
-            >
-              <SlideWithUI
-                video={s}
-                isMuted={isMuted}
-                isVisible={isActive && slideIndex === i + 1}
-                isNear={isActive && Math.abs(slideIndex - (i + 1)) <= 1}
-                onLike={onLike}
-                onComment={onComment}
-                onGift={onGift}
-              />
-            </div>
-          ))}
+          {children}
         </div>
-      )}
+
+        {extraSlides.map((s, i) => (
+          <div
+            key={s.id}
+            className={`relative h-full flex-shrink-0 ${adActive ? 'invisible pointer-events-none' : ''}`}
+            style={{ width: `${100 / (extraCount + 1)}%` }}
+          >
+            <SlideWithUI
+              video={s}
+              isMuted={isMuted}
+              isVisible={isActive && slideIndex === i + 1 && !adActive}
+              isNear={isActive && Math.abs(slideIndex - (i + 1)) <= 1}
+              isPaused={isPaused}
+              onLike={onLike}
+              onComment={onComment}
+              onGift={onGift}
+              onCarouselAudio={onCarouselAudio}
+              onMoreOptions={onMoreOptions}
+            />
+          </div>
+        ))}
+      </div>
 
       <SwipeHint show={showHint && isActive} />
     </div>

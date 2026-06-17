@@ -7,7 +7,7 @@ import {
   Scissors, Type, Layers, Volume2, VolumeX,
   ChevronRight, ChevronLeft, Play, Clock, Sliders,
   Image, Palette, Mic, Hash, ArrowLeft, Globe, Lock, Users, AtSign,
-  Loader2, Check
+  Loader2, Check, Gem
 } from "lucide-react"
 import ImaginaAIModal from "./imagina-ai-modal"
 import TextEditorOverlay, { type TextOverlayData } from "./text-editor-overlay"
@@ -56,7 +56,7 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
   }, [])
   const [currentStep, setCurrentStep] = useState<'edit' | 'publish' | 'share'>('edit')
   const [description, setDescription] = useState('')
-  const [privacy, setPrivacy] = useState<'public' | 'followers' | 'private'>('public')
+  const [privacy, setPrivacy] = useState<'public' | 'followers' | 'subscribers' | 'private'>('public')
   const [location] = useState('')
   // Mention suggestions
   const [mentionQuery, setMentionQuery] = useState<string | null>(null)
@@ -991,6 +991,7 @@ const CreateActionModal: React.FC<CreateActionModalProps> = ({ isOpen, onClose }
   const privacyOptions = [
     { value: 'public', icon: Globe, label: 'Público' },
     { value: 'followers', icon: Users, label: 'Seguidores' },
+    { value: 'subscribers', icon: Gem, label: 'Suscriptores' },
     { value: 'private', icon: Lock, label: 'Privado' },
   ] as const
 

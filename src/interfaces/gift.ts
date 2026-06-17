@@ -5,6 +5,7 @@ export interface GiftI {
     slug: string;
     emoji: string;
     video: string | null;
+    thumbnail?: string | null;
     cost?: string | number
     color?: string
     animation?: string

@@ -119,11 +119,12 @@ export async function saveMessages(
 // --- Stories ---
 
 export async function saveStories(stories: any[]): Promise<void> {
-  if (!stories.length) return;
   const db = await openDB();
   return new Promise((res, rej) => {
     const tx = db.transaction(STORE_STORIES, "readwrite");
     const store = tx.objectStore(STORE_STORIES);
+    // Siempre reemplazamos el caché por la verdad del servidor: si llega vacío
+    // (todas las historias expiraron a las 24h) el clear deja el store vacío.
     store.clear();
     for (const story of stories) {
       store.put(story);
@@ -132,6 +133,15 @@ export async function saveStories(stories: any[]): Promise<void> {
     tx.onerror = () => rej(tx.error);
     tx.onabort = () => rej(tx.error);
   });
+}
+
+export async function clearStoriesCache(): Promise<void> {
+  try {
+    const db = await openDB();
+    const tx = db.transaction(STORE_STORIES, "readwrite");
+    tx.objectStore(STORE_STORIES).clear();
+    return new Promise((res) => { tx.oncomplete = () => res(); tx.onerror = () => res(); });
+  } catch { /* silent */ }
 }
 
 export async function loadStoriesCache(): Promise<any[]> {
@@ -179,3 +189,15 @@ export async function loadMessages(chat_uuid: string): Promise<Message[]> {
     }
   });
 }
+
+export async function clearChatCache(): Promise<void> {
+  try {
+    const db = await openDB();
+    const tx = db.transaction([STORE_CHATS, STORE_MESSAGES, STORE_STORIES], "readwrite");
+    tx.objectStore(STORE_CHATS).clear();
+    tx.objectStore(STORE_MESSAGES).clear();
+    tx.objectStore(STORE_STORIES).clear();
+    return new Promise((res) => { tx.oncomplete = () => res(); tx.onerror = () => res(); });
+  } catch { /* silent */ }
+}
+

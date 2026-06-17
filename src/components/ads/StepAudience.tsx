@@ -11,6 +11,8 @@ interface StepAudienceProps {
     setData: (data: any) => void;
     errors?: Record<string, boolean>;
     shakeTrigger?: number;
+    /** Boost de video: oculta la segmentación por ubicación (se muestra a todos). */
+    hideLocation?: boolean;
 }
 
 const shake = {
@@ -18,7 +20,7 @@ const shake = {
     transition: { duration: 0.45 }
 }
 
-const StepAudience: React.FC<StepAudienceProps> = ({ data, setData, errors = {}, shakeTrigger = 0 }) => {
+const StepAudience: React.FC<StepAudienceProps> = ({ data, setData, errors = {}, shakeTrigger = 0, hideLocation = false }) => {
     const inputRef = React.useRef<HTMLInputElement>(null);
     const [intInput, setIntInput] = useState("");
     const { getCurrentLocation, loading: geoLoading, error: geoError } = useGeolocation();
@@ -196,7 +198,8 @@ const StepAudience: React.FC<StepAudienceProps> = ({ data, setData, errors = {},
 
                 {/* Right Col: Interests & Locations */}
                 <div className="space-y-6">
-                    {/* Locations */}
+                    {/* Locations — oculto en boost: el video se muestra a todos */}
+                    {!hideLocation && (
                     <motion.div
                         key={`locations-${shakeTrigger}`}
                         animate={errors.locations ? shake : {}}
@@ -268,6 +271,7 @@ const StepAudience: React.FC<StepAudienceProps> = ({ data, setData, errors = {},
                             ))}
                         </div>
                     </motion.div>
+                    )}
 
                     {/* Interests */}
                     <div className="space-y-2">

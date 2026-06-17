@@ -1,8 +1,9 @@
 "use client"
 
-import React, { useState, useMemo, useRef } from "react"
+import React, { useState, useMemo } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { X, Search, Image, Film } from "lucide-react"
+import { pickMedia } from "../../../hooks/useMediaPicker"
 
 export interface StickerItem {
   id: string
@@ -179,8 +180,16 @@ interface StickerPanelProps {
 const StickerPanel: React.FC<StickerPanelProps> = ({ isOpen, onClose, onSelectSticker, onSelectImageFile, onSelectVideoFile }) => {
   const [activeCategory, setActiveCategory] = useState<Category>("popular")
   const [query, setQuery] = useState("")
-  const imageInputRef = useRef<HTMLInputElement>(null)
-  const videoInputRef = useRef<HTMLInputElement>(null)
+  // Selectores nativos (Capacitor) — en el celular abren la galería/cámara nativa
+  // en vez del input web crudo, que en Android no abre el selector correctamente.
+  const handlePickImage = async () => {
+    const picked = await pickMedia("image", 50)
+    if (picked && onSelectImageFile) { onSelectImageFile(picked.file); onClose() }
+  }
+  const handlePickVideo = async () => {
+    const picked = await pickMedia("video", 50)
+    if (picked && onSelectVideoFile) { onSelectVideoFile(picked.file); onClose() }
+  }
 
   const filtered = useMemo(() => {
     if (query.trim()) {
@@ -231,14 +240,14 @@ const StickerPanel: React.FC<StickerPanelProps> = ({ isOpen, onClose, onSelectSt
               <h3 className="text-white font-semibold text-sm">Stickers</h3>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => imageInputRef.current?.click()}
+                  onClick={handlePickImage}
                   className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/8 border border-white/10 text-white/70 text-[11px] font-semibold hover:bg-white/12 transition-colors"
                 >
                   <Image size={12} />
                   Imagen
                 </button>
                 <button
-                  onClick={() => videoInputRef.current?.click()}
+                  onClick={handlePickVideo}
                   className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/8 border border-white/10 text-white/70 text-[11px] font-semibold hover:bg-white/12 transition-colors"
                 >
                   <Film size={12} />
@@ -246,28 +255,6 @@ const StickerPanel: React.FC<StickerPanelProps> = ({ isOpen, onClose, onSelectSt
                 </button>
               </div>
             </div>
-            <input
-              ref={imageInputRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={e => {
-                const file = e.target.files?.[0]
-                if (file && onSelectImageFile) { onSelectImageFile(file); onClose() }
-                e.currentTarget.value = ""
-              }}
-            />
-            <input
-              ref={videoInputRef}
-              type="file"
-              accept="video/*"
-              className="hidden"
-              onChange={e => {
-                const file = e.target.files?.[0]
-                if (file && onSelectVideoFile) { onSelectVideoFile(file); onClose() }
-                e.currentTarget.value = ""
-              }}
-            />
 
             {/* Search Bar */}
             <div className="px-4 pb-2 shrink-0">
