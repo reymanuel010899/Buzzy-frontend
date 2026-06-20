@@ -45,8 +45,9 @@ public class MainActivity extends BridgeActivity {
             // forzar una capa de HW global entra en conflicto con la surface de
             // decodificación de <video> → el video se pinta por tiles ("cuadritos").
             // La promoción a GPU se hace por elemento (translateZ(0) en el <video>).
-            // Sin debug del WebView en producción (evita overhead).
-            WebView.setWebContentsDebuggingEnabled(false);
+            // Debug del WebView SOLO en builds debug (para chrome://inspect).
+            // En producción (release) queda desactivado para evitar overhead.
+            WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG);
 
             // Allow WebView to request microphone permission for getUserMedia
             webView.setWebChromeClient(new WebChromeClient() {

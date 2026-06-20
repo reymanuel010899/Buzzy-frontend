@@ -10,6 +10,8 @@ import FluidSearch from "./fluid-search"
 import NotificationPanel from "../notifications/NotificationPanel"
 import { useNotificationsStore } from "../../context/NotificationsStore"
 import { useCallStore } from "../../store/callStore"
+import HeaderStories from "./HeaderStories"
+import { useFeedModeStore } from "../../store/feedModeStore"
 
 const Navbar: React.FC = () => {
   const { t } = useTranslation(['common'])
@@ -24,6 +26,8 @@ const Navbar: React.FC = () => {
   const { activeOutgoingCall, activeIncomingCall } = useCallStore();
   const [isCallMinimized] = useState(false);
   const [activeCallTime] = useState(0);
+  const feedMode = useFeedModeStore((state) => state.feedMode);
+  const setFeedMode = useFeedModeStore((state) => state.setFeedMode);
 
   useEffect(() => {
     const handleScroll = () => setScrollPosition(window.scrollY)
@@ -46,30 +50,19 @@ const Navbar: React.FC = () => {
             />
           )}
         </AnimatePresence>
-        <div className="flex justify-between items-center mx-auto py-1">
-          <div className="flex items-center justify-center gap-5 sm:gap-6">
-
+        <div className="flex items-center gap-2 mx-auto py-1">
             <motion.button
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.9 }}
-              className="relative text-gray-300 hover:text-cyan-400 transition-colors"
+              className="relative shrink-0 text-gray-300 hover:text-cyan-400 transition-colors"
               onClick={() => navigate("/ads")}
             >
-              <Megaphone className="h-7 w-7" />
+              <Megaphone className="h-8 w-8" />
             </motion.button>
 
-          </div>
+          <HeaderStories inline showLabels={false} />
 
-          <div className="hidden md:flex flex-grow max-w-lg items-center bg-gray-800/60 backdrop-blur-md border border-gray-700/50 rounded-full px-4 py-2 mx-8 cursor-pointer hover:bg-gray-700/50 transition-all"
-            onClick={() => setShowSearch(true)}>
-            <span className="text-gray-400">{search || "Buscar en Buzzy..."}</span>
-            <motion.div whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
-              <Search className="w-5 h-5 text-gray-400 ml-auto" />
-            </motion.div>
-          </div>
-
-          <div className="flex items-center gap-4 sm:gap-6">
-
+          <div className="flex shrink-0 items-center gap-2 sm:gap-4">
             {isCallMinimized && (activeOutgoingCall || (activeIncomingCall && activeIncomingCall.status === 'active')) && (
               <motion.div
                 initial={{ opacity: 0, scale: 0.8 }}
@@ -89,7 +82,7 @@ const Navbar: React.FC = () => {
               className="relative text-gray-300 hover:text-purple-400 transition-colors"
               onClick={() => setShowNotifications(v => !v)}
             >
-              <Bell className="w-10 h-7" />
+              <Bell className="w-10 h-8" />
               {notifUnreadCount > 0 && (
                 <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-red-500 rounded-full text-[10px] font-bold text-white flex items-center justify-center px-1">
                   {notifUnreadCount > 9 ? "9+" : notifUnreadCount}
@@ -99,12 +92,35 @@ const Navbar: React.FC = () => {
           </div>
         </div>
 
-        <div className="md:hidden pt-1">
+        <div className="md:hidden -mt-1">
           <div className="flex items-center bg-gray-800/60 backdrop-blur-md border border-gray-700/50 rounded-full px-2 py-1 cursor-pointer hover:bg-gray-700/50 transition-all"
             onClick={() => setShowSearch(true)}>
             <span className="text-gray-400 px-2">{search || "Buscar en Buzzy..."}</span>
             <Search className="w-5 h-5 text-gray-400 ml-auto mr-2" />
           </div>
+        </div>
+
+        <div className="flex items-center justify-center gap-6 pt-1 pb-0.5">
+          <button
+            type="button"
+            onClick={() => setFeedMode("for-you")}
+            className={`bg-transparent p-0 text-[12px] font-medium transition-colors ${feedMode === "for-you"
+              ? "text-white"
+              : "text-white/45 hover:text-white"
+              }`}
+          >
+            Para ti
+          </button>
+          <button
+            type="button"
+            onClick={() => setFeedMode("following")}
+            className={`bg-transparent p-0 text-[12px] font-medium transition-colors ${feedMode === "following"
+              ? "text-[#00f0ff]"
+              : "text-white/45 hover:text-white"
+              }`}
+          >
+            Seguidos
+          </button>
         </div>
       </nav>
 

@@ -50,6 +50,10 @@ export interface StoryMedia {
   type: "image" | "video";
   order: number;
   story: number;
+  // Etiquetados en runtime al agrupar (ver groupedStories): privacy + created_at
+  // de la historia padre, para mostrar el label correcto por media-item.
+  privacy?: string;
+  created_at?: string;
 }
 
 export interface StoryTextLayer {

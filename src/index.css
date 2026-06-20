@@ -527,3 +527,16 @@ body {
 .eq-bars .eq-bar:nth-child(3) { animation-delay: 0.2s; }
 .eq-bars .eq-bar:nth-child(4) { animation-delay: 0.15s; }
 .eq-bars .eq-bar:nth-child(5) { animation-delay: 0.05s; }
+/* ── Ocultar el ícono de play por defecto del WebView en los videos del feed ──
+   Android/iOS WebView pintan un botón de "play" grande y PIXELADO sobre el
+   <video> mientras no tiene primer frame (eso es lo que se confundía con
+   "cuadritos"). Estas reglas lo eliminan de raíz, sin depender del poster. */
+.feed-video::-webkit-media-controls-start-playback-button,
+.feed-video::-webkit-media-controls-play-button,
+.feed-video::-webkit-media-controls-overlay-play-button,
+.feed-video::-webkit-media-controls,
+.feed-video::-webkit-media-controls-panel {
+  display: none !important;
+  -webkit-appearance: none !important;
+  opacity: 0 !important;
+}

@@ -2,7 +2,7 @@
 
 import React, { useRef, useState, useEffect, useCallback } from "react"
 import { AnimatePresence, motion } from "framer-motion"
-import { Heart, MessageCircle, Eye, Music2, MoreVertical } from "lucide-react"
+import { Heart, MessageCircle, Eye, Music2, Forward } from "lucide-react"
 import { Link } from "react-router-dom"
 import { Video } from "./main.interface"
 import { useUserVideos } from "../../hooks/useUserVideos"
@@ -93,7 +93,7 @@ function SlideActions({ video, onLike, onComment, onGift, onMoreOptions }: Slide
         className="flex flex-col items-center gap-1"
       >
         <div className="flex h-8 w-8 items-center justify-center">
-          <MoreVertical className="h-5 w-5 text-white/70" />
+          <Forward className="h-5 w-5 text-white/70" />
         </div>
       </motion.button>
     </div>
@@ -122,6 +122,12 @@ const SlideVideo = React.memo(function SlideVideo({ video, isMuted, isVisible, i
   const ref = useRef<HTMLVideoElement>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [isFrameReady, setIsFrameReady] = useState(false)
+  // Espejo de isVisible para re-verificar DENTRO del fetch async del audio: al
+  // bajar a un video, su carrusel puede volverse isVisible un instante mientras
+  // se descarga la pista; si para cuando resuelve ya no es visible, NO debe sonar
+  // (este era el "intenta sonar la música del video horizontal de abajo").
+  const isVisibleRef = useRef(isVisible)
+  isVisibleRef.current = isVisible
   const src = video.video?.startsWith("http") ? video.video : getMediaUrl(video.video)
   const thumb = video.thumbnail_url?.startsWith("http") ? video.thumbnail_url : getMediaUrl(video.thumbnail_url)
 
@@ -181,6 +187,10 @@ const SlideVideo = React.memo(function SlideVideo({ video, isMuted, isVisible, i
 
     prefetchAudioUrl(trackUrl).then(blobUrl => {
       if (audioRef.current) return
+      // El fetch es async: si entre que empezó y terminó el slide dejó de ser
+      // visible (scrolleaste a otro video), descartar — si no, sonaría la música
+      // de un carrusel que ya no estás viendo.
+      if (!isVisibleRef.current || isMuted) return
       const audio = new Audio(blobUrl)
       audio.loop = false
       audio.volume = volumeMusic
@@ -371,10 +381,15 @@ export default function HorizontalCarousel({ video, isActive, isMuted, isExpande
 
   const [slideIndex, setSlideIndex] = useState(0)
   const [showHint, setShowHint] = useState(false)
-  const [dragPct, setDragPct] = useState(0)
-  const [dragging, setDragging] = useState(false)
 
   const containerRef = useRef<HTMLDivElement>(null)
+  // Ref al "strip" (la tira con todos los slides). Durante el arrastre movemos su
+  // transform DIRECTAMENTE en el DOM, sin pasar por setState → cero re-renders por
+  // frame → 60fps reales. React solo interviene al SOLTAR (commitSlide). Esto es
+  // lo que hace que el swipe horizontal se sienta nativo (estilo TikTok) en vez de
+  // dar tirones (antes setDragPct re-renderizaba todo el carrusel con sus videos
+  // en cada touchmove).
+  const stripRef = useRef<HTMLDivElement>(null)
   const touchStart = useRef<{ x: number; y: number } | null>(null)
   const directionRef = useRef<"h" | "v" | null>(null)
   const slideRef = useRef(slideIndex)
@@ -384,6 +399,24 @@ export default function HorizontalCarousel({ video, isActive, isMuted, isExpande
   const slides = [video, ...userVideos.filter((v) => v.id !== video.id)]
   const slidesLenRef = useRef(slides.length)
   slidesLenRef.current = slides.length
+  // extraCount en un ref para leerlo dentro de los closures nativos del touch sin
+  // recrearlos. extraCount = nº de slides además del principal.
+  const extraCountRef = useRef(0)
+  extraCountRef.current = Math.max(0, slides.length - 1)
+
+  // Escribe el transform del strip DIRECTAMENTE en el DOM (sin React). dragPct es
+  // el % arrastrado del slide actual; misma fórmula que el render para que el
+  // arrastre y el estado final coincidan exactamente.
+  const applyStripTransform = useCallback((dragPctValue: number, withTransition: boolean) => {
+    const strip = stripRef.current
+    const n = extraCountRef.current
+    if (!strip || n === 0) return
+    strip.style.transition = withTransition
+      ? "transform 0.18s cubic-bezier(0.22, 1, 0.36, 1)"
+      : "none"
+    strip.style.transform =
+      `translateX(${(dragPctValue - slideRef.current * 100) / (n + 1)}%)`
+  }, [])
 
   useEffect(() => {
     onSlideChange?.(slideIndex, slides.length)
@@ -403,8 +436,6 @@ export default function HorizontalCarousel({ video, isActive, isMuted, isExpande
   // Reset al cambiar video principal
   useEffect(() => {
     setSlideIndex(0)
-    setDragPct(0)
-    setDragging(false)
     setUserVideos(getFromCache(video.user_id.username))
   }, [video.id, video.user_id.username, getFromCache])
 
@@ -414,8 +445,6 @@ export default function HorizontalCarousel({ video, isActive, isMuted, isExpande
   useEffect(() => {
     if (isActive) return
     setSlideIndex(0)
-    setDragPct(0)
-    setDragging(false)
     touchStart.current = null
     directionRef.current = null
   }, [isActive])
@@ -433,10 +462,14 @@ export default function HorizontalCarousel({ video, isActive, isMuted, isExpande
   const commitSlide = useCallback((newIdx: number) => {
     const maxIdx = slidesLenRef.current - 1
     const clamped = Math.max(0, Math.min(newIdx, maxIdx))
+    // Actualizar el ref ANTES de animar el strip al destino (con transición),
+    // para que el DOM llegue suave al slide nuevo sin esperar el re-render.
+    slideRef.current = clamped
+    applyStripTransform(0, true)
+    // React reconcilia el estado lógico (mismo valor → el style prop coincide con
+    // lo que ya pusimos en el DOM, sin saltos).
     setSlideIndex(clamped)
-    setDragPct(0)
-    setDragging(false)
-  }, [])
+  }, [applyStripTransform])
 
   // Touch handlers nativos — más fluidos que React synthetic events
   useEffect(() => {
@@ -446,8 +479,8 @@ export default function HorizontalCarousel({ video, isActive, isMuted, isExpande
     const onStart = (e: TouchEvent) => {
       touchStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
       directionRef.current = null
-      setDragging(true)
-      setDragPct(0)
+      // Quitar la transición para que el strip siga al dedo 1:1 (sin lag de animación).
+      applyStripTransform(0, false)
     }
 
     const onMove = (e: TouchEvent) => {
@@ -474,7 +507,10 @@ export default function HorizontalCarousel({ video, isActive, isMuted, isExpande
       const atEnd = slideRef.current === slidesLenRef.current - 1 && dx < 0
       if (atStart || atEnd) pct *= 0.12
 
-      setDragPct(pct)
+      // DOM directo, sin setState → sin re-render por frame. Antes setDragPct
+      // re-renderizaba todo el carrusel (con sus <video>) en cada touchmove,
+      // causando los tirones al deslizar entre slides.
+      applyStripTransform(pct, false)
     }
 
     const onEnd = (e: TouchEvent) => {
@@ -483,7 +519,8 @@ export default function HorizontalCarousel({ video, isActive, isMuted, isExpande
       touchStart.current = null
 
       if (directionRef.current !== "h") {
-        setDragging(false); setDragPct(0); directionRef.current = null; return
+        // Fue gesto vertical: dejar el strip donde está (sin desplazamiento).
+        applyStripTransform(0, true); directionRef.current = null; return
       }
       directionRef.current = null
 
@@ -501,7 +538,8 @@ export default function HorizontalCarousel({ video, isActive, isMuted, isExpande
           commitSlide(slideRef.current - 1)
         }
       } else {
-        setDragPct(0); setDragging(false)
+        // No alcanzó el umbral: animar de vuelta al slide actual.
+        applyStripTransform(0, true)
       }
     }
 
@@ -513,16 +551,11 @@ export default function HorizontalCarousel({ video, isActive, isMuted, isExpande
       el.removeEventListener("touchmove", onMove)
       el.removeEventListener("touchend", onEnd)
     }
-  }, [commitSlide, expandInBackground, video.id, video.user_id.username])
+  }, [commitSlide, expandInBackground, applyStripTransform, video.id, video.user_id.username])
 
   // Extra slides (index >= 1) — slide 0 is always the main video fixed in place
   const extraSlides = slides.slice(1)
   const extraCount = extraSlides.length
-
-  // Translate is in units of container width (100% = one full slide)
-  // When on slide 0: translate = 0 (main video stays fixed)
-  // When on slide N: translate = -N * 100%
-  const dragTranslate = dragPct
 
   return (
     <div
@@ -532,17 +565,17 @@ export default function HorizontalCarousel({ video, isActive, isMuted, isExpande
     >
       {/* All slides in one strip — slide 0 is children (main feed video + buttons) */}
       <div
+        ref={stripRef}
         className="absolute inset-0 flex"
         style={{
           width: extraCount > 0 ? `${(extraCount + 1) * 100}%` : "100%",
           height: "100%",
-          // `translateX` works relative to the strip width, so normalize by
-          // the number of slides to keep each swipe aligned one-by-one.
-          transform: extraCount > 0 ? `translateX(${(dragTranslate - (slideIndex * 100)) / (extraCount + 1)}%)` : undefined,
-          // 0.18s + easeOutQuint: el deslizamiento horizontal entre slides es más
-          // rápido y seco (igual que la transición vertical del feed), sin perder
-          // suavidad. Antes 0.28s se sentía algo lento.
-          transition: extraCount > 0 && !dragging ? "transform 0.18s cubic-bezier(0.22, 1, 0.36, 1)" : "none",
+          // En REPOSO el transform refleja slideIndex (sin dragPct: el arrastre lo
+          // maneja applyStripTransform escribiendo el DOM directo, sin re-render).
+          // La transición va siempre activa para que un cambio de slideIndex
+          // programático (no por gesto) también anime suave.
+          transform: extraCount > 0 ? `translateX(${(-(slideIndex * 100)) / (extraCount + 1)}%)` : undefined,
+          transition: extraCount > 0 ? "transform 0.18s cubic-bezier(0.22, 1, 0.36, 1)" : "none",
           willChange: extraCount > 0 ? "transform" : undefined,
         }}
       >

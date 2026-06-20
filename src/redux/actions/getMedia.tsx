@@ -7,13 +7,17 @@ let _feedFetchInFlight = false;
 
 // list-home: top 20 videos populares para usuarios nuevos sin historial.
 export const getMedia = () => async (dispatch: (a: unknown) => void) => {
-  // Mostrar cache primero mientras llega el servidor
-  try {
-    const cached = await loadFeed();
-    if (cached.length > 0) {
-      dispatch({ type: APPEND_MEDIA, payload: cached });
-    }
-  } catch { /* fallo silencioso */ }
+  // El cache SOLO se muestra cuando NO hay internet. Con conexión siempre pedimos
+  // videos frescos al servidor — así al iniciar sesión nunca ves los que ya
+  // viste. Offline: mostramos el cache para que la app no quede en blanco.
+  if (!navigator.onLine) {
+    try {
+      const cached = await loadFeed();
+      if (cached.length > 0) {
+        dispatch({ type: APPEND_MEDIA, payload: cached });
+      }
+    } catch { /* fallo silencioso */ }
+  }
 
   try {
     const response = await apiClient.get('/api/list-home/')
@@ -26,6 +30,14 @@ export const getMedia = () => async (dispatch: (a: unknown) => void) => {
       saveFeed(response.data).catch(() => {});
     }
   } catch {
+    // La petición falló (probablemente nos quedamos sin internet a mitad): mostrar
+    // el cache como último recurso para no dejar el feed vacío.
+    try {
+      const cached = await loadFeed();
+      if (cached.length > 0) {
+        dispatch({ type: APPEND_MEDIA, payload: cached });
+      }
+    } catch { /* fallo silencioso */ }
     dispatch({
       type: FAILED_MEDIA,
       payload: 'offline'
@@ -45,14 +57,17 @@ export const getRecommendedFeed = (forceRefresh = false) => async (dispatch: (a:
   if (_feedFetchInFlight && !forceRefresh) return;
   _feedFetchInFlight = true;
 
-  // 1. Mostrar cache de IndexedDB inmediatamente mientras llega el servidor
-  try {
-    const cached = await loadFeed();
-    if (cached.length > 0) {
-      dispatch({ type: APPEND_MEDIA, payload: cached });
+  // 1. El cache SOLO se muestra si NO hay internet. Con conexión vamos directo al
+  //    servidor para traer videos frescos (no los que el usuario ya vio).
+  if (!navigator.onLine) {
+    try {
+      const cached = await loadFeed();
+      if (cached.length > 0) {
+        dispatch({ type: APPEND_MEDIA, payload: cached });
+      }
+    } catch {
+      // fallo silencioso
     }
-  } catch {
-    // fallo silencioso
   }
 
   // 2. Siempre llamar al servidor — con o sin cache previo
@@ -75,11 +90,19 @@ export const getRecommendedFeed = (forceRefresh = false) => async (dispatch: (a:
       return videos;
     }
   } catch {
-    // Sin internet: el cache de IndexedDB ya fue despachado arriba
+    // La petición falló (sin internet): AHORA sí mostramos el cache como respaldo
+    // para no dejar el feed vacío.
+    try {
+      const cached = await loadFeed();
+      if (cached.length > 0) {
+        dispatch({ type: APPEND_MEDIA, payload: cached });
+      }
+    } catch { /* fallo silencioso */ }
     dispatch({ type: FAILED_MEDIA, payload: 'offline' });
   } finally {
-    // Liberar el guard después de 3s para permitir refreshes manuales
-    setTimeout(() => { _feedFetchInFlight = false; }, 3000);
+    // Carga de reemplazo (no paginación): libera la guarda de inmediato para no
+    // bloquear un cambio de tab inmediato hacia el feed de seguidos.
+    _feedFetchInFlight = false;
   }
 };
 
@@ -108,6 +131,56 @@ export const loadMoreFeed = () => async (dispatch: (a: unknown) => void) => {
   } catch {
     // Sin internet: no despachamos FAILED_MEDIA para no borrar el feed actual;
     // el usuario simplemente no recibe más páginas hasta recuperar conexión.
+  } finally {
+    setTimeout(() => { _feedFetchInFlight = false; }, 3000);
+  }
+};
+
+// ─── Feed de seguidos (tab "Seguidos") ───────────────────────────────────────
+// Timeline cronológico de las cuentas que el usuario sigue.
+// No usa el cache de IndexedDB (ese es solo para el cold-start de "Para ti").
+
+// getFollowingFeed: primera carga del tab Seguidos. REEMPLAZA el feed actual.
+// `force` ignora la guarda: un cambio de tab es intención explícita del usuario
+// y debe poder reemplazar cualquier carga del otro feed que esté en vuelo.
+export const getFollowingFeed = (force = false) => async (dispatch: (a: unknown) => void) => {
+  if (_feedFetchInFlight && !force) return;
+  _feedFetchInFlight = true;
+
+  // Cambio de tab (force): limpia el feed anterior para no mostrar los videos de
+  // "Para ti" mientras llega la respuesta de seguidos.
+  if (force) dispatch({ type: RESET_MEDIA });
+
+  try {
+    const response = await apiClient.get('/api/recommendations/following/');
+    if (response.status === 200) {
+      const videos = response.data?.results ?? response.data;
+      dispatch({ type: SUCCEES_MEDIA, payload: videos });
+      return videos;
+    }
+  } catch {
+    dispatch({ type: FAILED_MEDIA, payload: 'offline' });
+  } finally {
+    // Carga de reemplazo (no paginación): libera la guarda de inmediato para no
+    // bloquear un cambio de tab inmediato hacia el otro feed.
+    _feedFetchInFlight = false;
+  }
+};
+
+// loadMoreFollowingFeed: paginación por scroll del tab Seguidos. AGREGA al final.
+export const loadMoreFollowingFeed = () => async (dispatch: (a: unknown) => void) => {
+  if (_feedFetchInFlight) return;
+  _feedFetchInFlight = true;
+
+  try {
+    const response = await apiClient.get('/api/recommendations/following/');
+    if (response.status === 200) {
+      const videos = response.data?.results ?? response.data;
+      dispatch({ type: APPEND_MEDIA, payload: videos });
+      return videos;
+    }
+  } catch {
+    // Sin internet: mantenemos el feed actual.
   } finally {
     setTimeout(() => { _feedFetchInFlight = false; }, 3000);
   }

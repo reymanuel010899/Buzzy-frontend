@@ -101,7 +101,13 @@ function makeFreshHowl(blobUrl: string, volume: number): Howl {
   return new Howl({
     src: [blobUrl],
     format: ['mp3'],
-    html5: false,
+    // html5: true → reproduce con el <audio> nativo en modo STREAMING: empieza a
+    // sonar apenas tiene los primeros frames, sin esperar a decodificar todo el
+    // MP3. Con html5: false (Web Audio) cada play decodificaba el archivo entero
+    // en memoria antes de sonar → alta latencia al dar play, aun con el blob ya
+    // cacheado. El blob sigue en memoria, así que no hay descarga; solo cambia el
+    // modo de decodificación a progresivo.
+    html5: true,
     loop: false,
     preload: true,
     volume,

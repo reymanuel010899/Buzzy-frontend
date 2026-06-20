@@ -30,7 +30,10 @@ export const getActiveStories = () => async (dispatch: any) => {
       type: FAILED_ACTIVE_STORIES,
       payload: error?.message ?? 'error',
     });
-    // Ante un fallo de red, devolver el cache para que la barra no se vacíe.
-    return cached;
+    // Fallo de red: devolver `undefined` (NO un array) para que el llamador lo
+    // distinga de una respuesta real del servidor. El cache ya se despachó arriba
+    // vía Redux, así que la barra no se vacía. Devolver el cache aquí haría que el
+    // home creyera que la carga fue exitosa y no reintentara.
+    return undefined;
   }
 };

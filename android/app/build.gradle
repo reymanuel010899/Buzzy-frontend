@@ -22,6 +22,11 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
+    // AGP 8+ deshabilita BuildConfig por defecto; lo activamos para poder usar
+    // BuildConfig.DEBUG en MainActivity (habilita chrome://inspect solo en debug).
+    buildFeatures {
+        buildConfig true
+    }
 }
 
 repositories {

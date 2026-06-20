@@ -7,7 +7,7 @@ import {
   Play,
   X,
   Share2,
-  MoreVertical,
+  Forward,
   Download,
   MessageCircle,
   Heart,
@@ -39,6 +39,9 @@ import {
   Lock,
   Bookmark,
   Gem,
+  Plus,
+  Camera,
+  Image as ImageIcon,
 } from "lucide-react"
 import { Button } from "../ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs"
@@ -47,7 +50,7 @@ import { connect, useDispatch, useSelector } from "react-redux"
 import type { RootState } from "../../store"
 import { getUser } from "../../redux/actions/GetUser"
 import { getUserMedia } from "../../redux/actions/GetUserMedia"
-import { RESET_MEDIA_USER } from "../../redux/type"
+import { RESET_MEDIA_USER, SUCCEES_GET_USER } from "../../redux/type"
 import { saveProfileVideos, loadProfileVideos } from "../../services/feedCacheDB"
 import { useWsEvent } from "../../context/WebSocketContext"
 import { createLike } from "../../redux/actions/createLike"
@@ -72,8 +75,11 @@ import BankAccountModal from "./BankAccountModal"
 import SocialConnectionsModal from "./SocialConnectionsModal"
 import { getActiveStories } from "../../redux/actions/history/listActiveHistory"
 import { viewStory } from "../../redux/actions/history/makeViewed"
+import { createStory } from "../../redux/actions/history/createHistory"
 import { LanguageSwitcher } from "../Layout/LanguageSwitcher"
 import type { StoryList } from "../index/main.interface"
+import StoryEditor from "../index/StoryEditor"
+import { pickMedia } from "../../hooks/useMediaPicker"
 import VipGiftExperience from "../giftModal/modalGift"
 import BuzzyBannerSpace from "../banner/BuzzyBannerSpace"
 import { fetchActiveBanner } from "../../redux/actions/getBanner"
@@ -531,6 +537,9 @@ function ProfileSeccion({
   const [showChatPrivacyModal, setShowChatPrivacyModal] = useState(false);
   const { setShowMessages, setSelectedChat } = useChat();
   const [showProfileMediaOptions, setShowProfileMediaOptions] = useState(false);
+  const [showProfileStoryPicker, setShowProfileStoryPicker] = useState(false);
+  const [profileStoryEditorFile, setProfileStoryEditorFile] = useState<File | null>(null);
+  const [profileIsUploadingStory, setProfileIsUploadingStory] = useState(false);
   const [activeVideoOptions, setActiveVideoOptions] = useState<string | null>(null);
   const [confirmDeleteVideoId, setConfirmDeleteVideoId] = useState<string | null>(null);
   const [isDeletingVideo, setIsDeletingVideo] = useState(false);
@@ -788,8 +797,15 @@ function ProfileSeccion({
     dispatch({ type: RESET_MEDIA_USER });
     setLocalMedia([]);
 
-    // Si es perfil propio: mostrar cache inmediatamente, luego sincronizar
-    if (isOwnProfile) {
+    // Perfil propio: ya tenemos los datos del usuario logueado en el store de
+    // auth → sembramos el perfil al instante para que NUNCA se vea el skeleton.
+    // getUser revalida en segundo plano. (No dependemos de `isOwnProfile` porque
+    // ese flag necesita que `user` ya esté cargado; aquí comparamos con la URL.)
+    const isMyProfile = !!currentUser?.username &&
+      currentUser.username.toLowerCase() === username.toLowerCase();
+    if (isMyProfile) {
+      dispatch({ type: SUCCEES_GET_USER, payload: { user: currentUser, _seeded: true } });
+      setIsProfileSwitching(false);
       loadProfileVideos().then((cached) => {
         if (cached.length > 0) setLocalMedia(cached as VideoItem[]);
       });
@@ -1372,6 +1388,85 @@ function ProfileSeccion({
       );
   }, [stories, user]);
 
+  const refreshProfileStories = useCallback(async () => {
+    const activeStories = await getActiveStories()(dispatch);
+    if (Array.isArray(activeStories)) {
+      setStories(activeStories);
+    }
+    return activeStories;
+  }, [dispatch]);
+
+  const openProfileStoryEditor = useCallback((file: File) => {
+    setShowProfileStoryPicker(false);
+    setShowProfileMediaOptions(false);
+    setShowProfileStoriesViewer(false);
+    videoRefs.current.forEach((video) => {
+      if (video && !video.paused) video.pause();
+    });
+    setProfileStoryEditorFile(file);
+  }, []);
+
+  const handlePickProfileStoryFromLibrary = useCallback(async () => {
+    const picked = await pickMedia("any", 50);
+    if (!picked) return;
+    openProfileStoryEditor(picked.file);
+  }, [openProfileStoryEditor]);
+
+  const handleCaptureProfileStoryPhoto = useCallback(async () => {
+    const picked = await pickMedia("image", 50, "camera");
+    if (!picked) return;
+    openProfileStoryEditor(picked.file);
+  }, [openProfileStoryEditor]);
+
+  const handleProfileStoryPublish = useCallback(async (
+    file: File,
+    caption: string,
+    music?: any,
+    filterCss?: string,
+    textLayers: any[] = [],
+    stickerLayers: any[] = [],
+    location?: string,
+    stickerFiles: { id: string; file: File }[] = [],
+    privacy: 'public' | 'subscribers' = 'public',
+  ) => {
+    setProfileIsUploadingStory(true);
+    const formData = new FormData();
+    formData.append('video', file);
+    formData.append('description', caption || '');
+    formData.append('privacy', privacy);
+    if (filterCss && filterCss !== "none") formData.append('filter_css', filterCss);
+    const stickerLayersClean = stickerLayers.map((layer: any) =>
+      (layer.kind === "image" || layer.kind === "video") ? { ...layer, src: "" } : layer
+    );
+    formData.append('text_layers', JSON.stringify(textLayers));
+    formData.append('sticker_layers', JSON.stringify(stickerLayersClean));
+    for (const { id, file: stickerFile } of stickerFiles) {
+      const ext = stickerFile.name.split(".").pop() || "png";
+      formData.append('sticker_files', stickerFile, `${id}__sticker.${ext}`);
+    }
+    if (location) formData.append('location', location);
+    if (music) {
+      formData.append('audio_track_url', music.track.audio_url);
+      formData.append('audio_track_title', music.track.title);
+      formData.append('audio_track_artist', music.track.artist);
+      formData.append('audio_volume_music', String(music.volume_music));
+      formData.append('audio_trim_start', String(music.trim_start));
+      formData.append('audio_trim_end', String(music.trim_end));
+    }
+
+    try {
+      await createStory(formData)(dispatch);
+      setProfileStoryEditorFile(null);
+      await refreshProfileStories();
+      showProfileToast('Historia publicada correctamente.');
+    } catch (error) {
+      console.error("Error creando la historia del perfil:", error);
+      showProfileToast('Error al subir la historia. Inténtalo de nuevo.', true);
+    } finally {
+      setProfileIsUploadingStory(false);
+    }
+  }, [dispatch, refreshProfileStories, showProfileToast]);
+
   const closeProfileStoriesViewer = useCallback(() => {
     setShowProfileStoriesViewer(false);
     setActiveProfileStoryIndex(0);
@@ -1415,14 +1510,9 @@ function ProfileSeccion({
 
   const handleOpenProfileStories = useCallback(async () => {
     setShowProfileMediaOptions(false);
+    setShowProfileStoryPicker(false);
 
-    let activeStories: any = stories;
-    if (!activeStories?.length) {
-      activeStories = await getActiveStories()(dispatch);
-      if (Array.isArray(activeStories)) {
-        setStories(activeStories);
-      }
-    }
+    const activeStories = stories?.length ? stories : await refreshProfileStories();
 
     const currentStories = (Array.isArray(activeStories) ? activeStories : stories)
       .filter((story: any) =>
@@ -1443,7 +1533,7 @@ function ProfileSeccion({
     setProfileStoryProgresses(new Array(currentStories.length).fill(0));
     setActiveProfileStoryIndex(0);
     setShowProfileStoriesViewer(true);
-  }, [dispatch, stories, user]);
+  }, [stories, user, refreshProfileStories]);
 
   useEffect(() => {
     if (!showProfileStoriesViewer || !profileStoriesMedia.length) return;
@@ -1661,8 +1751,15 @@ function ProfileSeccion({
     );
   }
 
-  // Mostrar skeleton mientras carga el nuevo perfil (evita flash del perfil anterior)
-  if (isProfileSwitching || (!user && !notFoundUsername)) {
+  // Mostrar skeleton solo si aún no hay datos del perfil correcto que pintar.
+  // Si ya tenemos el `user` que corresponde al username pedido (del cache o del
+  // store), ocultamos el skeleton aunque el fetch fresco siga en vuelo: los datos
+  // se revalidan en segundo plano (stale-while-revalidate) sin pantalla de carga.
+  const hasMatchingUser = Boolean(
+    user && username &&
+    (user as any)?.username?.toLowerCase() === username.toLowerCase()
+  );
+  if ((isProfileSwitching && !hasMatchingUser) || (!user && !notFoundUsername)) {
     return (
       <div className="min-h-screen bg-black flex flex-col items-center">
         {/* Banner skeleton */}
@@ -3654,7 +3751,7 @@ function ProfileSeccion({
                           onClick={(e) => { e.stopPropagation(); setActiveVideoOptions(prev => prev === video.id.toString() ? null : video.id.toString()); }}
                           className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 backdrop-blur-sm"
                         >
-                          <MoreVertical className="h-5 w-5 text-white/70" />
+                          <Forward className="h-5 w-5 text-white" />
                         </motion.button>
 
                         {/* Mini options menu */}
@@ -3982,7 +4079,10 @@ function ProfileSeccion({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => setShowProfileMediaOptions(false)}
+              onClick={() => {
+                setShowProfileMediaOptions(false);
+                setShowProfileStoryPicker(false);
+              }}
               className="fixed inset-0 z-50 bg-black/60 backdrop-blur-md transition-all duration-300"
             />
             <motion.div
@@ -3996,7 +4096,10 @@ function ProfileSeccion({
                 <div className="bg-gradient-to-r from-white/5 to-transparent px-5 py-4 flex justify-between items-center border-b border-white/5">
                   <h3 className="text-white font-semibold text-lg tracking-tight">Opciones de perfil</h3>
                   <button
-                    onClick={() => setShowProfileMediaOptions(false)}
+                    onClick={() => {
+                      setShowProfileMediaOptions(false);
+                      setShowProfileStoryPicker(false);
+                    }}
                     className="text-white/40 hover:text-white transition-colors p-1 hover:bg-white/5 rounded-full"
                   >
                     <X size={20} />
@@ -4008,6 +4111,7 @@ function ProfileSeccion({
                     className="w-full flex items-center gap-3 px-4 py-4 rounded-2xl text-white hover:bg-white/5 group transition-all duration-300"
                     onClick={() => {
                       setShowProfileMediaOptions(false);
+                      setShowProfileStoryPicker(false);
                       setShowFullProfileMedia(true);
                     }}
                   >
@@ -4033,6 +4137,51 @@ function ProfileSeccion({
                         <span className="text-xs text-white/40">Ver momentos recientes</span>
                       </div>
                     </button>
+                  )}
+
+                  {isOwnProfile && (
+                    <>
+                      <button
+                        className="w-full flex items-center gap-3 px-4 py-4 rounded-2xl text-white hover:bg-white/5 group transition-all duration-300"
+                        onClick={() => setShowProfileStoryPicker((prev) => !prev)}
+                      >
+                        <div className="w-10 h-10 rounded-xl bg-cyan-500/10 flex items-center justify-center text-cyan-400 group-hover:scale-110 transition-transform duration-300">
+                          <Plus size={20} />
+                        </div>
+                        <div className="flex flex-col items-start leading-tight">
+                          <span className="font-medium">Agregar historia</span>
+                          <span className="text-xs text-white/40">Publicar un momento nuevo</span>
+                        </div>
+                      </button>
+
+                      <AnimatePresence>
+                        {showProfileStoryPicker && !profileIsUploadingStory && (
+                          <motion.div
+                            initial={{ opacity: 0, y: 8, scale: 0.96 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: 8, scale: 0.96 }}
+                            className="mx-2 mb-1 overflow-hidden rounded-2xl border border-white/10 bg-white/5"
+                          >
+                            <button
+                              type="button"
+                              onClick={handlePickProfileStoryFromLibrary}
+                              className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm text-white hover:bg-white/10"
+                            >
+                              <ImageIcon size={16} className="text-cyan-400" />
+                              Galería
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleCaptureProfileStoryPhoto}
+                              className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm text-white hover:bg-white/10"
+                            >
+                              <Camera size={16} className="text-purple-400" />
+                              Tomar foto
+                            </button>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </>
                   )}
                 </div>
 
@@ -4190,6 +4339,20 @@ function ProfileSeccion({
               })()}
             </div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {profileStoryEditorFile && (
+          <StoryEditor
+            file={profileStoryEditorFile}
+            onPublish={handleProfileStoryPublish}
+            onClose={() => {
+              setProfileStoryEditorFile(null);
+              setShowProfileStoryPicker(false);
+            }}
+            isUploading={profileIsUploadingStory}
+          />
         )}
       </AnimatePresence>
 

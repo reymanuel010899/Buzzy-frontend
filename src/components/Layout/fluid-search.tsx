@@ -58,18 +58,26 @@ export default function FluidSearch({ onClose, searchTerm, setSearchTerm }: Flui
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/80 backdrop-blur-md pt-16 px-4"
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center pt-16 px-4"
       onClick={onClose}
     >
+      {/* Fondo: capa propia que anima su opacidad. El backdrop-blur va AQUÍ y no
+          en un nodo que cambia de opacidad globalmente, para evitar el flash
+          claro→oscuro al abrir (el WebView compone mal backdrop-filter + opacity
+          en el mismo nodo). */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.18 }}
+        className="absolute inset-0 bg-black/80 backdrop-blur-md"
+      />
       <motion.div
         initial={{ y: -50, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ type: "spring", damping: 30, stiffness: 300 }}
-        className="w-full max-w-md rounded-2xl bg-black p-4 overflow-hidden border border-white/10"
+        className="relative w-full max-w-md rounded-2xl bg-black p-4 overflow-hidden border border-white/10"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Search input */}
@@ -251,7 +259,7 @@ export default function FluidSearch({ onClose, searchTerm, setSearchTerm }: Flui
           )}
         </div>
       </motion.div>
-    </motion.div>
+    </div>
   )
 }
 

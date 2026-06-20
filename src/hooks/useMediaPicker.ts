@@ -38,6 +38,36 @@ export async function pickMedia(type: MediaType, maxSizeMb = 50, source: MediaSo
   return pickViaInput(accept, maxSizeMb);
 }
 
+/**
+ * After a native picker activity closes, the Capacitor WebView is in the
+ * middle of resuming. Resolves once the document is visible again and the
+ * browser has had a chance to paint, so a setState that runs right after the
+ * picker returns gets committed and rendered (instead of waiting for the next
+ * user interaction). Has a hard timeout so it never hangs.
+ */
+function waitForWebViewResume(timeoutMs = 1500): Promise<void> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      document.removeEventListener("visibilitychange", onVisible);
+      // Double rAF guarantees the WebView has resumed and painted a frame.
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") finish();
+    };
+
+    if (document.visibilityState === "visible") {
+      finish();
+    } else {
+      document.addEventListener("visibilitychange", onVisible);
+      setTimeout(finish, timeoutMs);
+    }
+  });
+}
+
 async function dataUrlToFile(dataUrl: string, filename: string, mimeType: string): Promise<File> {
   const res = await fetch(dataUrl);
   const blob = await res.blob();
@@ -117,6 +147,13 @@ async function pickNative(type: MediaType, maxSizeMb: number, _fallbackAccept: s
     }
 
     const file = new File([blob], name, { type: mimeType });
+
+    // When the native gallery activity closes, the WebView is resuming and
+    // React state updates triggered synchronously here may not get flushed to
+    // a paint until the next user interaction. Yield until the WebView has
+    // actually resumed (two animation frames) so the caller's setState renders.
+    await waitForWebViewResume();
+
     return { file, url: URL.createObjectURL(file) };
 
   } catch (err: unknown) {

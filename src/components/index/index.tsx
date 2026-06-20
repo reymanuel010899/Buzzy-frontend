@@ -6,7 +6,7 @@ import { Link, useNavigate, useLocation } from "react-router-dom"
 import sendMessageSound from "../../assets/sounds/sendMessage.mp3";
 import { prefetchAudioUrl } from "../../hooks/useVideoAudio";
 import { Howler } from "howler";
-import { Eye, MessageCircle, Heart, Volume2, VolumeX, Play, Pause, Plus, UserPlus, UserCheck, Loader2, X, MoreVertical, Music2, Camera, Image as ImageIcon, MapPin, Bookmark, Share2, Download, Lock, Gem } from "lucide-react"
+import { Eye, MessageCircle, Heart, Volume2, VolumeX, Play, Pause, UserPlus, UserCheck, X, MoreVertical, Music2, MapPin, Bookmark, Share2, Download, Lock, Gem, Forward } from "lucide-react"
 import AdCard from "../ads/AdCard"
 import StoryEditor from "./StoryEditor"
 import BottomNavbar from "../Layout/ButtonNavar"
@@ -62,16 +62,37 @@ const shortLocationLabel = (text: string) => {
   if (mainPart.length <= 22) return mainPart
   return `${mainPart.slice(0, 21).trimEnd()}…`
 }
+
+// Tiempo relativo de una historia, calculado EN EL CLIENTE a partir del
+// created_at absoluto (ISO). Antes se usaba el string `formatted_created_at` que
+// llega del backend, pero ese string se congela en el caché del dispositivo: una
+// historia subida hace 17h seguía mostrando "Hace 3 horas" en el celular porque
+// ese era el valor cuando se guardó en caché. Calcularlo aquí garantiza que
+// siempre refleje el tiempo real, sin importar cuán viejo sea el caché.
+const formatStoryTimeAgo = (createdAt?: string | null): string => {
+  if (!createdAt) return ""
+  const then = new Date(createdAt).getTime()
+  if (Number.isNaN(then)) return ""
+  const diffMs = Date.now() - then
+  const mins = Math.max(0, Math.floor(diffMs / 60000))
+  if (mins < 60) return `${mins} ${mins === 1 ? "minuto" : "minutos"}`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours} ${hours === 1 ? "hora" : "horas"}`
+  const days = Math.floor(hours / 24)
+  return `${days} ${days === 1 ? "día" : "días"}`
+}
 import TokenPurchaseSuccessModal from "../giftModal/TokenPurchaseSuccessModal";
 import { buyTokens } from "../../redux/actions/buyTokens";
 import { getWallet } from "../../redux/actions/getWallet";
 import { useVideoEngagement } from "../../hooks/useVideoEngagement";
 import { deleteStory } from "../../redux/actions/history/deleteHistory";
 import { reportStory, ReportPayload } from "../../redux/actions/history/reportStory";
-import { refreshFeed, loadMoreFeed } from "../../redux/actions/getMedia";
+import { refreshFeed, loadMoreFeed, getFollowingFeed, loadMoreFollowingFeed } from "../../redux/actions/getMedia";
 import { saveVideo, unsaveVideo } from "../../redux/actions/savedVideos";
 import { loadStoriesCache, saveStories } from "../../services/chatCacheDB";
 import { useCallStore } from "../../store/callStore";
+import { useHeaderStoriesStore } from "../../store/headerStoriesStore";
+import { useFeedModeStore, type FeedMode } from "../../store/feedModeStore";
 import { usePullToRefresh } from "../../hooks/usePullToRefresh";
 import { AppDispatch, RootState } from "../../store";
 interface StreamingUIProps {
@@ -164,6 +185,8 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([])
   const [isMuted, setIsMuted] = useState(false)
   const [videosPaused, setVideosPaused] = useState(true)
+  const feedMode = useFeedModeStore((state) => state.feedMode);
+  const setFeedMode = useFeedModeStore((state) => state.setFeedMode);
   const syncFeedPlaybackState = useCallback((paused: boolean) => {
     videosPausedRef.current = paused
     setVideosPaused(paused)
@@ -173,6 +196,9 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [feedLocked, setFeedLocked] = useState(true)
   const feedLockedRef = useRef(true)
   const mainRef = useRef<HTMLDivElement>(null)
+  // videoId's cuyo <video> ya tiene primer frame (loadeddata). Hasta entonces se
+  // muestra el thumbnail como placeholder (evita pantalla negra al scroll rápido).
+  const [readyVideos, setReadyVideos] = useState<Set<string>>(new Set());
   const [showLikeAnimation, setShowLikeAnimation] = useState<Record<string, boolean>>({});
   const [savedMap, setSavedMap] = useState<Record<string, boolean>>({});
   const [activeOptionsVideoId, setActiveOptionsVideoId] = useState<string | null>(null);
@@ -241,7 +267,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   // New state for Story Upload
   const [isUploadingStory, setIsUploadingStory] = useState(false)
   const [storyEditorFile, setStoryEditorFile] = useState<File | null>(null);
-  const [showStoryPicker, setShowStoryPicker] = useState(false);
 
   // --- New State for Story Viewer ---
   const [viewingStoryUserIndex, setViewingStoryUserIndex] = useState<number | null>(null);
@@ -327,9 +352,24 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [, setVideoLoopCount] = useState<Record<string, number>>({});
   const lastVideoTimeRef = useRef<Record<string, number>>({});
   const typingAudioRef = useRef<HTMLAudioElement | null>(null);
-  const [showStoriesBar, setShowStoriesBar] = useState(true);
+  // const [showStoriesBar, setShowStoriesBar] = useState(true);
   const lastFeedScrollTopRef = useRef(0);
   const feedScrollRef = useRef<HTMLDivElement>(null);
+  const resetFeedPosition = useCallback(() => {
+    activeVideoRef.current = 0;
+    setActiveVideo(0);
+    lastFetchedLengthRef.current = 0;
+    lastFeedScrollTopRef.current = 0;
+    // setShowStoriesBar(true);
+
+    window.requestAnimationFrame(() => {
+      feedScrollRef.current?.scrollTo({ top: 0, behavior: 'auto' });
+      window.scrollTo({ top: 0, behavior: 'auto' });
+      window.requestAnimationFrame(() => {
+        feedScrollRef.current?.scrollTo({ top: 0, behavior: 'auto' });
+      });
+    });
+  }, []);
 
   // Custom hook for interest-based recommendation tracking
   const { onIntersectionChange, recordInteraction } = useVideoEngagement();
@@ -339,24 +379,23 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const lastFetchedLengthRef = useRef<number>(0);
 
   // Pull-to-refresh — usa el hook compartido
-  const { isPulling: isPullRefreshing, pullProgress, onTouchStart: handlePullTouchStart, onTouchMove: handlePullTouchMove, onTouchEnd: handlePullTouchEnd } = usePullToRefresh({
+  const { isPulling: isPullRefreshing, pullProgress } = usePullToRefresh({
     onRefresh: async () => {
-      activeVideoRef.current = 0;
-      setActiveVideo(0);
-      lastFetchedLengthRef.current = 0;
       await Promise.all([
         refreshFeed()(dispatch),
         getActiveStories()(dispatch),
       ]);
+      resetFeedPosition();
     },
     // Feed vacío: siempre permitir. Feed con videos: solo desde el primer video en scroll 0
-    checkScrollTop: () => !mediaVideo?.length || (activeVideo === 0 && (feedScrollRef.current?.scrollTop ?? 0) === 0),
+    checkScrollTop: () => !mediaVideo?.length || (activeVideo === 0 && (feedScrollRef.current?.scrollTop ?? 0) <= 8),
+    global: true,
   });
 
   useEffect(() => {
-    // Pre-fetch music for next 4 videos as user scrolls
+    // Pre-fetch music for next 2 videos as user scrolls (balance fluidez/datos).
     if (activeVideo !== null && mediaVideo) {
-      mediaVideo.slice(activeVideo + 1, activeVideo + 5).forEach(v => {
+      mediaVideo.slice(activeVideo + 1, activeVideo + 3).forEach(v => {
         if (v.audio_track_url) prefetchAudioUrl(v.audio_track_url)
       })
     }
@@ -375,11 +414,13 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         setIsFetchingFeed(true);
         lastFetchedLengthRef.current = currentLength;
 
-        loadMoreFeed()(dispatch)
+        // Paginar según el tab activo: "Seguidos" usa su propio endpoint.
+        const loadMore = feedMode === 'following' ? loadMoreFollowingFeed : loadMoreFeed;
+        loadMore()(dispatch)
           .then((res: any) => {
             setIsFetchingFeed(false);
             if (!res || res.length === 0) {
-              // We keep lastFetchedLengthRef at currentLength to avoid re-triggering 
+              // We keep lastFetchedLengthRef at currentLength to avoid re-triggering
               // until more media is added from somewhere else
             }
           })
@@ -390,7 +431,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
           });
       }
     }
-  }, [activeVideo, mediaVideo, dispatch, isFetchingFeed]);
+  }, [activeVideo, mediaVideo, dispatch, isFetchingFeed, feedMode]);
   // Removed interestWeights from dependencies to avoid re-triggering the effect 
   // every time a video leaves the view, but they are still captured by the closure 
   // when the fetch actually starts.
@@ -437,15 +478,18 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     if (Object.keys(saved).length) setSavedMap(prev => ({ ...prev, ...saved }));
     const entries = media.map(v => ({ username: v.user_id.username, excludeId: v.id }))
     prefetchBatch(entries)
-    // Pre-fetch only first 4 music tracks — enough for immediate playback without RAM abuse
-    media.slice(0, 4).forEach(v => {
+    // Pre-fetch only first 2 music tracks — suficiente para arranque inmediato
+    // sin descargar de mas (balance fluidez/datos moviles).
+    media.slice(0, 2).forEach(v => {
       if (v.audio_track_url) prefetchAudioUrl(v.audio_track_url)
     })
   }, [media, prefetchBatch]);
 
   useEffect(() => {
     if (activeVideo === null || !mediaVideo?.length) return;
-    const start = Math.max(0, activeVideo - 1);
+    // Solo el activo + 2 adelante (no precargamos hacia atras: el scroll natural
+    // es hacia abajo). Mantiene el feed fluido sin descargar musica de mas.
+    const start = activeVideo;
     const end = Math.min(mediaVideo.length, activeVideo + 3);
     mediaVideo.slice(start, end).forEach(v => {
       if (v.audio_track_url) prefetchAudioUrl(v.audio_track_url)
@@ -539,8 +583,45 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       }
     });
 
+    // El feed que llega ya viene filtrado por el backend según el modo:
+    // "Para ti" → /recommendations/feed/, "Seguidos" → /recommendations/following/.
+    // No filtramos en cliente para no descartar videos válidos ni romper la paginación.
     return feed;
   }, [mediaVideo, ads]);
+
+  // Al montar arrancamos siempre en "Para ti" (el feed inicial ya lo carga el
+  // contenedor padre). El cambio de feed lo gestiona el efecto de abajo.
+  useEffect(() => {
+    setFeedMode('for-you');
+    setActiveVideo(0);
+    activeVideoRef.current = 0;
+    if (feedScrollRef.current) {
+      feedScrollRef.current.scrollTop = 0;
+    }
+  }, [setFeedMode]);
+
+  // Reacciona al cambio de tab ("Para ti" ↔ "Seguidos"). Resetea el scroll y el
+  // índice activo y pide al backend el feed correcto. Ignora el primer render
+  // (prevFeedModeRef === null) para no re-pedir el feed que el padre ya cargó.
+  const prevFeedModeRef = useRef<FeedMode | null>(null);
+  useEffect(() => {
+    const prev = prevFeedModeRef.current;
+    prevFeedModeRef.current = feedMode;
+    if (prev === null || prev === feedMode) return;
+
+    setActiveVideo(0);
+    activeVideoRef.current = 0;
+    if (feedScrollRef.current) {
+      feedScrollRef.current.scrollTop = 0;
+    }
+    lastFetchedLengthRef.current = 0;
+
+    if (feedMode === 'following') {
+      getFollowingFeed(true)(dispatch);
+    } else {
+      refreshFeed()(dispatch);
+    }
+  }, [feedMode, dispatch]);
 
   // ── Ventana de virtualización (memoria acotada) ──────────────────────────
   // Solo se montan los slides dentro de [activeVideo - BEHIND, activeVideo + AHEAD].
@@ -553,6 +634,36 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   // el siguiente sin cargar peso innecesario. El resto del feed son placeholders.
   const WINDOW_BEHIND = 2;
   const WINDOW_AHEAD = 3;
+  // Ventana de DECODERS de hardware: cuántos <video> tienen `src` cargado a la
+  // vez. Ventana mínima = el ANTERIOR + el ACTIVO + el SIGUIENTE (3 en total). El
+  // "anterior" hace que volver atrás sea instantáneo (sin pantalla negra); el
+  // "siguiente" hace que bajar sea instantáneo. Solo 3 decoders → lo más seguro
+  // para el pool limitado de Android. Los demás sueltan su decoder.
+  //   Viendo el 3 → decoders en [2,3,4];  bajas al 4 → [3,4,5] (el 2 se libera).
+  const isInDecoderWindow = (index: number) => {
+    const delta = index - (activeVideo ?? 0);
+    return delta >= -1 && delta <= 1;
+  };
+  // Liberación EXPLÍCITA del decoder. React pone src={undefined} al salir de la
+  // ventana, PERO en el WebView de Android quitar el atributo no suelta el decoder
+  // físico de inmediato → medido con dec(): al scrollear quedaban 4 con src en vez
+  // de 3. Aquí, al cambiar de video activo, recorremos los <video> FUERA de la
+  // ventana y forzamos removeAttribute('src')+load(), que SÍ libera el decoder.
+  // Solo tocamos los de fuera (nunca el activo ni los 2 precargados), así no
+  // interrumpimos ninguna reproducción ni causa pausas/blanco.
+  useEffect(() => {
+    videoRefs.current.forEach((video, index) => {
+      if (!video) return;
+      if (!isInDecoderWindow(index) && video.getAttribute('src')) {
+        try {
+          video.pause();
+          video.removeAttribute('src');
+          video.load(); // suelta el decoder de hardware de verdad
+        } catch { /* no-op */ }
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeVideo]);
   const { windowStart, windowEnd } = useMemo(() => {
     const center = activeVideo ?? 0;
     const last = Math.max(0, mergedFeed.length - 1);
@@ -577,6 +688,14 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     setExpandedDescriptions(p => pruneRecord(p, live));
     setCarouselDots(p => pruneRecord(p, live));
     setVideoLoopCount(p => pruneRecord(p, live));
+    // readyVideos: quitar los que salieron de la ventana de montaje (su <video> se
+    // desmonta → al volver recarga y dispara loadeddata de nuevo).
+    setReadyVideos(prev => {
+      let changed = false;
+      const next = new Set<string>();
+      prev.forEach(id => { if (live.has(id)) next.add(id); else changed = true; });
+      return changed ? next : prev;
+    });
     // refs: borrar in-place las claves fuera de la ventana
     for (const k in videoProgressRef.current) {
       if (!live.has(k)) delete videoProgressRef.current[k];
@@ -621,7 +740,8 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
       const globallyBlocked =
         !isAudioUnlocked ||
-        !feedItem ||
+        feedLockedRef.current ||   // feed bloqueado (candado, video en pausa inicial)
+        !feedItem ||               // → la música NO debe sonar hasta el primer tap
         feedItem.type !== 'video' ||
         !feedItem.audio_track_url ||
         isMuted ||
@@ -892,9 +1012,12 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       const userId = story?.user?.id;
       const isSub = story?.privacy === 'subscribers';
       console.log("[STORY PRIVACY]", story?.user?.username, "→", JSON.stringify(story?.privacy));
-      // Etiquetar cada media con el privacy de SU historia, para que el label
-      // dentro del visor dependa de la media actual, no del grupo entero.
-      const taggedMedia = (story.media || []).map((m: any) => ({ ...m, privacy: story.privacy }));
+      // Etiquetar cada media con el privacy y el created_at de SU historia, para
+      // que el label dentro del visor (privacy + "Hace X") dependa de la media
+      // actual, no del grupo entero. created_at se usa para calcular el tiempo
+      // relativo EN EL CLIENTE al renderizar (ver formatStoryTimeAgo): así nunca
+      // se congela en caché un string como "Hace 3 horas".
+      const taggedMedia = (story.media || []).map((m: any) => ({ ...m, privacy: story.privacy, created_at: story.created_at }));
       if (!groups.has(userId)) {
         groups.set(userId, { ...story, user: story.user, media: taggedMedia, hasSubscriberStory: isSub });
       } else {
@@ -1266,53 +1389,68 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       feedScrollRef.current.scrollTop = 0;
     }
     lastFeedScrollTopRef.current = 0;
-    setShowStoriesBar(true);
+    // setShowStoriesBar(true);
   }, []);
 
-  // Cargar stories solo una vez por sesión de app — el ref local muere con el desmonte
+  // Cargar stories. Una carga EXITOSA se marca con `_storiesFetched` para no
+  // re-pedir al servidor en cada montaje. Pero si el primer intento falla (red)
+  // o el componente se desmonta antes de que llegue la respuesta, el flag NO se
+  // quema, así que al volver al home se reintenta. Esto arregla el bug de "a
+  // veces las historias no aparecen hasta cambiar de sección y volver".
   useEffect(() => {
-    if (_storiesFetched) return;
-    _storiesFetched = true;
+    let cancelled = false;
 
-    // 1. Mostrar cache inmediatamente
+    // 1. Mostrar cache inmediatamente (siempre, aunque ya se haya hecho fetch)
     loadStoriesCache().then((cached) => {
-      if (cached.length > 0) {
-        setStories(cached);
-        cached.forEach((s: Story) => { if (s.audio_track_url) prefetchAudioUrl(s.audio_track_url); });
-      }
+      if (cancelled || cached.length === 0) return;
+      setStories((prev) => (prev.length > 0 ? prev : cached));
+      cached.forEach((s: Story) => { if (s.audio_track_url) prefetchAudioUrl(s.audio_track_url); });
     }).catch(() => {});
+
+    // Si ya hubo una carga exitosa esta sesión, no re-pedimos al servidor.
+    if (_storiesFetched) return;
 
     // 2. Pedir al servidor y actualizar. El servidor es la fuente de verdad:
     //    si devuelve [] (todas las historias expiraron a las 24h) hay que
     //    REEMPLAZAR el caché y vaciar la barra, no conservar historias muertas.
     //    Solo un fallo de red (res === undefined) preserva lo que ya se ve.
     getActiveStories()(dispatch).then((res: unknown) => {
-      if (!Array.isArray(res)) return; // fallo de red: no tocar la barra
+      if (!Array.isArray(res)) return; // fallo de red: NO quemamos el flag → reintenta al volver
+      _storiesFetched = true;          // éxito real (aunque sea []) → no re-pedir esta sesión
+      if (cancelled) return;
       const fresh = res as Story[];
       setStories(fresh);
       saveStories(fresh).catch(() => {});
       fresh.forEach((s: Story) => { if (s.audio_track_url) prefetchAudioUrl(s.audio_track_url); });
     });
+
+    return () => { cancelled = true; };
   }, [dispatch]); // Solo depende de dispatch que es estable
 
   // Suscripción al evento global de refresh — refresca feed + stories
   useEffect(() => {
-    const handleRefresh = () => {
+    const handleRefresh = async () => {
       if (!navigator.onLine) {
         window.dispatchEvent(new CustomEvent("buzzy:offline-toast"));
         return;
       }
-      refreshFeed()(dispatch);
-      getActiveStories()(dispatch).then((res: unknown) => {
+      // Refresca el feed del tab activo: "Seguidos" tiene su propio endpoint.
+      if (feedMode === 'following') {
+        await getFollowingFeed()(dispatch);
+      } else {
+        await refreshFeed()(dispatch);
+      }
+      const res = await getActiveStories()(dispatch);
+      resetFeedPosition();
+      if (Array.isArray(res)) {
         // El servidor manda: una respuesta real (aunque sea []) reemplaza la barra,
         // así si las historias expiran a las 24h se vacían al refrescar. Solo un
         // fallo de red (res no-array) preserva lo que ya se ve.
-        if (!Array.isArray(res)) return;
         const refreshed = res as Story[];
         setStories(refreshed);
         saveStories(refreshed).catch(() => {});
         refreshed.forEach((s: Story) => { if (s.audio_track_url) prefetchAudioUrl(s.audio_track_url); });
-      });
+      }
     };
     const handleOfflineToast = () => {
       setOfflineToast(true);
@@ -1324,7 +1462,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       window.removeEventListener("buzzy:refresh", handleRefresh);
       window.removeEventListener("buzzy:offline-toast", handleOfflineToast);
     };
-  }, [dispatch]);
+  }, [dispatch, feedMode]);
 
   const handleCommentClick = (index: number) => {
     if (mediaVideo && mediaVideo[index]) {
@@ -1464,6 +1602,12 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
           const index = videoRefs.current.findIndex((ref) => ref === video)
           const videoItem = mergedFeed[index];
 
+          // Guard: al liberar/reasignar refs (gestión de decoders) o si el feed
+          // cambió de tamaño, el observer puede dispararse para un <video> cuyo
+          // índice ya no existe en mergedFeed (index === -1 o item undefined).
+          // Sin esto, más abajo se lee `.id` de undefined → crash del observer.
+          if (index < 0 || !videoItem) return;
+
           if (entry.isIntersecting) {
             // Track intersection for recommendation system
           if (videoItem && videoItem.type === 'video') {
@@ -1481,8 +1625,13 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
             const carouselIsOnExtraSlide = index === activeVideoRef.current && activeCarouselSlideRef.current > 0;
             if (!isSameFirstVideo && !carouselIsOnExtraSlide) {
               video.currentTime = 0;
-              syncFeedPlaybackState(false);
               if (activeAdIndex !== index && !shouldBlockInitialAutoplay && !feedLockedRef.current) {
+                // Solo marcamos "reproduciendo" cuando DE VERDAD vamos a reproducir.
+                // Antes syncFeedPlaybackState(false) corría también con el candado
+                // puesto → algún efecto arrancaba el video un instante (destello de
+                // ~100ms) hasta que el guard lo pausaba. Ahora con candado NO se
+                // marca como reproduciendo → el video queda quieto desde el inicio.
+                syncFeedPlaybackState(false);
                 video.play().catch(() => {/* Autoplay ignored */ })
               } else {
                 video.pause()
@@ -1531,10 +1680,10 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     // re-crear el observer asegura que esos slides recién montados se observen.
   }, [mergedFeed, activeAdIndex, onIntersectionChange, windowStart, windowEnd])
   // --- Pause the feed (video + music) whenever a story surface is open ---
-  // Covers BOTH viewing someone's stories AND opening the "add story" picker.
+  // Covers story viewing and the story editor modal.
   // Without pausing musicAudioRef too, the feed track kept playing over the modal.
   useEffect(() => {
-    const storyOpen = viewingStoryUserIndex !== null || showStoryPicker || storyEditorFile !== null;
+    const storyOpen = viewingStoryUserIndex !== null || storyEditorFile !== null;
     if (storyOpen) {
       videoRefs.current.forEach((video) => {
         if (video && !video.paused) video.pause();
@@ -1549,7 +1698,36 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         if (v && v.paused) v.play().catch(() => {});
       }
     }
-  }, [viewingStoryUserIndex, showStoryPicker, storyEditorFile]);
+  }, [viewingStoryUserIndex, storyEditorFile]);
+  // Tap vs scroll: guardamos dónde empezó el toque. En onTouchEnd, si el dedo se
+  // movió más que TAP_SLOP px (o tardó demasiado), es un SCROLL → no es un tap de
+  // play/pausa. Así NUNCA llamamos preventDefault durante el scroll (eso disparaba
+  // el warning [Intervention] y entorpecía el momentum del scroll nativo, que es
+  // justo lo que impide el feel "tipo TikTok").
+  const touchStartRef = useRef<{ x: number; y: number; t: number } | null>(null);
+  const TAP_SLOP = 12;     // px de tolerancia de movimiento para seguir siendo "tap"
+  const TAP_MAX_MS = 400;  // un tap es rápido; más que esto es un gesto/scroll
+
+  const handleVideoTouchStart = (e: React.TouchEvent) => {
+    const t = e.changedTouches[0];
+    touchStartRef.current = t ? { x: t.clientX, y: t.clientY, t: Date.now() } : null;
+  };
+
+  const handleVideoTouchEnd = (index: number) => (e: React.TouchEvent) => {
+    const start = touchStartRef.current;
+    touchStartRef.current = null;
+    if (!start) return;
+    const t = e.changedTouches[0];
+    if (!t) return;
+    const movedX = Math.abs(t.clientX - start.x);
+    const movedY = Math.abs(t.clientY - start.y);
+    const elapsed = Date.now() - start.t;
+    // Si se movió o tardó demasiado, fue scroll → dejamos pasar el gesto nativo.
+    if (movedX > TAP_SLOP || movedY > TAP_SLOP || elapsed > TAP_MAX_MS) return;
+    // Es un tap real. NO preventDefault: no hace falta y rompe el scroll.
+    handleVideoClick(index);
+  };
+
   const handleVideoClick = (index: number) => {
     if (isPlayTransitioningRef.current) return;
     const now = Date.now();
@@ -1697,27 +1875,11 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const toggleMute = () => setIsMuted(!isMuted)
   // --- Logic for Create History ---
   const openStoryEditor = (file: File) => {
-    setShowStoryPicker(false);
     // Pause feed video when story editor opens
     videoRefs.current.forEach(v => { if (v && !v.paused) v.pause(); });
     musicAudioRef.current?.pause();
     setStoryEditorFile(file);
   }
-
-  const handleAddHistory = () => {
-    if (isUploadingStory) return;
-    setShowStoryPicker(prev => !prev);
-  }
-
-  useEffect(() => {
-    if (!showStoryPicker) return;
-    const close = () => setShowStoryPicker(false);
-    // setTimeout defers the listener registration until after the current click
-    // event has finished bubbling — without this the same click that opens the
-    // picker immediately closes it via document bubble.
-    const tid = setTimeout(() => document.addEventListener('click', close), 0);
-    return () => { clearTimeout(tid); document.removeEventListener('click', close); };
-  }, [showStoryPicker]);
 
   const handlePickStoryFromLibrary = async () => {
     const picked = await pickMedia("any", 50);
@@ -1803,6 +1965,30 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     setCurrentStoryItemIndex(0);
     setIsStoryPaused(false);
   };
+
+  // ── Publicar las historias al header global (Navar) ──────────────────────
+  // El header (componente compartido) lee de useHeaderStoriesStore y renderiza
+  // la fila de historias. Aquí el home publica sus datos; al desmontarse, los
+  // limpia para que el header no muestre historias fuera del feed.
+  useEffect(() => {
+    useHeaderStoriesStore.getState().setStoriesData({
+      enabled: true,
+      currentUser: user
+        ? { id: (user as any).id, username: (user as any).username, profile_picture: (user as any).profile_picture }
+        : null,
+      isUploading: isUploadingStory,
+      groups: groupedStories as any,
+      onStoryClick: handleStoryClick,
+      onAddStory: () => {},
+      onPickStoryFromLibrary: handlePickStoryFromLibrary,
+      onCaptureStoryPhoto: handleCaptureStoryPhoto,
+    });
+  }, [groupedStories, user, isUploadingStory, handlePickStoryFromLibrary, handleCaptureStoryPhoto]);
+
+  useEffect(() => {
+    return () => useHeaderStoriesStore.getState().reset();
+  }, []);
+
   const closeStoryViewer = useCallback(() => {
     stopStoryAudio(true);
     setViewingStoryUserIndex(null);
@@ -2467,11 +2653,11 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     const scrollDelta = currentScrollTop - previousScrollTop;
 
     if (currentScrollTop <= 8) {
-      setShowStoriesBar(true);
+      // setShowStoriesBar(true);
     } else if (scrollDelta > 6) {
-      setShowStoriesBar(false);
+      // setShowStoriesBar(false);
     } else if (scrollDelta < -6) {
-      setShowStoriesBar(true);
+      // setShowStoriesBar(true);
     }
 
     lastFeedScrollTopRef.current = currentScrollTop;
@@ -2502,151 +2688,25 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         )}
       </AnimatePresence>
 
-      <div className="fixed inset-0 z-0">
-        <div className="absolute inset-0 bg-black  opacity-80"></div>
-        <div className="absolute inset-0 bg-black opacity-[0.03]"></div>
-        <div className="absolute bottom-1/3 right-1/3 h-60 w-60 rounded-full bg-[#00f0ff]/20 blur-3xl animate-float-delayed"></div>
-      </div>
+      {/* Fondo fijo: negro sólido. Antes había un blob con `blur-3xl
+          animate-float-delayed` (blur enorme + animación continua). En el WebView
+          de Android un blur animado permanente consume GPU y compite con la
+          composición de la surface de video → contribuye al jank/tiling del feed.
+          Como el video ocupa toda la pantalla, ese adorno no se ve: lo quitamos. */}
+      <div className="fixed inset-0 z-0 bg-black" />
       <main
         ref={mainRef}
         // h-dvh (dynamic viewport height) en vez de h-screen (100vh): en el WebView
         // de Android 100vh es inestable (cambia con las barras del sistema), lo que
         // colapsa la cadena de alturas y hace que el video del feed arranque
         // "mochado" a media pantalla. 100dvh da una base de altura estable.
-        className="flex h-dvh w-full flex-col overflow-hidden pt-24 pb-[calc(env(safe-area-inset-bottom)+3rem)]"
+        className="flex h-dvh w-full flex-col overflow-hidden pt-[8.700rem] pb-[calc(env(safe-area-inset-bottom)+2.5rem)]"
       >
-        {/* Stories Bar */}
-        <div
-          className={`w-full transition-all duration-300 ease-in-out ${showStoriesBar ? "max-h-24 opacity-100" : "max-h-0 opacity-0 pointer-events-none"}`}
-        >
-          <div>
-            <div className="flex gap-2 px-2 py-2 snap-x ">
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ duration: 0.15 }}
-	                className="flex flex-col items-center gap-1 min-w-[52px] cursor-pointer snap-start relative group"
-	                onClick={handleAddHistory}
-	              >
-	                <div className="relative">
-                  <div className={`relative h-[40px] w-[40px] rounded-full p-[2px] bg-[#0c1033] overflow-hidden ${isUploadingStory ? 'animate-pulse' : ''}`}>
-                    <img
-                      src={getMediaUrl(user.profile_picture as string)}
-                      className={`w-full h-full rounded-full object-cover filter ${isUploadingStory ? 'brightness-50' : 'brightness-90 group-hover:brightness-100'} transition-all`}
-                      alt="Tu historia"
-                      loading="lazy"
-                    />
-                    {isUploadingStory ? (
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <Loader2 className="w-6 h-6 text-[#00f0ff] animate-spin" />
-                      </div>
-                    ) : (
-                      <div className="absolute bottom-0 right-0 bg-[#00f0ff] text-[#050718] rounded-full p-0.5 border-2 border-[#0c1033] group-hover:scale-110 transition-transform shadow-lg shadow-[#00f0ff]/20">
-                        <Plus size={14} strokeWidth={3} />
-                      </div>
-                    )}
-	                  </div>
-	                  <AnimatePresence>
-	                    {showStoryPicker && !isUploadingStory && (
-	                      <motion.div
-	                        initial={{ opacity: 0, y: 8, scale: 0.96 }}
-	                        animate={{ opacity: 1, y: 0, scale: 1 }}
-	                        exit={{ opacity: 0, y: 8, scale: 0.96 }}
-	                        className="absolute left-0 top-[48px] z-[9999] w-44 overflow-hidden rounded-xl border border-white/10 bg-[#0b0b14]/95 shadow-2xl backdrop-blur-md"
-	                        onClick={(e) => e.stopPropagation()}
-	                      >
-	                        <button
-	                          type="button"
-	                          onClick={handlePickStoryFromLibrary}
-	                          className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs font-medium text-white hover:bg-white/10 active:bg-white/15"
-	                        >
-	                          <ImageIcon size={15} className="text-cyan-400" />
-	                          Galeria
-		                        </button>
-		                        <button
-		                          type="button"
-		                          onClick={handleCaptureStoryPhoto}
-		                          className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs font-medium text-white hover:bg-white/10 active:bg-white/15"
-		                        >
-		                          <Camera size={15} className="text-purple-400" />
-		                          Tomar foto
-		                        </button>
-		                        {/* <button
-		                          type="button"
-		                          onClick={handleCaptureStoryVideo}
-		                          className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs font-medium text-white hover:bg-white/10 active:bg-white/15"
-		                        >
-		                          <VideoIcon size={15} className="text-pink-400" />
-		                          Grabar video
-		                        </button> */}
-	                      </motion.div>
-	                    )}
-	                  </AnimatePresence>
-	                </div>
-	                <span className="text-[9px] text-gray-300 font-medium truncate w-[52px] text-center group-hover:text-white">
-                  {isUploadingStory ? t('common:actions.uploading') : t('videos:feed.yourStory')}
-                </span>
-              </motion.div>
-              {/* Using groupedStories to display one bubble per User */}
-              {groupedStories.map((story, i) => {
-
-                const seen = false;
-                // const username = `User ${story.user.username}`;
-                return (
-                  <motion.div
-                    key={story.id || i}
-                    initial={{ opacity: 0, scale: 0.8 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    transition={{ duration: 0.15, delay: i * 0.02 }}
-                    className="flex flex-col items-center gap-1 min-w-[52px] cursor-pointer snap-start group"
-                    onClick={() => handleStoryClick(i)}
-                  >
-                    <div className="relative">
-                      {story.hasSubscriberStory ? (
-                        // Historia para suscriptores → anillo dorado/esmeralda premium + brillo
-                        <div className="absolute -inset-[3px] rounded-full bg-gradient-to-tr from-[#ffd700] via-[#34d399] to-[#10b981] opacity-90 group-hover:opacity-100 blur-[0.5px] animate-spin-slow shadow-[0_0_10px_rgba(16,185,129,0.55)]"></div>
-                      ) : !seen ? (
-                        <div className="absolute -inset-[3px] rounded-full bg-gradient-to-tr from-[#7000ff] via-[#ff0099] to-[#00f0ff] opacity-80 group-hover:opacity-100 blur-[0.5px] animate-spin-slow"></div>
-                      ) : (
-                        <div className="absolute inset-0 rounded-full border border-[#2a2f5e]"></div>
-                      )}
-                      <div className="relative h-[40px] w-[40px] rounded-full p-[2px] bg-[#050718] overflow-hidden">
-                        <img
-                          src={getMediaUrl(story.user.profile_picture)}
-                          className="w-full h-full rounded-full object-cover group-hover:scale-105 transition-transform duration-300"
-                          alt={story.user.username}
-                          loading="lazy"
-                        />
-                      </div>
-                      {story.hasSubscriberStory && (
-                        // Badge 💎 — distintivo de contenido para suscriptores
-                        <div className="absolute -bottom-0.5 -right-0.5 z-10 flex h-[15px] w-[15px] items-center justify-center rounded-full bg-[#050718] ring-[1.5px] ring-[#10b981] shadow-[0_0_6px_rgba(16,185,129,0.7)]">
-                          <Gem size={9} className="text-emerald-400" />
-                        </div>
-                      )}
-                    </div>
-                    <span
-                      className={`text-[9px] font-medium truncate w-[52px] text-center ${seen
-                        ? "text-gray-500"
-                        : "text-gray-300 group-hover:text-[#00f0ff] transition-colors"
-                        }`}
-                    >
-                      {story.user.username}
-                    </span>
-                  </motion.div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
         <section className="flex-1 min-h-0">
           <div
             ref={feedScrollRef}
             className="flex h-full flex-col overflow-y-auto overscroll-y-contain snap-y snap-mandatory"
             onScroll={handleFeedScroll}
-            onTouchStart={handlePullTouchStart}
-            onTouchMove={handlePullTouchMove}
-            onTouchEnd={handlePullTouchEnd}
           >
             {/* ── Offline toast ── */}
             {offlineToast && (
@@ -2676,11 +2736,17 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
               </div>
             )}
             {/* ── Empty feed state ── */}
-            {mediaVideo !== null && mediaVideo.length === 0 && (
+            {mediaVideo !== null && mergedFeed.length === 0 && (
               <div className="relative h-full w-full snap-start snap-always flex-shrink-0 flex flex-col items-center justify-center gap-4 px-6 text-center">
                 <div className="text-5xl">🎬</div>
-                <h3 className="text-white font-black text-lg">No hay videos disponibles</h3>
-                <p className="text-gray-500 text-sm max-w-xs">Pronto habrá más contenido. Vuelve a intentarlo en un momento.</p>
+                <h3 className="text-white font-black text-lg">
+                  {feedMode === 'following' ? 'No hay publicaciones de seguidos' : 'No hay videos disponibles'}
+                </h3>
+                <p className="text-gray-500 text-sm max-w-xs">
+                  {feedMode === 'following'
+                    ? 'Sigue más personas para ver contenido aquí.'
+                    : 'Pronto habrá más contenido. Vuelve a intentarlo en un momento.'}
+                </p>
                 <button
                   onClick={() => window.dispatchEvent(new CustomEvent("buzzy:refresh"))}
                   className="mt-2 px-5 py-2.5 rounded-xl bg-cyan-500/20 border border-cyan-500/40 text-cyan-400 text-sm font-bold hover:bg-cyan-500/30 transition-all"
@@ -2806,12 +2872,26 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 );
               }
 
-              return (
-                <div
-                  key={videoId}
-                  className="transform-gpu relative h-full min-h-full snap-start snap-always rounded-t-xl rounded-b-none border border-[#2a2f5e]/30 shadow-2xl shadow-black/50"
-                  style={{ contain: "layout style" }}
-                >
+                return (
+                  <div
+                    key={videoId}
+                    className="relative h-full min-h-full w-full snap-start snap-always"
+                    // OJO (causa de "video por cuadritos" en WebView Android):
+                    //  • NADA de `content-visibility:auto` aquí: descarta el render
+                    //    del slide fuera de viewport y, al volver con el scroll, lo
+                    //    RE-PINTA progresivamente tile por tile sobre la surface del
+                    //    <video> → ese es el tiling. Con video debe renderizarse de
+                    //    una sola vez, no diferido.
+                    //  • NADA de `transform-gpu`/translateZ aquí: el <video> ya crea
+                    //    su propia capa GPU; anidar otra capa multiplica las surfaces
+                    //    de composición y fuerza recomposición en cada frame.
+                    //  • NADA de `shadow-2xl`: una box-shadow con blur sobre el
+                    //    contenedor del video se recalcula en cada frame del scroll
+                    //    (y ni se ve, el video ocupa toda la pantalla).
+                    // Solo `contain: layout` (sin `paint`) para acotar el reflow sin
+                    // recortar/diferir el pintado.
+                    style={{ contain: "layout" } as React.CSSProperties}
+                  >
                   <HorizontalCarousel
                     video={data}
                     feedIndex={index}
@@ -2864,9 +2944,9 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                       }
                     }}
                   >
-                    <div className="absolute inset-0 rounded-t-xl rounded-b-none overflow-hidden pt-0 group">
+                    <div className="absolute inset-0 overflow-hidden pt-0 group">
 
-                      <div className="relative h-full w-full rounded-t-xl rounded-b-none overflow-hidden bg-black">
+                      <div className="relative h-full w-full overflow-hidden bg-black">
                         {data.media_type === 'image' ? (
                           <img
                             src={data.video?.startsWith("http") ? data.video : getMediaUrl(data.video)}
@@ -2886,9 +2966,19 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                             />
                             <video
                               ref={(el) => { videoRefs.current[index] = el }}
-                              src={Math.abs((activeVideo ?? 0) - index) <= 2 ? (data.video?.startsWith("http") ? data.video : getMediaUrl(data.video)) : undefined}
+                              // Ventana de DECODERS = activo + 2 adelante (ver
+                              // isInDecoderWindow). Fuera de la ventana el src es undefined
+                              // → React lo quita → se libera el decoder. preload "auto" para
+                              // los 3 de la ventana (decodifican su primer frame antes de
+                              // verlos); "none" para el resto.
+                              src={isInDecoderWindow(index) ? (data.video?.startsWith("http") ? data.video : getMediaUrl(data.video)) : undefined}
+                              // poster = thumbnail: tapa el ÍCONO DE PLAY por defecto que el
+                              // WebView pinta cuando el <video> aún no tiene primer frame
+                              // (eso es lo que se veía "pixelado/por cuadritos" — NO era el
+                              // video, era el play-button por defecto). El poster muestra el
+                              // thumbnail mientras carga, así nunca se ve ese ícono.
                               poster={data.thumbnail_url?.startsWith("http") ? data.thumbnail_url : getMediaUrl(data.thumbnail_url)}
-                              preload={activeVideo === index ? "auto" : (Math.abs((activeVideo ?? 0) - index) <= 1 ? "metadata" : "none")}
+                              preload={isInDecoderWindow(index) ? "auto" : "none"}
                               muted={isMuted || activeAdIndex === index}
                               loop
                               playsInline
@@ -2897,11 +2987,22 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                               // animar opacity sobre la surface de video fuerza al WebView
                               // a recomponer la pila de capas → repinta por tiles (el video
                               // aparece "por cuadritos"). El video va SIEMPRE opaco; el
-                              // thumbnail (<img> detrás) cubre el área hasta que el video
-                              // pinta su primer frame encima, de golpe y sin recomposición.
+                              // thumbnail (<img> detrás) + poster cubren el área hasta que
+                              // el video pinta su primer frame. NO usamos visibility:hidden
+                              // sobre el <video> porque eso TAMBIÉN oculta su poster → se
+                              // veía el ícono de play por defecto. Dejamos el poster hacer su
+                              // trabajo (mostrar el thumbnail) hasta que hay frame de video.
                               style={{ transform: "translateZ(0)", backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden" }}
-                              className={`absolute inset-0 h-full w-full object-cover border-[#00f0ff]/5`}
-                              onPlay={() => {
+                              className={`feed-video absolute inset-0 h-full w-full object-cover`}
+                              onPlay={(e) => {
+                                // Red de seguridad: con el feed bloqueado (candado, antes
+                                // del primer tap) el video NO debe reproducirse. Si algo lo
+                                // arranca (autoplay del WebView, efecto residual), lo
+                                // pausamos en el acto. Es el guard definitivo del candado.
+                                if (feedLockedRef.current) {
+                                  e.currentTarget.pause();
+                                  return;
+                                }
                                 syncFeedPlaybackState(false);
                                 onVideoPlay(videoId);
                                 // Unlock audio context on first video play (Capacitor/Android)
@@ -2914,11 +3015,49 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                                   setIsAudioUnlocked(true);
                                 }
                               }}
+                              onLoadedData={(e) => {
+                                // El video YA tiene primer frame → marcarlo "listo" para
+                                // revelarlo encima del thumbnail. Hasta aquí se ve el
+                                // thumbnail como placeholder (estilo TikTok), nunca la
+                                // surface NEGRA del <video> sin datos.
+                                setReadyVideos(prev => prev.has(videoId) ? prev : new Set(prev).add(videoId));
+                                // Con el candado puesto: asegurar que quede en el frame 0 y
+                                // PAUSADO en cuanto hay datos, ANTES de que el WebView pueda
+                                // autoreproducir → elimina el destello de ~100ms que se veía
+                                // al recargar (reproducía un instante y luego se pausaba).
+                                if (feedLockedRef.current) {
+                                  e.currentTarget.pause();
+                                  e.currentTarget.currentTime = 0;
+                                  return;
+                                }
+                                // Recuperación de scroll rápido: si al llegar (saltando
+                                // varios) este video es el activo pero llegó SIN datos, el
+                                // observer ya intentó play() y falló. Ahora que tiene su
+                                // primer frame, lo arrancamos — así no queda negro/parado
+                                // esperando que vuelvas atrás manualmente.
+                                if (activeVideoRef.current === index && !feedLockedRef.current
+                                    && activeAdIndex === null && !videosPausedRef.current) {
+                                  e.currentTarget.play().catch(() => {});
+                                }
+                              }}
                               onPlaying={() => {
                                 syncFeedPlaybackState(false);
+                                // Revelar el video justo cuando YA está pintando movimiento
+                                // real (no solo con datos). Así la transición thumbnail→video
+                                // ocurre con el video ya corriendo → sin el "salto"/frame
+                                // estático que se notaba con onLoadedData.
+                                setReadyVideos(prev => prev.has(videoId) ? prev : new Set(prev).add(videoId));
                               }}
                               onPause={() => {
                                 syncFeedPlaybackState(true);
+                              }}
+                              onEmptied={() => {
+                                // Se le quitó el src (salió de la ventana) → ya no está
+                                // listo; al volver mostrará el thumbnail hasta recargar.
+                                setReadyVideos(prev => {
+                                  if (!prev.has(videoId)) return prev;
+                                  const next = new Set(prev); next.delete(videoId); return next;
+                                });
                               }}
                               onLoadedMetadata={(e) => {
                                 // Populate duration as soon as metadata is ready so the
@@ -3036,7 +3175,11 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                         {!adActive && (
                           <div
                             className="absolute inset-0 z-10"
-                            onTouchEnd={(e) => { e.preventDefault(); handleVideoClick(index); }}
+                            onTouchStart={handleVideoTouchStart}
+                            onTouchEnd={handleVideoTouchEnd(index)}
+                            // onClick para ratón (desktop). En móvil, el click sintético
+                            // que sigue al touch cae dentro del debounce de 800ms de
+                            // handleVideoClick, así que no provoca doble toggle.
                             onClick={() => handleVideoClick(index)}
                           />
                         )}
@@ -3535,7 +3678,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                               className="flex flex-col items-center"
                             >
                               <div className="flex h-8 w-8 items-center justify-center">
-                                <MoreVertical className="h-5 w-5 text-white/70" />
+                                <Forward className="h-6 w-6 text-white" />
                               </div>
                             </motion.button>
 
@@ -3645,7 +3788,10 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                         </span>
                       )}
                     </div>
-                    <span className="text-xs text-gray-300">Hace {groupedStories[viewingStoryUserIndex].formatted_created_at}</span>
+                    <span className="text-xs text-gray-300">Hace {formatStoryTimeAgo(
+                      groupedStories[viewingStoryUserIndex]?.media?.[currentStoryItemIndex]?.created_at
+                      ?? groupedStories[viewingStoryUserIndex]?.created_at
+                    )}</span>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
