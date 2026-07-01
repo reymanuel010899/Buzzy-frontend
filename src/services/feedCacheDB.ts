@@ -56,12 +56,18 @@ async function precacheAudioTracks(videos: Video[]): Promise<void> {
       .map(v => v.audio_track_url)
       .filter((url): url is string => typeof url === 'string' && url.startsWith('http'));
     const unique = [...new Set(urls)];
-    await Promise.allSettled(unique.map(url =>
-      cache.match(url).then(hit => {
+    await Promise.allSettled(unique.map(url => {
+      // La música va FIRMADA (?expires=&sig=), y esos params cambian en cada feed.
+      // Indexamos el cache por la RUTA del archivo (key estable) para que el audio
+      // guardado hoy se recupere mañana, aunque la firma de hoy ya no exista. El
+      // fetch usa la URL firmada completa; el put se hace bajo la ruta.
+      let key: string;
+      try { key = new URL(url).pathname; } catch { key = url.split('?')[0]; }
+      return cache.match(key).then(hit => {
         if (hit) return undefined;
-        return fetch(url).then(r => r.ok ? cache.put(url, r) : undefined).catch(() => {});
-      })
-    ));
+        return fetch(url).then(r => r.ok ? cache.put(key, r) : undefined).catch(() => {});
+      });
+    }));
   } catch {
     // best-effort — sin internet no hay nada que pre-cachear
   }

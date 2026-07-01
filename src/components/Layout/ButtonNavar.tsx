@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useState } from "react"
-import { Plus, Home, Wallet } from "lucide-react"
+import { Plus, Home, Megaphone } from "lucide-react"
 import { Link, useLocation } from "react-router-dom"
 import { motion, AnimatePresence } from "framer-motion"
 import { useSelector } from "react-redux"
@@ -102,14 +102,15 @@ const BottomNavbar: React.FC = () => {
             </motion.button>
           </div>
 
-          {/* Wallet */}
-          <Link to="/wallet" className="relative flex flex-col items-center gap-0.5 group">
+          {/* Campaña (Ads) — antes aquí estaba Wallet; Wallet se movió al modal de
+              ajustes del perfil. La campaña mantiene su flujo: navega a /ads. */}
+          <Link to="/ads" className="relative flex flex-col items-center gap-0.5 group">
             <motion.div whileTap={{ scale: 0.85 }} className="flex flex-col items-center gap-0.5">
-              <Wallet className={`h-5 w-5 transition-colors duration-200 ${isActive("/wallet") ? "text-[#00f0ff]" : "text-white/40 group-hover:text-white/70"}`} />
-              <span className={`text-[9px] font-medium transition-colors duration-200 ${isActive("/wallet") ? "text-[#00f0ff]" : "text-white/30"}`}>Wallet</span>
+              <Megaphone className={`h-5 w-5 transition-colors duration-200 ${isActive("/ads") ? "text-[#00f0ff]" : "text-white/40 group-hover:text-white/70"}`} />
+              <span className={`text-[9px] font-medium transition-colors duration-200 ${isActive("/ads") ? "text-[#00f0ff]" : "text-white/30"}`}>Campaña</span>
             </motion.div>
             <AnimatePresence>
-              {isActive("/wallet") && (
+              {isActive("/ads") && (
                 <motion.div
                   layoutId="activeBar"
                   className="absolute -bottom-1 w-4 h-0.5 rounded-full"

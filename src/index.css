@@ -540,3 +540,16 @@ body {
   -webkit-appearance: none !important;
   opacity: 0 !important;
 }
+
+/* ── Feed de video NATIVO (ExoPlayer detrás del WebView) ──────────────────────
+   Cuando el feed nativo está activo, el WebView debe ser 100% transparente para
+   ver el ViewPager2/ExoPlayer detrás. El WebView nativo ya es transparente, pero
+   su CONTENIDO (body #1a1a1a) pintaba opaco y tapaba el video. Esta clase en
+   <html> hace transparentes body/html/#root → se ve el video nativo detrás, y la
+   UI HTML (botones) queda encima. */
+html.native-video-feed,
+html.native-video-feed body,
+html.native-video-feed #root {
+  background: transparent !important;
+  background-color: transparent !important;
+}

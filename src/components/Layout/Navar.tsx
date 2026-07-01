@@ -1,11 +1,10 @@
 "use client"
 
 import type React from "react"
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { useTranslation } from "react-i18next"
-import { Search, Bell, Megaphone } from "lucide-react"
+import { Search, Bell } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
-import { useNavigate } from "react-router-dom"
 import FluidSearch from "./fluid-search"
 import NotificationPanel from "../notifications/NotificationPanel"
 import { useNotificationsStore } from "../../context/NotificationsStore"
@@ -19,8 +18,6 @@ const Navbar: React.FC = () => {
   const [search, setSearch] = useState("")
   const [showSearch, setShowSearch] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
-  const [scrollPosition, setScrollPosition] = useState(0)
-  const navigate = useNavigate()
 
   const notifUnreadCount = useNotificationsStore((state) => state.unreadCount);
   const { activeOutgoingCall, activeIncomingCall } = useCallStore();
@@ -29,16 +26,22 @@ const Navbar: React.FC = () => {
   const feedMode = useFeedModeStore((state) => state.feedMode);
   const setFeedMode = useFeedModeStore((state) => state.setFeedMode);
 
-  useEffect(() => {
-    const handleScroll = () => setScrollPosition(window.scrollY)
-    window.addEventListener("scroll", handleScroll)
-    return () => window.removeEventListener("scroll", handleScroll)
-  }, [])
-
   return (
     <>
       <nav
-        className={`fixed w-full top-0 z-50 px-2 sm:px-6 transition-all duration-300 ${scrollPosition > 20 ? "bg-black backdrop-blur-lg" : "bg-black/80 backdrop-blur-2xl"}`}
+        // Header con fondo NEGRO SÓLIDO y constante. Negro pleno hasta el 88% y solo
+        // un breve desvanecido en el último tramo para que el borde inferior no sea un
+        // corte duro contra el video.
+        //
+        // IMPORTANTE — SIN backdrop-blur ni transition: en modo ExoPlayer nativo el
+        // video se dibuja en una capa de Android DETRÁS del WebView. El `backdrop-filter`
+        // (blur) no puede leer esa capa nativa de forma fiable → el header "parpadeaba"
+        // dejando ver los colores del video. Y `transition-all` animaba ese cambio.
+        // Sin ambos + negro sólido, el color es SIEMPRE el mismo, sin flicker.
+        className="fixed w-full top-0 z-50 px-2 sm:px-6"
+        style={{
+          background: 'linear-gradient(to bottom, #000 0%, #000 88%, rgba(0,0,0,0) 100%)',
+        }}
       >
         <AnimatePresence>
           {isCallMinimized && (activeOutgoingCall || (activeIncomingCall && activeIncomingCall.status === 'active')) && (
@@ -50,14 +53,21 @@ const Navbar: React.FC = () => {
             />
           )}
         </AnimatePresence>
-        <div className="flex items-center gap-2 mx-auto py-1">
+        <div className="flex items-center gap-2 mx-auto ">
+            {/* IZQUIERDA: Notificaciones (antes estaba el megáfono; el megáfono se
+                movió al nav inferior). */}
             <motion.button
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.9 }}
-              className="relative shrink-0 text-gray-300 hover:text-cyan-400 transition-colors"
-              onClick={() => navigate("/ads")}
+              className="relative shrink-0 text-gray-300 hover:text-purple-400 transition-colors"
+              onClick={() => setShowNotifications(v => !v)}
             >
-              <Megaphone className="h-8 w-8" />
+              <Bell className="h-7 w-7" />
+              {notifUnreadCount > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-red-500 rounded-full text-[10px] font-bold text-white flex items-center justify-center px-1">
+                  {notifUnreadCount > 9 ? "9+" : notifUnreadCount}
+                </span>
+              )}
             </motion.button>
 
           <HeaderStories inline showLabels={false} />
@@ -76,35 +86,26 @@ const Navbar: React.FC = () => {
               </motion.div>
             )}
 
+            {/* DERECHA: solo el ICONO de búsqueda (quitamos el input grande para
+                ganar espacio de video). Al tocarlo abre el modal de búsqueda. */}
             <motion.button
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.9 }}
-              className="relative text-gray-300 hover:text-purple-400 transition-colors"
-              onClick={() => setShowNotifications(v => !v)}
+              className="relative text-gray-300 hover:text-cyan-400 transition-colors"
+              onClick={() => setShowSearch(true)}
             >
-              <Bell className="w-10 h-8" />
-              {notifUnreadCount > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-red-500 rounded-full text-[10px] font-bold text-white flex items-center justify-center px-1">
-                  {notifUnreadCount > 9 ? "9+" : notifUnreadCount}
-                </span>
-              )}
+              <Search className="h-7 w-7" />
             </motion.button>
           </div>
         </div>
 
-        <div className="md:hidden -mt-1">
-          <div className="flex items-center bg-gray-800/60 backdrop-blur-md border border-gray-700/50 rounded-full px-2 py-1 cursor-pointer hover:bg-gray-700/50 transition-all"
-            onClick={() => setShowSearch(true)}>
-            <span className="text-gray-400 px-2">{search || "Buscar en Buzzy..."}</span>
-            <Search className="w-5 h-5 text-gray-400 ml-auto mr-2" />
-          </div>
-        </div>
-
-        <div className="flex items-center justify-center gap-6 pt-1 pb-0.5">
+        {/* Tabs "Para ti / Seguidos" — segunda fila DENTRO del header, DEBAJO de la
+            fila de iconos (campana/historia/búsqueda). */}
+        <span className="flex items-center justify-center gap-6 -mt-0.5 pb-1">
           <button
             type="button"
             onClick={() => setFeedMode("for-you")}
-            className={`bg-transparent p-0 text-[12px] font-medium transition-colors ${feedMode === "for-you"
+            className={`bg-transparent p-0 text-[13px] font-semibold transition-colors ${feedMode === "for-you"
               ? "text-white"
               : "text-white/45 hover:text-white"
               }`}
@@ -114,14 +115,14 @@ const Navbar: React.FC = () => {
           <button
             type="button"
             onClick={() => setFeedMode("following")}
-            className={`bg-transparent p-0 text-[12px] font-medium transition-colors ${feedMode === "following"
+            className={`bg-transparent p-0 text-[13px] font-semibold transition-colors ${feedMode === "following"
               ? "text-[#00f0ff]"
               : "text-white/45 hover:text-white"
               }`}
           >
             Seguidos
           </button>
-        </div>
+        </span>
       </nav>
 
       <AnimatePresence>

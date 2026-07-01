@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Contenedor del feed nativo: ViewPager2 vertical a pantalla completa. Cada
+     página es item_video.xml (una PlayerView de ExoPlayer). -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/transparent">
+
+    <androidx.viewpager2.widget.ViewPager2
+        android:id="@+id/video_pager"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+</FrameLayout>

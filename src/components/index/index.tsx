@@ -5,6 +5,9 @@ import axios from "axios";
 import { Link, useNavigate, useLocation } from "react-router-dom"
 import sendMessageSound from "../../assets/sounds/sendMessage.mp3";
 import { prefetchAudioUrl } from "../../hooks/useVideoAudio";
+import { fetchFreshMediaUrl } from "../../hooks/useFreshMediaUrl";
+import { BuzzyVideoFeed } from "../../plugins/buzzyVideoFeed";
+import { App as CapApp } from "@capacitor/app";
 import { Howler } from "howler";
 import { Eye, MessageCircle, Heart, Volume2, VolumeX, Play, Pause, UserPlus, UserCheck, X, MoreVertical, Music2, MapPin, Bookmark, Share2, Download, Lock, Gem, Forward } from "lucide-react"
 import AdCard from "../ads/AdCard"
@@ -196,9 +199,22 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [feedLocked, setFeedLocked] = useState(true)
   const feedLockedRef = useRef(true)
   const mainRef = useRef<HTMLDivElement>(null)
-  // videoId's cuyo <video> ya tiene primer frame (loadeddata). Hasta entonces se
-  // muestra el thumbnail como placeholder (evita pantalla negra al scroll rápido).
-  const [readyVideos, setReadyVideos] = useState<Set<string>>(new Set());
+  // Feed de video 100% NATIVO: el video SIEMPRE lo reproduce ExoPlayer. Inicia en
+  // true para que NUNCA se renderice el <video> HTML (ni un parpadeo inicial).
+  const exoActiveRef = useRef(true)
+  const [exoActive, setExoActive] = useState(true)
+  // Estado de pausa del video NATIVO (para el candado/tap). El feed nativo arranca
+  // PAUSADO (candado) hasta el primer tap, igual que antes.
+  const exoPausedRef = useRef(true)
+  const [exoPaused, setExoPaused] = useState(true)
+  // true mientras el usuario ARRASTRA/asienta el feed nativo. Mientras es true se
+  // OCULTA la UI HTML (botones/overlays) para no mostrar data del video viejo, y se
+  // bloquea abrir comentarios (evita comentarios del video equivocado).
+  const feedScrollingRef = useRef(false)
+  const [feedScrolling, setFeedScrolling] = useState(false)
+  // ID del video ACTIVO según el nativo (fuente de verdad para mostrar el slide
+  // correcto). Se decide por ID, no por índice, para evitar el desfase nativo↔HTML.
+  const [activeVideoId, setActiveVideoId] = useState<string | null>(null)
   const [showLikeAnimation, setShowLikeAnimation] = useState<Record<string, boolean>>({});
   const [savedMap, setSavedMap] = useState<Record<string, boolean>>({});
   const [activeOptionsVideoId, setActiveOptionsVideoId] = useState<string | null>(null);
@@ -349,12 +365,373 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [shownAds, setShownAds] = useState<Set<string>>(new Set());
   const [lastAdTimestamp, setLastAdTimestamp] = useState<number>(() => Date.now());
   const [adSequenceCount, setAdSequenceCount] = useState<number>(0);
+  // Espejos para leer estado FRESCO de los ads dentro del listener 'progress'
+  // nativo y de applyVideoProgress (que son callbacks/closures registrados una
+  // sola vez → sin estos refs leerían valores viejos). El feed nativo dispara los
+  // ads desde el evento 'progress' del ExoPlayer (Fase 4), no desde onTimeUpdate
+  // del <video> HTML (que no existe en modo nativo).
+  const adsRef = useRef(ads);
+  adsRef.current = ads;
+  const activeAdIndexRef = useRef(activeAdIndex);
+  activeAdIndexRef.current = activeAdIndex;
+  const shownAdsRef = useRef(shownAds);
+  shownAdsRef.current = shownAds;
+  const lastAdTimestampRef = useRef(lastAdTimestamp);
+  lastAdTimestampRef.current = lastAdTimestamp;
   const [, setVideoLoopCount] = useState<Record<string, number>>({});
   const lastVideoTimeRef = useRef<Record<string, number>>({});
   const typingAudioRef = useRef<HTMLAudioElement | null>(null);
   // const [showStoriesBar, setShowStoriesBar] = useState(true);
   const lastFeedScrollTopRef = useRef(0);
   const feedScrollRef = useRef<HTMLDivElement>(null);
+
+  // ── Feed de video 100% NATIVO (ExoPlayer) ───────────────────────────────────
+  // El video lo reproduce SIEMPRE ExoPlayer nativo (detrás del WebView). Del
+  // WebView solo quedan botones/overlays/layout. Esto elimina de raíz los
+  // cuadritos, el ícono de play, las transiciones, etc. del <video> en WebView.
+  //
+  // show() se llama UNA SOLA VEZ (cuando llegan los primeros videos). Antes el
+  // efecto dependía de mediaVideo.length y se re-disparaba en cada paginación →
+  // reiniciaba ExoPlayer en bucle (nunca mostraba nada). Este guard lo evita.
+  const exoShownRef = useRef(false)
+  // Cuántas URLs de video ya enviamos al feed nativo (para append incremental).
+  const exoSentCountRef = useRef(0)
+  // ITEMS del feed que van al nativo: SOLO videos reproducibles (sin imágenes ni
+  // ads), en el MISMO orden e índice que el ViewPager2 nativo. El 'pageChanged'
+  // nativo indexa en ESTA lista (no en mergedFeed, que intercala ads → desalinearía
+  // los botones). Es la fuente de verdad para alinear UI ↔ video nativo.
+  const buildExoItems = useCallback(() => (mediaVideo ?? [])
+    .filter(v => v.media_type !== 'image' && v.video)
+    .map(v => ({ ...v, type: 'video' as const })), [mediaVideo]);
+  const exoItemsRef = useRef<ReturnType<typeof buildExoItems>>([]);
+  // Índice CRUDO del video activo en exoItems (lo da 'pageChanged'). Distinto de
+  // activeVideoRef (que indexa en mergedFeed con ads). Lo usa la re-firma para
+  // confirmar que el video que falló sigue siendo el activo antes de reproducirlo.
+  const activeVideoNativeRef = useRef(0);
+  // Último uuid re-firmado, para no entrar en bucle si la URL fresca también falla.
+  const lastRefreshedUuidRef = useRef<string | null>(null);
+  const buildExoUrls = useCallback(() => buildExoItems()
+    .map(v => (v.video.startsWith('http') ? v.video : getMediaUrl(v.video))), [buildExoItems]);
+  // Mantener exoItemsRef sincronizado con la lista que ve el nativo.
+  useEffect(() => { exoItemsRef.current = buildExoItems(); }, [buildExoItems]);
+  useEffect(() => {
+    if (exoShownRef.current) return;
+    const urls = buildExoUrls();
+    if (urls.length === 0) return;
+    exoShownRef.current = true;
+    exoSentCountRef.current = urls.length;
+    BuzzyVideoFeed.show({ videoUrls: urls })
+      .then(() => {
+        exoActiveRef.current = true;
+        setExoActive(true);
+        // Hace transparentes body/html/#root → se ve el video nativo detrás
+        // (el body #1a1a1a opaco era lo que tapaba el ViewPager2/ExoPlayer).
+        document.documentElement.classList.add('native-video-feed');
+        // Bajar el video debajo del navbar para que el avatar del autor se vea por
+        // fuera del header (no tapado detrás). Se mide tras pintar la UI.
+        // Y REVELAR el feed nativo (insertado INVISIBLE) recién cuando el chrome del
+        // WebView ya pintó → así el video y la UI (navbar/historias/tabs) aparecen
+        // JUNTOS al volver a la app, no el video primero y la UI un instante después.
+        // Doble rAF: el primero deja a React confirmar el commit; el segundo asegura
+        // que ese frame se haya PINTADO antes de mostrar el video nativo.
+        requestAnimationFrame(() => {
+          syncNativeInsets();
+          requestAnimationFrame(() => {
+            BuzzyVideoFeed.reveal().catch(() => {});
+          });
+        });
+      })
+      .catch(() => { exoShownRef.current = false; });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mediaVideo?.length]);
+
+  // PASO 4 — Cleanup al DESMONTAR el feed: liberar ExoPlayer (video + música) y
+  // restaurar el WebView, para no dejar players vivos (fuga de memoria/recursos).
+  useEffect(() => {
+    return () => {
+      if (exoShownRef.current) {
+        BuzzyVideoFeed.hide().catch(() => {});
+        exoShownRef.current = false;
+        exoActiveRef.current = false;
+        document.documentElement.classList.remove('native-video-feed');
+      }
+    };
+  }, []);
+
+  // CAMBIO DE TAB ("Para ti" ↔ "Seguidos"): el feed se REEMPLAZA por completo. El
+  // nativo debe recargar TODA su lista (replaceUrls) y volver a la página 0 — no sirve
+  // appendUrls (que solo agrega al final). Detectamos el cambio de feedMode y marcamos
+  // que el próximo mediaVideo va por replaceUrls.
+  const pendingFeedReplaceRef = useRef(false);
+  const prevFeedModeForExoRef = useRef(feedMode);
+  useEffect(() => {
+    if (prevFeedModeForExoRef.current !== feedMode) {
+      prevFeedModeForExoRef.current = feedMode;
+      pendingFeedReplaceRef.current = true; // el feed que llegue es de otro tab
+    }
+  }, [feedMode]);
+
+  // Sincroniza la lista del feed NATIVO con mediaVideo:
+  //  - Cambio de tab (pendingFeedReplaceRef): replaceUrls → reemplaza todo, vuelve arriba.
+  //  - Paginación normal (el feed crece): appendUrls → solo las URLs nuevas (scroll infinito).
+  useEffect(() => {
+    if (!exoShownRef.current) return;
+    const urls = buildExoUrls();
+
+    if (pendingFeedReplaceRef.current) {
+      // Esperar a que el nuevo feed haya llegado (no reemplazar con lista vacía del RESET).
+      if (urls.length === 0) return;
+      pendingFeedReplaceRef.current = false;
+      exoSentCountRef.current = urls.length;
+      activeVideoNativeRef.current = 0;
+      activeVideoRef.current = 0;
+      BuzzyVideoFeed.replaceUrls({ videoUrls: urls }).catch(() => {});
+      return;
+    }
+
+    if (urls.length <= exoSentCountRef.current) return;
+    const newOnes = urls.slice(exoSentCountRef.current);
+    exoSentCountRef.current = urls.length;
+    BuzzyVideoFeed.appendUrls({ videoUrls: newOnes }).catch(() => {});
+    // Depende también del PRIMER id: al cambiar de tab, dos feeds pueden tener la
+    // misma longitud pero distinto contenido → sin el id, el efecto no correría y el
+    // replaceUrls no se enviaría.
+  }, [mediaVideo?.length, mediaVideo?.[0]?.id, buildExoUrls]);
+
+  // Mide el navbar (arriba) y el nav inferior y se los pasa al feed nativo para que
+  // el video quede ENTRE ambos (avatar del autor visible, no detrás del header).
+  const syncNativeInsets = useCallback(() => {
+    if (!exoActiveRef.current) return;
+    const nav = document.querySelector('nav');
+    const top = nav ? Math.round(nav.getBoundingClientRect().height) : 0;
+    // 1) Bajar el VIDEO nativo esa altura. 2) Bajar la CAPA HTML del slide la MISMA
+    //    altura (CSS var) → el avatar del autor (top-2 del slide) cae debajo del nav.
+    BuzzyVideoFeed.setInsets({ top, bottom: 0 }).catch(() => {});
+    document.documentElement.style.setProperty('--feed-top-inset', `${top}px`);
+  }, []);
+
+  // Posición del avatar del AUTOR del video para que NO quede tapado por el navbar.
+  // Nativo: la capa del slide ya bajó --feed-top-inset → el avatar solo necesita 8px.
+  // Web: el slide NO baja → el avatar debe bajar la altura del navbar + 8px.
+  useEffect(() => {
+    const nav = document.querySelector('nav');
+    const navH = nav ? Math.round(nav.getBoundingClientRect().height) : 56;
+    const authorTop = exoActive ? '0.5rem' : `${navH + 8}px`;
+    document.documentElement.style.setProperty('--author-top', authorTop);
+  }, [exoActive, mediaVideo?.length]);
+
+  // Reaplicar al rotar/redimensionar (cambia la altura del header).
+  useEffect(() => {
+    const onResize = () => syncNativeInsets();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [syncNativeInsets]);
+
+  // El SCROLL lo hace el ViewPager2 NATIVO. Cuando el swipe cambia de video, el
+  // nativo emite 'pageChanged' → actualizamos activeVideo para que la UI HTML
+  // (botones like/comment/gift de ESE video) refleje el video correcto.
+  // Espejo de applyVideoProgress (definido más abajo) para el listener 'progress'
+  // nativo, que se monta una sola vez. Arranca no-op; se reasigna tras definirla.
+  const applyVideoProgressRef = useRef<(videoId: string, currentTime: number, duration: number) => void>(() => {});
+
+  // FASE 3.3 — Música 100% NATIVA. Pasa la pista del video activo al segundo
+  // ExoPlayer (volumen video/música y trim). url vacío = sin música → silencia.
+  // Respeta candado/mute/ad/stories (igual que el antiguo musicAudioRef).
+  const applyNativeMusic = useCallback((item: any) => {
+    if (!exoActiveRef.current) return;
+    const blocked = feedLockedRef.current || isMuted || activeAdIndex !== null
+      || viewingStoryUserIndex !== null;
+    if (!item || item.type !== 'video' || !item.audio_track_url || blocked) {
+      BuzzyVideoFeed.setMusic({ url: '', volumeOriginal: item?.volume_original ?? 1.0 }).catch(() => {});
+      return;
+    }
+    const trimStart = Math.max(0, item.audio_trim_start ?? 0);
+    const trimEndRaw = item.audio_trim_end;
+    // trimEnd válido solo si es un número > trimStart; si no, 0 = sin recorte final.
+    const trimEnd = (typeof trimEndRaw === 'number' && isFinite(trimEndRaw) && trimEndRaw > trimStart)
+      ? trimEndRaw : 0;
+    BuzzyVideoFeed.setMusic({
+      url: item.audio_track_url,
+      volumeMusic: Math.min(Math.max(item.volume_music ?? 0.8, 0), 1),
+      volumeOriginal: Math.min(Math.max(item.volume_original ?? 1.0, 0), 1),
+      trimStart,
+      trimEnd,
+    }).catch(() => {});
+  }, [isMuted, activeAdIndex, viewingStoryUserIndex]);
+
+    // El nativo da un índice en la lista de SOLO-videos (exoItems). Lo mapeamos al
+    // índice de mergedFeed (que intercala ads) buscando por id → así toda la UI que
+    // indexa en mergedFeed (slide activo, botones) sigue alineada con el video.
+    const nativeToMergedIndex = (nativeIdx: number) => {
+      const exoItem = exoItemsRef.current[nativeIdx];
+      if (!exoItem) return { mergedIdx: nativeIdx, item: undefined };
+      const mergedIdx = mergedFeedRef.current.findIndex(
+        (m) => m?.type === 'video' && m.id === exoItem.id);
+      return { mergedIdx: mergedIdx >= 0 ? mergedIdx : nativeIdx, item: exoItem };
+    };
+
+  useEffect(() => {
+    let handle: { remove: () => void } | undefined;
+    // Limpiar cualquier listener previo ANTES de registrar (evita acumular
+    // listeners duplicados si el componente se re-monta → un solo evento
+    // disparaba el handler varias veces).
+    BuzzyVideoFeed.removeAllListeners?.().catch?.(() => {});
+    BuzzyVideoFeed.addListener('pageChanged', ({ index }) => {
+      const { mergedIdx, item } = nativeToMergedIndex(index);
+      activeVideoNativeRef.current = index; // índice CRUDO en exoItems (para re-firma)
+      lastRefreshedUuidRef.current = null;  // nuevo video → permitir re-firma de nuevo
+      // Scroll VERTICAL: liberar la música horizontal prebuferada del video anterior
+      // → no acumular pistas en memoria entre videos del feed.
+      BuzzyVideoFeed.clearMusicPrefetch().catch(() => {});
+      activeVideoRef.current = mergedIdx;
+      setActiveVideo(mergedIdx);
+      // ID del video ACTIVO según el nativo (fuente de verdad). La opacity del slide
+      // se decide por ESTE id, no por el índice (que podía desfasarse → mostrabas los
+      // botones de un video y el video de otro = "números congelados/equivocados").
+      if (item?.id != null) setActiveVideoId(String(item.id));
+      setActiveOptionsVideoId(null);
+      if (item && item.type === 'video') {
+        onIntersectionChange(item.id, true, item.category || null);
+      }
+      // Cambiar la música nativa al del nuevo video.
+      applyNativeMusic(item);
+      // Llegamos a la nueva página: ya hay un video activo definido → mostrar la UI
+      // (los datos ya son del video correcto). scrollState(IDLE) también lo hará.
+      feedScrollingRef.current = false;
+      setFeedScrolling(false);
+    }).then(h => { handle = h; }).catch(() => {});
+
+    // Ocultar la UI HTML MIENTRAS se arrastra/asienta el feed (no mostrar data del
+    // video viejo en transición). Al quedar quieto, pageChanged la vuelve a mostrar.
+    let scrollHandle: { remove: () => void } | undefined;
+    BuzzyVideoFeed.addListener('scrollState', ({ scrolling }) => {
+      feedScrollingRef.current = scrolling;
+      setFeedScrolling(scrolling);
+      // IDLE (scrolling=false): el feed quedó quieto. Si NO cambió de página (volviste
+      // al mismo video), pageChanged no llega, así que aquí restauramos la UI igual.
+    }).then(h => { scrollHandle = h; }).catch(() => {});
+
+    // FASE 3.4 — Progreso nativo de ExoPlayer → barra + vistas + métricas.
+    let progHandle: { remove: () => void } | undefined;
+    BuzzyVideoFeed.addListener('progress', ({ index, position, duration }) => {
+      const item = exoItemsRef.current[index];
+      if (!item || item.type !== 'video') return;
+      const videoId = item.id?.toString();
+      if (!videoId) return;
+      // ExoPlayer da ms → la lógica de progreso/vistas trabaja en segundos.
+      applyVideoProgressRef.current(videoId, position / 1000, duration / 1000);
+    }).then(h => { progHandle = h; }).catch(() => {});
+
+    // RE-FIRMA estilo TikTok: un video falló (típicamente 403 por URL firmada
+    // vencida tras volver a la app horas después). En vez de quedar en negro,
+    // pedimos al backend una URL RECIÉN firmada del video activo y la reproducimos
+    // de nuevo (video + su música). Guard anti-bucle: no re-intentar el mismo uuid
+    // más de una vez seguida (si la URL fresca también falla, es otro problema).
+    let errHandle: { remove: () => void } | undefined;
+    BuzzyVideoFeed.addListener('playerError', ({ index }) => {
+      const item = exoItemsRef.current[index];
+      const uuid = item?.uuid?.toString();
+      if (!uuid) return;
+      if (lastRefreshedUuidRef.current === uuid) return; // ya reintentado
+      lastRefreshedUuidRef.current = uuid;
+      fetchFreshMediaUrl(uuid).then(fresh => {
+        if (!fresh?.video) return;
+        // Solo reproducir si SIGUE siendo el video activo (el usuario no scrolleó).
+        if (exoItemsRef.current[activeVideoNativeRef.current]?.uuid?.toString() !== uuid) return;
+        BuzzyVideoFeed.playUrl({ url: fresh.video }).catch(() => {});
+        // Re-firmar también la música del item con la URL fresca.
+        applyNativeMusic({ ...item, audio_track_url: fresh.audio_track_url });
+      });
+    }).then(h => { errHandle = h; }).catch(() => {});
+
+    // FRAME LISTO del player nativo (tras playUrl al cambiar de slide horizontal).
+    // Lo retransmitimos como evento global del DOM → el HorizontalCarousel activo lo
+    // escucha y RECIÉN AHÍ desvanece el thumbnail del slide (revela el ExoPlayer). Así
+    // nunca se ve el frame del slide vecino mientras el nuevo video aún bufferea.
+    let frameHandle: { remove: () => void } | undefined;
+    BuzzyVideoFeed.addListener('frameReady', () => {
+      window.dispatchEvent(new Event('buzzy:nativeframeready'));
+    }).then(h => { frameHandle = h; }).catch(() => {});
+
+    return () => { handle?.remove(); scrollHandle?.remove(); progHandle?.remove(); errHandle?.remove(); frameHandle?.remove(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // PASO 2 — Mute nativo: el botón de volumen silencia/activa el ExoPlayer (video +
+  // música), no solo el <video> HTML viejo.
+  useEffect(() => {
+    if (!exoActiveRef.current) return;
+    BuzzyVideoFeed.setMuted({ muted: isMuted }).catch(() => {});
+  }, [isMuted]);
+
+  // BLOQUEAR el scroll nativo cuando hay un modal HTML encima (comentarios, gifts,
+  // opciones) → el feed no se mueve detrás del modal.
+  useEffect(() => {
+    if (!exoActiveRef.current) return;
+    const modalOpen = showCommentsModal || showGiftMenu || activeOptionsVideoId !== null;
+    BuzzyVideoFeed.setScrollEnabled({ enabled: !modalOpen }).catch(() => {});
+  }, [showCommentsModal, showGiftMenu, activeOptionsVideoId]);
+
+  // Reaplicar la música nativa cuando cambia ad/story (sin esperar a un
+  // pageChanged). El mute lo maneja setMuted (arriba) sin recargar la pista.
+  useEffect(() => {
+    if (!exoActiveRef.current) return;
+    if (feedLockedRef.current) return; // aún con candado: la música no debe sonar
+    applyNativeMusic(mergedFeedRef.current[activeVideoRef.current ?? 0]);
+  }, [activeAdIndex, viewingStoryUserIndex, applyNativeMusic]);
+
+  // FASE 4 — Pausar el video NATIVO mientras el AdOverlay está abierto. El ad se
+  // reproduce en el WebView (con su propio audio) encima del feed; si no pausamos
+  // el ExoPlayer, el video + su música seguirían sonando POR DEBAJO del anuncio.
+  // Al cerrar el ad (activeAdIndex → null) reanudamos, salvo candado/pausa manual.
+  useEffect(() => {
+    if (!exoActiveRef.current) return;
+    if (activeAdIndex !== null) {
+      BuzzyVideoFeed.setPaused({ paused: true }).catch(() => {});
+    } else if (!feedLockedRef.current && !exoPausedRef.current && !videosPausedRef.current) {
+      BuzzyVideoFeed.setPaused({ paused: false }).catch(() => {});
+    }
+  }, [activeAdIndex]);
+
+  // FASE 3.2 — Mostrar/ocultar el feed NATIVO al salir/volver del Home. El video
+  // nativo vive detrás del WebView; si no se oculta, sigue VISIBLE y SONANDO al
+  // abrir chat, stories, ir a perfil, etc. Oculto = GONE + pausa; visible = se
+  // muestra (y se reanuda solo si no está en candado/pausa manual).
+  const onHomeRoute = location.pathname === '/';
+  useEffect(() => {
+    if (!exoActiveRef.current) return;
+    const feedHidden = !onHomeRoute || showMessages || viewingStoryUserIndex !== null
+      || storyEditorFile !== null;
+    BuzzyVideoFeed.setVisible({ visible: !feedHidden }).catch(() => {});
+    if (!feedHidden) {
+      // Volvimos al feed: reanudar solo si NO está bloqueado/pausado manualmente.
+      if (!feedLockedRef.current && !exoPausedRef.current) {
+        BuzzyVideoFeed.setPaused({ paused: false }).catch(() => {});
+      }
+    }
+  }, [onHomeRoute, showMessages, viewingStoryUserIndex, storyEditorFile]);
+
+  // PASO 3 — Ciclo de vida de la app: al pasar a BACKGROUND (minimizar, bloquear
+  // pantalla, entra llamada), pausar+ocultar el ExoPlayer (no debe sonar fuera de
+  // foco). Al volver, reanudar solo si el feed está visible y sin candado/pausa.
+  useEffect(() => {
+    let handle: { remove: () => void } | undefined;
+    CapApp.addListener('appStateChange', ({ isActive }) => {
+      if (!exoActiveRef.current) return;
+      if (!isActive) {
+        BuzzyVideoFeed.setPaused({ paused: true }).catch(() => {});
+      } else {
+        const feedVisible = location.pathname === '/' && !showMessages
+          && viewingStoryUserIndex === null && storyEditorFile === null;
+        if (feedVisible && !feedLockedRef.current && !exoPausedRef.current) {
+          BuzzyVideoFeed.setPaused({ paused: false }).catch(() => {});
+        }
+      }
+    }).then(h => { handle = h; }).catch(() => {});
+    return () => { handle?.remove(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const resetFeedPosition = useCallback(() => {
     activeVideoRef.current = 0;
     setActiveVideo(0);
@@ -442,6 +819,8 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     ad_cooldown_seconds: 360,
     ads_refresh_seconds: 300,
   });
+  const adConfigRef = useRef(adConfig);
+  adConfigRef.current = adConfig;
   const userGpsRef = useRef<{ lat: number; lng: number } | null>(null);
 
   // Fetch delivery config once on mount
@@ -541,6 +920,8 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   };
 
   const isPremiumUser = LoginReducer?.user?.is_buzzy_premium === true;
+  const isPremiumUserRef = useRef(isPremiumUser);
+  isPremiumUserRef.current = isPremiumUser;
 
   const stopStoryAudio = useCallback((restoreVideoVolume = true) => {
     storyAudioRequestIdRef.current += 1;
@@ -588,6 +969,10 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     // No filtramos en cliente para no descartar videos válidos ni romper la paginación.
     return feed;
   }, [mediaVideo, ads]);
+  // Espejo de mergedFeed para leerlo en el listener de pageChanged (que se
+  // registra antes en el archivo, sin poder depender de mergedFeed directamente).
+  const mergedFeedRef = useRef(mergedFeed);
+  mergedFeedRef.current = mergedFeed;
 
   // Al montar arrancamos siempre en "Para ti" (el feed inicial ya lo carga el
   // contenedor padre). El cambio de feed lo gestiona el efecto de abajo.
@@ -688,14 +1073,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     setExpandedDescriptions(p => pruneRecord(p, live));
     setCarouselDots(p => pruneRecord(p, live));
     setVideoLoopCount(p => pruneRecord(p, live));
-    // readyVideos: quitar los que salieron de la ventana de montaje (su <video> se
-    // desmonta → al volver recarga y dispara loadeddata de nuevo).
-    setReadyVideos(prev => {
-      let changed = false;
-      const next = new Set<string>();
-      prev.forEach(id => { if (live.has(id)) next.add(id); else changed = true; });
-      return changed ? next : prev;
-    });
     // refs: borrar in-place las claves fuera de la ventana
     for (const k in videoProgressRef.current) {
       if (!live.has(k)) delete videoProgressRef.current[k];
@@ -732,6 +1109,13 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
   const ensureAudioForTrack = useCallback(
     (feedItem?: any, videoElement?: HTMLVideoElement | null) => {
+      // En modo ExoPlayer nativo la música la reproduce el SEGUNDO ExoPlayer
+      // (applyNativeMusic → setMusic), NO el <audio> HTML. Cortamos aquí para no
+      // tener dos músicas sonando a la vez.
+      if (exoActiveRef.current) {
+        musicAudioRef.current?.pause();
+        return;
+      }
       // Cancel any pending retry before evaluating new state
       if (audioSyncRafRef.current) {
         cancelAnimationFrame(audioSyncRafRef.current);
@@ -960,12 +1344,21 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   useEffect(() => {
     const onPause = () => {
       videoRefs.current.forEach(v => { if (v && !v.paused) v.pause() })
+      // Feed nativo: ocultar+pausar (un modal lo tapa).
+      if (exoActiveRef.current) BuzzyVideoFeed.setVisible({ visible: false }).catch(() => {});
     }
     const onResume = () => {
       const shouldBlockInitialAutoplay = activeVideo === 0 && !hasUserInteracted.current && !hasLeftInitialVideoRef.current;
       if (activeVideo !== null && !shouldBlockInitialAutoplay) {
         const v = videoRefs.current[activeVideo]
         if (v && v.paused) v.play().catch(() => { })
+      }
+      // Feed nativo: volver a mostrar y reanudar si no está en candado/pausa.
+      if (exoActiveRef.current) {
+        BuzzyVideoFeed.setVisible({ visible: true }).catch(() => {});
+        if (!feedLockedRef.current && !exoPausedRef.current) {
+          BuzzyVideoFeed.setPaused({ paused: false }).catch(() => {});
+        }
       }
     }
     window.addEventListener('buzzy:pausefeed', onPause)
@@ -1011,7 +1404,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     stories.forEach((story: any) => {
       const userId = story?.user?.id;
       const isSub = story?.privacy === 'subscribers';
-      console.log("[STORY PRIVACY]", story?.user?.username, "→", JSON.stringify(story?.privacy));
       // Etiquetar cada media con el privacy y el created_at de SU historia, para
       // que el label dentro del visor (privacy + "Hace X") dependa de la media
       // actual, no del grupo entero. created_at se usa para calcular el tiempo
@@ -1219,11 +1611,26 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
   // ─── WebSocket events (via singleton context) ─────────────────────────────
 
+  // Stats en VIVO de un video para el carrusel (botones del WebView): combina el
+  // override de likes del socket (likeOverrides) y el comments_count actualizado en
+  // mediaVideo. Así los botones reflejan el tiempo real, no el valor del montaje.
+  const getLiveStats = useCallback((videoId: number) => {
+    const lo = likeOverrides[String(videoId)];
+    const vid = mediaVideo?.find(v => String(v.id) === String(videoId));
+    return {
+      liked: lo ? lo.liked : undefined,
+      likeCount: lo ? lo.like_count : undefined,
+      commentsCount: vid?.comments_count,
+    };
+  }, [likeOverrides, mediaVideo]);
+
   useWsEvent("like_updated", useCallback((data: any) => {
-    // Update likeOverrides instead of mediaVideo to avoid re-assigning video src on Android
+    // Aceptar varios nombres posibles del backend (video_id/video/id, likes/like_count).
+    const key = String(data.video_id ?? data.video ?? data.id);
+    const count = data.likes ?? data.like_count ?? data.likes_count ?? 0;
     setLikeOverrides(prev => ({
       ...prev,
-      [String(data.video_id)]: { liked: data.liked, like_count: data.likes },
+      [key]: { liked: data.liked, like_count: count },
     }));
   }, []));
 
@@ -1298,22 +1705,27 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
   useWsEvent("new_comment", useCallback((data: any) => {
     if (!data?.user_id) return;
+    // Comparar como STRING (el backend puede mandar id numérico o string → === fallaba).
+    const vid = String(data.video_id ?? data.video ?? data.id);
+    const count = data.comments_count ?? data.comment_count ?? data.comments;
     setMedia(prev =>
       prev ? prev.map(video =>
-        video.id === data.video_id
-          ? { ...video, comments_count: data.comments_count }
+        String(video.id) === vid
+          ? { ...video, comments_count: count ?? video.comments_count }
           : video
       ) : prev
     );
-    if (currentVideoIdRef.current?.toString() === data.video_id?.toString()) {
+    if (currentVideoIdRef.current?.toString() === vid) {
       setComments(prev => upsertComment(prev, data));
     }
   }, [setMedia, upsertComment]));
 
   useWsEvent("new_view", useCallback((data: any) => {
+    const vid = String(data.video_id ?? data.video ?? data.id);
+    const count = data.view_acount ?? data.view_count ?? data.views;
     setMedia(prev =>
       prev ? prev.map(video =>
-        video.id === data.video_id ? { ...video, view_acount: data.view_acount } : video
+        String(video.id) === vid ? { ...video, view_acount: count ?? video.view_acount } : video
       ) : prev
     );
   }, [setMedia]));
@@ -1527,18 +1939,13 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const lastVideoProgressUpdate = useRef<Record<string, number>>({});
   const videoProgressUpdateInterval = 200; // Actualizar solo cada 200ms (5 veces por segundo)
 
-  const handleVideoProgress = useCallback((e: React.SyntheticEvent<HTMLVideoElement>, videoId: string) => {
-    const videoElement = e.currentTarget;
-    const currentTime = videoElement.currentTime;
-    const duration = videoElement.duration;
-
+  // Núcleo de progreso, desacoplado del <video> HTML: toma (videoId, segundos,
+  // duración). Lo usan TANTO el <video> HTML (handleVideoProgress) COMO el evento
+  // 'progress' nativo de ExoPlayer (Fase 3.4) → barra + vistas + métricas.
+  const applyVideoProgress = useCallback((videoId: string, currentTime: number, duration: number) => {
     const now = Date.now();
     const lastUpdate = lastVideoProgressUpdate.current[videoId] || 0;
-
-    // Throttle: solo actualizar si ha pasado el intervalo
-    if (now - lastUpdate < videoProgressUpdateInterval) {
-      return;
-    }
+    if (now - lastUpdate < videoProgressUpdateInterval) return;
     lastVideoProgressUpdate.current[videoId] = now;
 
     // Monetization tracking — 50% mark, min 10s for monetizable
@@ -1560,7 +1967,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     const viewThreshold = isFinite(duration) && duration > 0 && duration < 10
       ? duration * 0.8
       : 10;
-    if (videoElement.currentTime >= viewThreshold && !viewedVideos.has(videoId)) {
+    if (currentTime >= viewThreshold && !viewedVideos.has(videoId)) {
       createView({ video_id: videoId })(dispatch)
         .then(() => {})
         .catch((err: any) => console.error("API View Error:", err));
@@ -1570,7 +1977,53 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         return newSet;
       });
     }
+
+    // ── ADS en el FEED NATIVO (Fase 4) ───────────────────────────────────────
+    // En modo nativo (ExoPlayer) el <video> HTML no existe → su onTimeUpdate (que
+    // dispara los ads en web) nunca corre. Aquí replicamos ese trigger desde el
+    // 'progress' del ExoPlayer: a los ~5s, en cada Nth video, respetando cooldown
+    // y "ya mostrado", abrimos el AdOverlay (mismo componente que web). El video
+    // nativo se pausa al abrir y se reanuda al cerrar (lo maneja el efecto de
+    // activeAdIndex). Solo en nativo: en web sigue el path de onTimeUpdate.
+    if (exoActiveRef.current && !isPremiumUserRef.current
+        && currentTime >= 5 && currentTime < 6.5
+        && adsRef.current.length > 0
+        && activeAdIndexRef.current === null
+        && !shownAdsRef.current.has(videoId)) {
+      const cfg = adConfigRef.current;
+      const now2 = Date.now();
+      const cooldownPassed = now2 - lastAdTimestampRef.current > cfg.ad_cooldown_seconds * 1000;
+      // Índice del video en mergedFeed (donde se renderiza el AdOverlay). El ad se
+      // muestra cada Nth video → usamos la posición del video en mergedFeed.
+      const mergedIdx = mergedFeedRef.current.findIndex(
+        (m) => m?.type === 'video' && m.id?.toString() === videoId);
+      // Contamos solo los videos hasta este punto para el "cada Nth" (mergedFeed
+      // intercala ads, así que mergedIdx no sirve para el módulo directamente).
+      const videoOrdinal = mergedIdx >= 0
+        ? mergedFeedRef.current.slice(0, mergedIdx + 1).filter(m => m?.type === 'video').length - 1
+        : -1;
+      if (cooldownPassed && mergedIdx >= 0 && videoOrdinal >= 0
+          && videoOrdinal % cfg.ad_every_nth_video === 0) {
+        const nextAd = pickRandomAd(adsRef.current);
+        if (nextAd) {
+          setSelectedAd(nextAd);
+          setActiveAdIndex(mergedIdx);
+          setShownAds(prev => new Set(prev instanceof Set ? prev : []).add(videoId));
+          setIsMuted(false);       // el ad siempre con sonido (igual que web)
+          setAdSequenceCount(1);
+          setExpandedDescriptions(prev => ({ ...prev, [videoId]: false }));
+        }
+      }
+    }
   }, [viewedVideos, dispatch, trackTimeUpdate]);
+
+  const handleVideoProgress = useCallback((e: React.SyntheticEvent<HTMLVideoElement>, videoId: string) => {
+    const videoElement = e.currentTarget;
+    applyVideoProgress(videoId, videoElement.currentTime, videoElement.duration);
+  }, [applyVideoProgress]);
+
+  // Mantener el espejo actualizado (declarado arriba para el listener 'progress').
+  applyVideoProgressRef.current = applyVideoProgress;
   const handleFollowClick = (userIdToFollow: number, userIdAsString: string, actions: "create" | "delete") => {
     if (!userIdToFollow) {
       return;
@@ -1607,6 +2060,25 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
           // índice ya no existe en mergedFeed (index === -1 o item undefined).
           // Sin esto, más abajo se lee `.id` de undefined → crash del observer.
           if (index < 0 || !videoItem) return;
+
+          // MODO ExoPlayer nativo: el ref es un <div> placeholder (no un <video>).
+          // Solo actualizamos el video activo → el efecto llama setActive() a
+          // ExoPlayer, que reproduce el nativo. NO tocamos .play()/.pause() (el div
+          // no los tiene). Track de intersección para recomendaciones sí.
+          if (exoActiveRef.current) {
+            if (entry.isIntersecting) {
+              if (videoItem.type === 'video') {
+                onIntersectionChange(videoItem.id, true, videoItem.category || null);
+              }
+              if (index !== 0) hasLeftInitialVideoRef.current = true;
+              activeVideoRef.current = index;
+              setActiveVideo(index);
+              setActiveOptionsVideoId(null);
+            } else if (videoItem.type === 'video') {
+              onIntersectionChange(videoItem.id, false, videoItem.category || null);
+            }
+            return;
+          }
 
           if (entry.isIntersecting) {
             // Track intersection for recommendation system
@@ -1734,6 +2206,25 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     if (now - lastClickTimestamp.current < 800) return;
     lastClickTimestamp.current = now;
     if (activeAdIndex !== null) return;
+
+    // ── MODO ExoPlayer nativo: el candado/tap controla el video NATIVO ──────────
+    if (exoActiveRef.current) {
+      hasUserInteracted.current = true;
+      // Primer tap: quitar el candado y reproducir. Taps siguientes: toggle.
+      const wasLocked = feedLockedRef.current;
+      if (wasLocked) { feedLockedRef.current = false; setFeedLocked(false); }
+      const nextPaused = wasLocked ? false : !exoPausedRef.current;
+      exoPausedRef.current = nextPaused;
+      setExoPaused(nextPaused);
+      syncFeedPlaybackState(nextPaused);
+      BuzzyVideoFeed.setPaused({ paused: nextPaused }).catch(() => {});
+      // Al QUITAR el candado por primera vez: arrancar la música nativa del video
+      // activo (estaba bloqueada por feedLocked). En toggle no hace falta (la música
+      // ya está cargada; setPaused la pausa/reanuda con el video).
+      if (wasLocked) applyNativeMusic(mergedFeedRef.current[activeVideoRef.current ?? index]);
+      return;
+    }
+
     const videoElement = videoRefs.current[index];
     if (!videoElement) return;
 
@@ -2666,7 +3157,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
   return (
     <>
-    <div className="relative min-h-dvh overflow-hidden bg-black text-white font-sans">
+    <div className={`relative min-h-dvh overflow-hidden text-white font-sans ${exoActive ? '' : 'bg-black'}`}>
       {/* Story Editor */}
       <AnimatePresence>
         {storyEditorFile && (
@@ -2693,24 +3184,30 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
           de Android un blur animado permanente consume GPU y compite con la
           composición de la surface de video → contribuye al jank/tiling del feed.
           Como el video ocupa toda la pantalla, ese adorno no se ve: lo quitamos. */}
-      <div className="fixed inset-0 z-0 bg-black" />
+      {!exoActive && <div className="fixed inset-0 z-0 bg-black" />}
       <main
         ref={mainRef}
         // h-dvh (dynamic viewport height) en vez de h-screen (100vh): en el WebView
         // de Android 100vh es inestable (cambia con las barras del sistema), lo que
         // colapsa la cadena de alturas y hace que el video del feed arranque
         // "mochado" a media pantalla. 100dvh da una base de altura estable.
-        className="flex h-dvh w-full flex-col overflow-hidden pt-[8.700rem] pb-[calc(env(safe-area-inset-bottom)+2.5rem)]"
+        className="flex h-dvh w-full flex-col overflow-hidden pt-[5rem] pb-[calc(env(safe-area-inset-bottom)+2.5rem)]"
       >
         <section className="flex-1 min-h-0">
           <div
             ref={feedScrollRef}
-            className="flex h-full flex-col overflow-y-auto overscroll-y-contain snap-y snap-mandatory"
+            // Con ExoPlayer nativo: el HTML NO scrollea (overflow-hidden). El SWIPE
+            // lo reenvía el plugin nativo al ViewPager2 (no necesita pointer-events
+            // -none aquí). El TAP de play/pause SÍ lo captura el HTML, por eso NO
+            // ponemos pointer-events-none (eso bloqueaba el tap → video pausado).
+            className={exoActive
+              ? "flex h-full flex-col overflow-hidden"
+              : "flex h-full flex-col overflow-y-auto overscroll-y-contain snap-y snap-mandatory"}
             onScroll={handleFeedScroll}
           >
             {/* ── Offline toast ── */}
             {offlineToast && (
-              <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[9200] flex items-center gap-2 px-4 py-2 rounded-full bg-black/80 backdrop-blur-md border border-white/15 animate-fade-in">
+              <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[9200] flex items-center gap-2 px-4 py-2 rounded-full bg-black/80 backdrop-blur-md border border-white/15 animate-fade-in">
                 <svg className="w-4 h-4 text-yellow-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                   <path d="M18.364 5.636a9 9 0 010 12.728M15.536 8.464a5 5 0 010 7.072M12 12h.01M8.464 15.536a5 5 0 010-7.072M5.636 18.364a9 9 0 010-12.728" strokeLinecap="round" strokeLinejoin="round"/>
                   <line x1="2" y1="2" x2="22" y2="22" strokeLinecap="round"/>
@@ -2720,7 +3217,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
             )}
             {/* ── Pull-to-refresh indicator ── */}
             {(isPullRefreshing || pullProgress > 0) && (
-              <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[9100] flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 backdrop-blur-md border border-white/15"
+              <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[9100] flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 backdrop-blur-md border border-white/15"
                 style={{ opacity: isPullRefreshing ? 1 : pullProgress }}
               >
                 <svg
@@ -2792,10 +3289,32 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
             {mergedFeed.map((data, index) => {
               const videoId = data.type === 'video' ? data.id?.toString() : `ad-${data.id}`;
 
-              // Virtualización: fuera de la ventana se monta un placeholder vacío
-              // de la misma altura/snap. Preserva el índice posicional (videoRefs,
-              // observer, audio, ads) y la altura total del scroll → sin saltos.
-              if (index < windowStart || index > windowEnd) {
+              // En modo ExoPlayer nativo: el video y el scroll los maneja el nativo.
+              // El HTML solo muestra los BOTONES/overlays del video ACTIVO, fijos
+              // encima del video. ANTES renderizábamos SOLO el activo y los demás
+              // `hidden` → al cambiar de video se MONTABA/DESMONTABA el slide, y ese
+              // remontaje hacía repintar el WebView entero → FLASH NEGRO sobre el
+              // video nativo. AHORA mantenemos montados el activo + vecino anterior +
+              // siguiente, y solo cambiamos la OPACIDAD (sin remontar) → sin flash.
+              const exoActiveIdx = activeVideo ?? 0;
+              if (exoActive) {
+                // El slide ACTIVO (por ID, fuente de verdad nativa) + sus vecinos
+                // quedan MONTADOS. El inactivo se oculta con `visibility:hidden`
+                // (NO con opacity ni desmontando):
+                //  • `opacity-0` → crea capa GPU que el WebView Android NO repinta →
+                //    los números quedaban CONGELADOS.
+                //  • desmontar (hidden total) → al volver REMONTA → el WebView repinta
+                //    toda la capa → PESTAÑAZO NEGRO sobre el video.
+                //  • `visibility:hidden` → NO crea capa congelada, el DOM SÍ se
+                //    actualiza, y NO remonta → sin flash Y sin números congelados.
+                const isActiveSlide = activeVideoId ? videoId === activeVideoId : index === exoActiveIdx;
+                const isNeighbor = Math.abs(index - exoActiveIdx) === 1;
+                if (!isActiveSlide && !isNeighbor) {
+                  // Lejos del activo: vacío real (no cuesta).
+                  return <div key={videoId} data-feed-index={index} className="hidden" />;
+                }
+              } else if (index < windowStart || index > windowEnd) {
+                // Virtualización normal (modo WebView): placeholder fuera de ventana.
                 return (
                   <div
                     key={videoId}
@@ -2804,6 +3323,13 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                   />
                 );
               }
+
+              // ¿Es el video ACTIVO? En exo se decide por ID (el índice podía
+              // desfasarse del nativo → botones/label/candado del video equivocado).
+              // En web, por índice. Reemplaza todos los viejos `activeVideo === index`.
+              const isActiveVideo = exoActive
+                ? (activeVideoId ? videoId === activeVideoId : activeVideo === index)
+                : activeVideo === index;
 
               const isExpanded = expandedDescriptions[videoId];
               // While an ad plays on this slide, hide ALL the video's own UI
@@ -2875,7 +3401,16 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 return (
                   <div
                     key={videoId}
-                    className="relative h-full min-h-full w-full snap-start snap-always"
+                    // En modo exo: slide FIJO encima del video nativo, mostrando solo
+                    // los botones/avatar del activo. Empieza DEBAJO del navbar (top =
+                    // --feed-top-inset, la misma altura que el margen del video nativo)
+                    // para que el avatar del autor (top-2 del slide) NO quede tapado.
+                    // Los vecinos quedan MONTADOS pero invisibles (opacity-0) → cambiar
+                    // de video es un toggle de opacidad, NO un remontaje (sin flash).
+                    // En modo WebView: parte del scroll con snap.
+                    className={exoActive
+                      ? `absolute left-0 right-0 bottom-0 w-full ${(isActiveVideo && !feedScrolling) ? '' : 'pointer-events-none'}`
+                      : "relative h-full min-h-full w-full snap-start snap-always"}
                     // OJO (causa de "video por cuadritos" en WebView Android):
                     //  • NADA de `content-visibility:auto` aquí: descarta el render
                     //    del slide fuera de viewport y, al volver con el scroll, lo
@@ -2889,18 +3424,42 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                     //    contenedor del video se recalcula en cada frame del scroll
                     //    (y ni se ve, el video ocupa toda la pantalla).
                     // Solo `contain: layout` (sin `paint`) para acotar el reflow sin
-                    // recortar/diferir el pintado.
-                    style={{ contain: "layout" } as React.CSSProperties}
+                    // recortar/diferir el pintado. En exo, además, `top` baja el slide
+                    // debajo del navbar (avatar del autor visible, no tapado).
+                    // visibility (no opacity/display): el slide inactivo se oculta SIN
+                    // crear capa GPU congelada y SIN remontar → sin números congelados
+                    // ni pestañazo negro. El activo (y no scrolleando) es visible.
+                    style={exoActive
+                      ? { contain: "layout", top: 'var(--feed-top-inset, 0px)',
+                          visibility: (isActiveVideo && !feedScrolling) ? 'visible' : 'hidden' } as React.CSSProperties
+                      : { contain: "layout" } as React.CSSProperties}
                   >
                   <HorizontalCarousel
                     video={data}
                     feedIndex={index}
-                    isActive={activeVideo === index}
+                    hideVideos={exoActive}
+                    isActive={isActiveVideo}
                     isMuted={isMuted}
                     isExpanded={!!expandedDescriptions[videoId]}
-                    isPaused={videosPaused && activeVideo === index}
+                    isPaused={(exoActive ? exoPaused : videosPaused) && activeVideo === index}
                     adActive={adActive}
                     feedScrollRef={feedScrollRef}
+                    onTapToggle={() => {
+                      // Tap sobre un slide horizontal → pausar/reanudar el video nativo,
+                      // igual que un tap en el video vertical. Reusa handleVideoClick, que
+                      // en modo ExoPlayer hace toggle de exoPaused + setPaused nativo (el
+                      // player activo es el del slide horizontal en curso).
+                      if (activeVideo === index) handleVideoClick(index);
+                    }}
+                    onHorizontalDrag={(dragging) => {
+                      // Cortar el audio nativo (video + música) mientras se arrastra de
+                      // lado entre slides del carrusel → sin "feedback" del slide viejo.
+                      if (exoActiveRef.current) {
+                        BuzzyVideoFeed.setScrollPausing({ pausing: dragging }).catch(() => {});
+                      }
+                    }}
+                    getLiveStats={getLiveStats}
+                    onToggleMute={toggleMute}
                     onCarouselAudio={(playing) => {
                       // Belt-and-suspenders: when a slide's track actually starts
                       // (async), make sure the feed music is silenced. Resuming the
@@ -2918,15 +3477,54 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                       currentVideoIdRef.current = String(id)
                       setShowCommentsModal(true)
                       getComment({ video_id: uuid })(dispatch).then((res: any) => {
-                        setComments(Array.isArray(res) ? res : [])
+                        const list = Array.isArray(res) ? res : []
+                        setComments(list)
+                        // Corregir el contador del badge con la cantidad REAL del
+                        // servidor (el comments_count del feed podía venir cacheado/
+                        // viejo → "3" cuando en realidad hay 0).
+                        const realCount = list.length
+                        setMedia(prev => prev ? prev.map(v =>
+                          v.id === id ? { ...v, comments_count: realCount } : v
+                        ) : prev)
                       })
                     }}
                     onGift={(id) => handleVideoGiftClick(id)}
                     onMoreOptions={() => setActiveOptionsVideoId(videoId)}
-                    onSlideChange={(idx, total) => {
+                    onSlideChange={(idx, total, slideUrl, slide, nextSlide) => {
                       setCarouselDots(prev => ({ ...prev, [videoId]: { index: idx, total } }));
                       if (activeVideo === index) {
                         activeCarouselSlideRef.current = idx;
+                        // MODO ExoPlayer nativo: el carrusel horizontal cambia de slide,
+                        // pero el video lo reproduce el nativo. Le pasamos la URL del
+                        // slide para que ExoPlayer cambie de video (slide 0 = video del
+                        // feed, slide >0 = otros videos del mismo usuario).
+                        if (exoActiveRef.current) {
+                          if (slideUrl) BuzzyVideoFeed.playUrl({ url: slideUrl }).catch(() => {});
+                          // Música nativa del slide actual (PASO 6): cada slide es un
+                          // video con su PROPIA canción → applyNativeMusic con el item
+                          // del slide (slide 0 = video del feed; slides extra = su música).
+                          // CRÍTICO: los slides del carrusel vienen del prefetch (useUserVideos)
+                          // y NO pasan por mergedFeed, así que NO traen `type: 'video'`.
+                          // applyNativeMusic descarta cualquier item con type !== 'video'
+                          // (lo trata como "sin música" → silencia). Por eso la música de
+                          // los videos horizontales no se oía. Le inyectamos el type aquí.
+                          const slideItem = idx === 0
+                            ? mergedFeedRef.current[index]
+                            : (slide ? { ...slide, type: 'video' as const } : undefined);
+                          applyNativeMusic(slideItem);
+                          // PRE-BUFERAR la música del SIGUIENTE slide horizontal → al
+                          // llegar suena al instante (baja latencia). Solo si tiene
+                          // pista; si no, no-op. El nativo la libera al scroll vertical.
+                          if (nextSlide?.audio_track_url && !isMuted) {
+                            const ts = Math.max(0, nextSlide.audio_trim_start ?? 0);
+                            const teRaw = nextSlide.audio_trim_end;
+                            const te = (typeof teRaw === 'number' && isFinite(teRaw) && teRaw > ts) ? teRaw : 0;
+                            BuzzyVideoFeed.prefetchMusic({
+                              url: nextSlide.audio_track_url, trimStart: ts, trimEnd: te,
+                            }).catch(() => {});
+                          }
+                          return;
+                        }
                         // Coordinate the feed (slide 0) audio/video with the carousel.
                         // On an extra slide, the SlideVideo owns playback — fully stop
                         // the feed video AND its music so they don't play on top of the
@@ -2946,7 +3544,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                   >
                     <div className="absolute inset-0 overflow-hidden pt-0 group">
 
-                      <div className="relative h-full w-full overflow-hidden bg-black">
+                      <div className={`relative h-full w-full overflow-hidden ${exoActive ? '' : 'bg-black'}`}>
                         {data.media_type === 'image' ? (
                           <img
                             src={data.video?.startsWith("http") ? data.video : getMediaUrl(data.video)}
@@ -2954,6 +3552,13 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                             alt=""
                             loading="lazy"
                           />
+                        ) : exoActive ? (
+                          // ExoPlayer nativo activo: NO renderizamos el <video> ni el
+                          // thumbnail HTML, ni ref. El video + scroll los maneja el
+                          // ViewPager2 nativo, que avisa el cambio de video vía
+                          // 'pageChanged' (no el IntersectionObserver). Sin ref aquí
+                          // para no engañar al código que asume <video> (.pause/.volume).
+                          <div className="absolute inset-0" />
                         ) : (
                           <div className="absolute inset-0 overflow-hidden bg-black">
                             <img
@@ -3016,11 +3621,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                                 }
                               }}
                               onLoadedData={(e) => {
-                                // El video YA tiene primer frame → marcarlo "listo" para
-                                // revelarlo encima del thumbnail. Hasta aquí se ve el
-                                // thumbnail como placeholder (estilo TikTok), nunca la
-                                // surface NEGRA del <video> sin datos.
-                                setReadyVideos(prev => prev.has(videoId) ? prev : new Set(prev).add(videoId));
                                 // Con el candado puesto: asegurar que quede en el frame 0 y
                                 // PAUSADO en cuanto hay datos, ANTES de que el WebView pueda
                                 // autoreproducir → elimina el destello de ~100ms que se veía
@@ -3042,22 +3642,9 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                               }}
                               onPlaying={() => {
                                 syncFeedPlaybackState(false);
-                                // Revelar el video justo cuando YA está pintando movimiento
-                                // real (no solo con datos). Así la transición thumbnail→video
-                                // ocurre con el video ya corriendo → sin el "salto"/frame
-                                // estático que se notaba con onLoadedData.
-                                setReadyVideos(prev => prev.has(videoId) ? prev : new Set(prev).add(videoId));
                               }}
                               onPause={() => {
                                 syncFeedPlaybackState(true);
-                              }}
-                              onEmptied={() => {
-                                // Se le quitó el src (salió de la ventana) → ya no está
-                                // listo; al volver mostrará el thumbnail hasta recargar.
-                                setReadyVideos(prev => {
-                                  if (!prev.has(videoId)) return prev;
-                                  const next = new Set(prev); next.delete(videoId); return next;
-                                });
                               }}
                               onLoadedMetadata={(e) => {
                                 // Populate duration as soon as metadata is ready so the
@@ -3165,11 +3752,11 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                             />
                           )}
                         </AnimatePresence>
-                        {/* Subtle bottom scrim only — just enough to keep controls
-                            readable without tinting the whole video. */}
-                        <div className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-[#050718]/70 to-transparent pointer-events-none"></div>
-                        <div className="absolute inset-0 bg-gradient-to-r from-[#7000ff]/10 to-[#00f0ff]/10 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none">
-                        </div>
+                        {/* Sin tinte sobre el video: se quitó el scrim inferior y el
+                            overlay lateral morado→cyan (inset-0 bg-gradient-to-r) que
+                            oscurecían/teñían el video (más oscuro a un lado). El video se
+                            muestra con su COLOR ORIGINAL. La legibilidad del texto la dan
+                            los drop-shadow de cada texto, no un velo encima del video. */}
                         {/* Single tap capture zone — only source of play/pause taps.
                             Disabled while an ad is active so it never sits over the ad. */}
                         {!adActive && (
@@ -3186,7 +3773,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
                         {/* Lock overlay — visual only, no onClick (tap zone above handles it) */}
                         <AnimatePresence>
-                          {feedLocked && activeVideo === index && data.media_type === 'video' && !adActive && (
+                          {(feedLocked || (exoActive && exoPaused)) && isActiveVideo && data.media_type === 'video' && !adActive && (
                             <motion.div
                               key="feed-lock"
                               initial={{ opacity: 0, scale: 0.8 }}
@@ -3197,7 +3784,9 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                             >
                               <div className="flex items-center justify-center">
                                 <div className="flex h-16 w-16 items-center justify-center rounded-full bg-black/60 backdrop-blur-md border border-white/20">
-                                  <Lock className="h-7 w-7 text-white" />
+                                  {/* Candado en el bloqueo inicial; Pause cuando el usuario
+                                      pausó manualmente el video nativo. */}
+                                  {feedLocked ? <Lock className="h-7 w-7 text-white" /> : <Pause className="h-7 w-7 text-white" fill="white" />}
                                 </div>
                               </div>
                             </motion.div>
@@ -3284,7 +3873,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                         </div>
 
 {/* FOOTER INFERIOR — música + audio + dots */}
-                        <div className={`absolute -bottom-6 left-0 right-0 px-3 pb-[calc(env(safe-area-inset-bottom)+2.85rem)] pt-10 pointer-events-none flex flex-col justify-end gap-2 bg-gradient-to-t from-black/70 via-black/20 to-transparent transition-opacity ${isExpanded ? 'z-[80]' : 'z-20'} ${adActive ? 'opacity-0 pointer-events-none' : ''}`}>
+                        <div className={`absolute bottom-8 left-0 right-0 px-3 pb-[calc(env(safe-area-inset-bottom)+2.85rem)] pt-10 pointer-events-none flex flex-col justify-end gap-2 transition-opacity ${isExpanded ? 'z-[80]' : 'z-20'} ${adActive ? 'opacity-0 pointer-events-none' : ''}`}>
 
                           {/* Dots carrusel */}
                           {carouselDots[videoId] && carouselDots[videoId].total > 1 && (
@@ -3309,13 +3898,13 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                               Bajada pegada al borde inferior (mt-2 mb-[-22px]). */}
                           <div
                             className="relative flex items-center justify-between w-full pointer-events-auto mt-2 mb-[-22px]"
-                            style={{
-                              transform: 'translateZ(0)',
-                              backfaceVisibility: 'hidden',
-                              willChange: 'transform, opacity',
-                              isolation: 'isolate',
-                              contain: 'paint',
-                            }}
+                            // OJO: NADA de `contain:paint` / `willChange` / `isolation`
+                            // / `translateZ` aquí. En el WebView de Android creaban una
+                            // capa GPU AISLADA que NO se re-pintaba cuando cambiaba solo
+                            // el TEXTO (el número de likes/comments/views): el DOM
+                            // cambiaba pero la capa mostraba el frame viejo → "números
+                            // congelados" pese a que el WebSocket actualizaba el estado.
+                            style={{}}
                           >
                             {/* Botón seguir (movido aquí abajo a la izquierda) */}
                             <div className="h-9 w-9 flex-shrink-0 flex items-center justify-center">
@@ -3345,7 +3934,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                               </AnimatePresence>
                             </div>
 
-                            {data.media_type === 'video' && data.audio_track_title && activeVideo === index && !isExpanded && (
+                            {data.media_type === 'video' && data.audio_track_title && isActiveVideo && !isExpanded && (
                               <div className="mx-auto flex max-w-[70%] items-center gap-2 rounded-full bg-black/20 px-2 py-1 border border-white/10">
                                 <Music2 className="h-3 w-3 text-cyan-400 shrink-0" />
                                 <span className="truncate text-[10px] font-bold uppercase tracking-widest text-white/80">
@@ -3435,7 +4024,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                               <div className="relative flex h-10 w-10 items-center justify-center rounded-full bg-white/10">
                                 <MessageCircle className="h-5 w-5 text-white" />
                                 <AnimatePresence>
-                                  {activeVideo === index && (data.comments_count || 0) > 0 && (
+                                  {isActiveVideo && (data.comments_count || 0) > 0 && (
                                     <motion.div
                                       key="comment-badge"
                                       initial={{ scale: 0, opacity: 0 }}
@@ -3528,18 +4117,18 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                           {/* 3. COLUMNA DE INTERACCIONES (DERECHA) */}
                           <div
                             className={`
-                              absolute right-1 bottom-[calc(env(safe-area-inset-bottom)+5.5rem)] flex flex-col items-center gap-3
+                              absolute right-1 bottom-[calc(env(safe-area-inset-bottom)+4.5rem)] flex flex-col items-center gap-3.5
                               pb-[env(safe-area-inset-bottom)+50px]
                               transition-all duration-300
                               ${isExpanded || adActive ? 'pointer-events-none z-[65] opacity-0' : 'pointer-events-auto z-[70] opacity-100'}
                             `}
-                            style={{
-                              transform: 'translateZ(0)',
-                              backfaceVisibility: 'hidden',
-                              willChange: 'transform, opacity',
-                              isolation: 'isolate',
-                              contain: 'paint',
-                            }}
+                            // OJO: NADA de `contain:paint` / `willChange` / `isolation`
+                            // / `translateZ` aquí. En el WebView de Android creaban una
+                            // capa GPU AISLADA que NO se re-pintaba cuando cambiaba solo
+                            // el TEXTO (el número de likes/comments/views): el DOM
+                            // cambiaba pero la capa mostraba el frame viejo → "números
+                            // congelados" pese a que el WebSocket actualizaba el estado.
+                            style={{}}
                           >
 
                             {/* Like */}

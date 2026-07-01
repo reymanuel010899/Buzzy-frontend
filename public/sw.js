@@ -52,15 +52,23 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Audio tracks → Cache First (el audio de un video publicado nunca cambia)
-  if (url.pathname.includes('/media/audio_tracks/')) {
-    event.respondWith(cacheFirst(request, AUDIO_CACHE));
+  // Audio tracks → Cache First (el audio de un video publicado nunca cambia).
+  // La música ahora va FIRMADA (/media-signed/audio_tracks/...?expires=&sig=); la
+  // firma cambia en cada feed, así que indexamos el cache por la RUTA (key estable)
+  // y NO por el Request completo — si no, nunca acertaría y se re-descargaría.
+  if (
+    url.pathname.includes('/media/audio_tracks/') ||
+    url.pathname.includes('/media-signed/audio_tracks/')
+  ) {
+    event.respondWith(cacheFirst(request, AUDIO_CACHE, url.pathname));
     return;
   }
 
-  // Videos y media pesada → Network First con fallback al cache
-  if (url.pathname.startsWith('/media/')) {
-    event.respondWith(networkFirst(request, MEDIA_CACHE));
+  // Videos y media pesada → Network First con fallback al cache. Para video firmado
+  // usamos la ruta como key (la firma vencida igual la re-firma el cliente, pero si
+  // ya bajamos los bytes offline, se reusan por ruta).
+  if (url.pathname.startsWith('/media/') || url.pathname.startsWith('/media-signed/')) {
+    event.respondWith(networkFirst(request, MEDIA_CACHE, url.pathname));
     return;
   }
 
@@ -88,14 +96,18 @@ self.addEventListener('fetch', (event) => {
 });
 
 // ── Estrategia Cache First ────────────────────────────────────────────────────
-async function cacheFirst(request, cacheName) {
-  const cached = await caches.match(request);
+// `key` opcional: cuando la URL lleva firma variable (?expires=&sig=), pasamos la
+// RUTA para indexar el cache de forma estable. El fetch sigue usando el `request`
+// firmado (que el servidor valida); el put/match se hacen contra la key.
+async function cacheFirst(request, cacheName, key) {
+  const matchKey = key || request;
+  const cached = await caches.match(matchKey);
   if (cached) return cached;
   try {
     const response = await fetch(request);
     if (response.ok) {
       const cache = await caches.open(cacheName);
-      cache.put(request, response.clone());
+      cache.put(matchKey, response.clone());
     }
     return response;
   } catch {
@@ -104,16 +116,17 @@ async function cacheFirst(request, cacheName) {
 }
 
 // ── Estrategia Network First ──────────────────────────────────────────────────
-async function networkFirst(request, cacheName) {
+async function networkFirst(request, cacheName, key) {
+  const matchKey = key || request;
   try {
     const response = await fetch(request);
     if (response.ok) {
       const cache = await caches.open(cacheName);
-      cache.put(request, response.clone());
+      cache.put(matchKey, response.clone());
     }
     return response;
   } catch {
-    const cached = await caches.match(request);
+    const cached = await caches.match(matchKey);
     return cached ?? Response.error();
   }
 }

@@ -1,8 +1,8 @@
 "use client"
 
-import React, { useRef, useState, useEffect, useCallback } from "react"
+import React, { useRef, useState, useEffect, useCallback, useReducer } from "react"
 import { AnimatePresence, motion } from "framer-motion"
-import { Heart, MessageCircle, Eye, Music2, Forward } from "lucide-react"
+import { Heart, MessageCircle, Eye, Music2, Forward, Volume2, VolumeX } from "lucide-react"
 import { Link } from "react-router-dom"
 import { Video } from "./main.interface"
 import { useUserVideos } from "../../hooks/useUserVideos"
@@ -16,7 +16,11 @@ const clampWords = (text: string, maxWords = 4): string => {
 
 const HINT_KEY = "buzzy_swipe_hint_seen"
 const SWIPE_COMMIT = 60
-const ANGLE_MAX = 40
+// Umbral horizontal/vertical del carrusel. Alineado con el listener nativo del WebView
+// (VideoFeedPlugin), que reenvía al ViewPager2 vertical solo si dy > dx*1.2 (~50°). Con
+// el mismo corte aquí (≤50° = horizontal), NO queda una franja ambigua donde el feed
+// vertical y el carrusel se muevan a la vez ("se arrastran 2 al mismo tiempo").
+const ANGLE_MAX = 50
 
 interface SlideActionsProps {
   video: Video
@@ -24,12 +28,24 @@ interface SlideActionsProps {
   onComment: (uuid: string, id: number) => void
   onGift: (id: number) => void
   onMoreOptions?: () => void
+  // Override en VIVO desde el padre (que escucha el WebSocket). Si viene definido,
+  // MANDA sobre el estado local → así los likes/comentarios en tiempo real se ven.
+  likedOverride?: boolean
+  likeCountOverride?: number
+  commentsCountOverride?: number
+  isMuted?: boolean
+  onToggleMute?: () => void
 }
 
 // Panel de acciones — copia exacta del video principal
-function SlideActions({ video, onLike, onComment, onGift, onMoreOptions }: SlideActionsProps) {
-  const [liked, setLiked] = useState(video.liked ?? false)
-  const [likeCount, setLikeCount] = useState(video.like_count ?? 0)
+function SlideActions({ video, onLike, onComment, onGift, onMoreOptions, likedOverride, likeCountOverride, commentsCountOverride, isMuted, onToggleMute }: SlideActionsProps) {
+  const [likedLocal, setLiked] = useState(video.liked ?? false)
+  const [likeCountLocal, setLikeCount] = useState(video.like_count ?? 0)
+
+  // El override del socket (si llega) tiene prioridad; si no, el estado local.
+  const liked = likedOverride !== undefined ? likedOverride : likedLocal
+  const likeCount = likeCountOverride !== undefined ? likeCountOverride : likeCountLocal
+  const commentsCount = commentsCountOverride !== undefined ? commentsCountOverride : (video.comments_count ?? 0)
 
   const handleLike = () => {
     setLiked(p => !p)
@@ -38,7 +54,7 @@ function SlideActions({ video, onLike, onComment, onGift, onMoreOptions }: Slide
   }
 
   return (
-    <div className="absolute right-1 bottom-[calc(env(safe-area-inset-bottom)+5.5rem)] flex flex-col items-center gap-3 z-[70] pointer-events-auto pb-[env(safe-area-inset-bottom)+50px]">
+    <div className="absolute right-1 bottom-[calc(env(safe-area-inset-bottom)+4.5rem)] flex flex-col items-center gap-3.5 z-[70] pointer-events-auto pb-[env(safe-area-inset-bottom)+50px]">
 
       {/* Like */}
       <motion.button whileTap={{ scale: 0.9 }} onClick={handleLike} className="relative flex flex-col items-center gap-1">
@@ -56,13 +72,13 @@ function SlideActions({ video, onLike, onComment, onGift, onMoreOptions }: Slide
       <motion.button whileTap={{ scale: 0.92 }} onClick={() => onComment(video.uuid ?? String(video.id), video.id)} className="flex flex-col items-center relative">
         <div className="relative flex h-7 w-7 items-center justify-center rounded-full">
           <MessageCircle className="h-6 w-8" />
-          {(video.comments_count || 0) > 0 && (
+          {commentsCount > 0 && (
             <div className="absolute -top-1 -right-1 min-h-[8px] min-w-[8px] flex items-center justify-center rounded-full bg-cyan-500 text-[10px] font-bold px-1 shadow-cyan-500/40">
-              {(video.comments_count ?? 0) > 9 ? "9+" : video.comments_count}
+              {commentsCount > 9 ? "9+" : commentsCount}
             </div>
           )}
         </div>
-        <span className="text-xs mt-0.5 text-white">{video.comments_count || 0}</span>
+        <span className="text-xs mt-0.5 text-white">{commentsCount}</span>
       </motion.button>
 
       {/* Views */}
@@ -96,6 +112,15 @@ function SlideActions({ video, onLike, onComment, onGift, onMoreOptions }: Slide
           <Forward className="h-5 w-5 text-white/70" />
         </div>
       </motion.button>
+
+      {/* Mute — faltaba en el carrusel (solo lo tenía el video principal). */}
+      <motion.button
+        whileTap={{ scale: 0.9 }}
+        onClick={(e) => { e.stopPropagation(); onToggleMute?.(); }}
+        className="h-9 w-9 flex items-center justify-center rounded-full text-white drop-shadow-lg"
+      >
+        {isMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+      </motion.button>
     </div>
   )
 }
@@ -103,18 +128,33 @@ function SlideActions({ video, onLike, onComment, onGift, onMoreOptions }: Slide
 interface Props {
   video: Video
   feedIndex: number
+  // Cuando ExoPlayer nativo reproduce, ocultamos los <video> HTML (slide 0 +
+  // carrusel) para no ver doble video. Los botones/overlays siguen visibles.
+  hideVideos?: boolean
   isActive: boolean
   isMuted: boolean
   isExpanded: boolean
   isPaused: boolean
   adActive?: boolean
   feedScrollRef: React.RefObject<HTMLDivElement>
+  // Stats en VIVO de un video (desde el padre, que escucha el WebSocket). Devuelve
+  // el like/comment actualizado en tiempo real, no el cacheado del montaje.
+  getLiveStats?: (videoId: number) => { liked?: boolean; likeCount?: number; commentsCount?: number } | undefined
+  onToggleMute?: () => void
   onLike: (uuid: string, id: number) => void
   onComment: (uuid: string, id: number) => void
   onGift: (id: number) => void
-  onSlideChange?: (index: number, total: number) => void
+  onSlideChange?: (index: number, total: number, videoUrl?: string, slide?: Video, nextSlide?: Video) => void
+  // Avisa cuando empieza/termina un arrastre HORIZONTAL → el padre corta el audio
+  // nativo (video + música) durante la transición para no oír "feedback" del slide
+  // que se deja. true al confirmar dirección horizontal, false al soltar.
+  onHorizontalDrag?: (dragging: boolean) => void
   onCarouselAudio?: (playing: boolean) => void
   onMoreOptions?: () => void
+  // Tap (sin arrastre) sobre el área del video → pausar/reanudar. En slide 0 lo maneja
+  // el video del feed; en los slides extra el carrusel no tenía forma de pausar. Este
+  // callback lo dispara el padre (mismo toggle que el vertical).
+  onTapToggle?: () => void
   children: React.ReactNode
 }
 
@@ -243,8 +283,15 @@ const SlideVideo = React.memo(function SlideVideo({ video, isMuted, isVisible, i
   )
 })
 
-function SlideWithUI({ video: s, isMuted, isVisible, isNear, isPaused, onLike, onComment, onGift, onCarouselAudio, onMoreOptions }: {
+function SlideWithUI({ video: s, isMuted, isVisible, isNear, isPaused, hideVideo, frameReady, getLiveStats, onToggleMute, onLike, onComment, onGift, onCarouselAudio, onMoreOptions }: {
   video: Video; isMuted: boolean; isVisible: boolean; isNear: boolean; isPaused: boolean;
+  hideVideo?: boolean;
+  // ¿El ExoPlayer nativo ya pintó el frame del video de ESTE slide? Solo cuando es
+  // true (y el slide es visible) desvanecemos el thumbnail → sin destello del video
+  // anterior. En modo web (hideVideo=false) no se usa.
+  frameReady?: boolean;
+  getLiveStats?: (videoId: number) => { liked?: boolean; likeCount?: number; commentsCount?: number } | undefined;
+  onToggleMute?: () => void;
   onLike: (uuid: string, id: number) => void;
   onComment: (uuid: string, id: number) => void;
   onGift: (id: number) => void;
@@ -254,11 +301,42 @@ function SlideWithUI({ video: s, isMuted, isVisible, isNear, isPaused, onLike, o
   const [expanded, setExpanded] = useState(false)
 
   return (
-    <div className="relative h-full w-full bg-black">
-      <SlideVideo video={s} isMuted={isMuted} isVisible={isVisible} isNear={isNear} onCarouselAudio={onCarouselAudio} />
+    <div className={`relative h-full w-full ${hideVideo ? '' : 'bg-black'}`}>
+      {/* En modo ExoPlayer nativo NO montamos el <video> HTML (el nativo lo
+          reproduce). Solo el UI/botones del slide. */}
+      {!hideVideo && (
+        <SlideVideo video={s} isMuted={isMuted} isVisible={isVisible} isNear={isNear} onCarouselAudio={onCarouselAudio} />
+      )}
 
-      {/* Gradiente inferior */}
-      <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-black/70 to-transparent pointer-events-none" />
+      {/* FRAME del slide en modo nativo: el ExoPlayer dibuja UN solo video detrás
+          del WebView. Al arrastrar de lado se vería el MISMO video (el activo) en
+          el slide destino. Para dar la impresión de "otro video" (como el vertical),
+          en los slides NO visibles mostramos su thumbnail. Al SOLTAR, playUrl cambia
+          el ExoPlayer al video del slide y este frame se vuelve transparente (deja
+          ver el nativo). El slide visible NO pinta nada → se ve el ExoPlayer real. */}
+      {hideVideo && (
+        <img
+          src={isNear ? (s.thumbnail_url?.startsWith("http") ? s.thumbnail_url : getMediaUrl(s.thumbnail_url)) : undefined}
+          alt=""
+          aria-hidden="true"
+          className="absolute inset-0 h-full w-full object-cover pointer-events-none"
+          // El thumbnail TAPA el ExoPlayer salvo cuando el slide está activo Y QUIETO.
+          // La clase `.carousel-dragging` (en el strip, vía CSS) lo fuerza opaco MIENTRAS
+          // se arrastra → no se ve el ExoPlayer reproduciendo el video que dejas. Al
+          // quedar quieto, este `isVisible` lo desvanece (delay 420ms) y revela el nativo.
+          data-slide-thumb={(isVisible && frameReady) ? "active" : "idle"}
+          style={{
+            // Solo revelar el nativo (opacity 0) cuando el slide es visible Y el
+            // ExoPlayer confirmó su 1er frame. Si aún no (frameReady=false), el
+            // thumbnail sigue opaco → no se ve el frame del video anterior.
+            opacity: (isVisible && frameReady) ? 0 : 1,
+            transition: (isVisible && frameReady) ? "opacity 120ms ease-out" : "opacity 120ms",
+          }}
+        />
+      )}
+
+      {/* Sin gradiente inferior: el video se muestra con su COLOR ORIGINAL, sin velo
+          oscuro. La legibilidad del texto la dan los drop-shadow de cada texto. */}
 
       {/* Pill — arriba centro, abre descripción */}
       {s.description && (
@@ -288,8 +366,12 @@ function SlideWithUI({ video: s, isMuted, isVisible, isNear, isPaused, onLike, o
         </motion.div>
       )}
 
-      {/* Avatar + follow — arriba izquierda / derecha */}
-      <div className="absolute top-2 left-3 right-3 z-50 flex items-center justify-between pointer-events-auto">
+      {/* Avatar + follow — DEBAJO del navbar (no tapado). `--author-top` la setea el
+          feed: en nativo el slide ya baja → 8px; en web → altura del navbar + 8px. */}
+      <div
+        className="absolute left-3 right-3 z-50 flex items-center justify-between pointer-events-auto"
+        style={{ top: 'var(--author-top, 0.5rem)' }}
+      >
         <Link
           to={`/profile/${s.user_id.username}`}
           onClick={e => e.stopPropagation()}
@@ -322,8 +404,9 @@ function SlideWithUI({ video: s, isMuted, isVisible, isNear, isPaused, onLike, o
         )}
       </div>
 
-      {/* Footer — pill de música centrado (el disco se movió arriba a la derecha) */}
-      <div className="absolute bottom-[calc(env(safe-area-inset-bottom)+2.5rem)] left-3 right-3 z-30 pointer-events-none">
+      {/* Footer — pill de música centrado. Subido por ENCIMA del nav inferior
+          (antes 2.5rem → el footer/nav lo tapaba en videos con carrusel). */}
+      <div className="absolute bottom-[calc(env(safe-area-inset-bottom)+8rem)] left-3 right-3 z-30 pointer-events-none">
         <div className="relative flex items-center justify-center w-full">
           {s.audio_track_title && (
             <div className="flex max-w-[80%] items-center gap-2 rounded-full bg-black/15 px-2 py-1 backdrop-blur-sm">
@@ -345,7 +428,18 @@ function SlideWithUI({ video: s, isMuted, isVisible, isNear, isPaused, onLike, o
       </div>
 
       {/* Panel de acciones */}
-      <SlideActions video={s} onLike={onLike} onComment={onComment} onGift={onGift} onMoreOptions={onMoreOptions} />
+      <SlideActions
+        video={s}
+        likedOverride={getLiveStats?.(s.id)?.liked}
+        likeCountOverride={getLiveStats?.(s.id)?.likeCount}
+        commentsCountOverride={getLiveStats?.(s.id)?.commentsCount}
+        isMuted={isMuted}
+        onToggleMute={onToggleMute}
+        onLike={onLike}
+        onComment={onComment}
+        onGift={onGift}
+        onMoreOptions={onMoreOptions}
+      />
     </div>
   )
 }
@@ -371,8 +465,11 @@ function SwipeHint({ show }: { show: boolean }) {
   )
 }
 
-export default function HorizontalCarousel({ video, isActive, isMuted, isExpanded: _isExpanded, isPaused, adActive, onLike, onComment, onGift, onSlideChange, onCarouselAudio, onMoreOptions, children }: Props) {
+export default function HorizontalCarousel({ video, hideVideos, isActive, isMuted, isExpanded: _isExpanded, isPaused, adActive, getLiveStats, onToggleMute, onLike, onComment, onGift, onSlideChange, onHorizontalDrag, onCarouselAudio, onMoreOptions, onTapToggle, children }: Props) {
   const { getFromCache, expandInBackground } = useUserVideos()
+  // Mirror de onTapToggle para el touch handler nativo (registrado una sola vez).
+  const onTapToggleRef = useRef(onTapToggle)
+  onTapToggleRef.current = onTapToggle
 
   // Cargar desde cache inmediatamente — sin esperar fetch
   const [userVideos, setUserVideos] = useState<Video[]>(() => getFromCache(video.user_id.username))
@@ -381,6 +478,14 @@ export default function HorizontalCarousel({ video, isActive, isMuted, isExpande
 
   const [slideIndex, setSlideIndex] = useState(0)
   const [showHint, setShowHint] = useState(false)
+  // ¿El ExoPlayer nativo ya pintó el frame del slide ACTUAL? Mientras sea false, el
+  // thumbnail del slide activo se mantiene OPACO (tapa el nativo) → no se ve el frame
+  // del slide vecino que prepare() aún tiene cargado. Se pone false al cambiar de
+  // slide y true cuando el nativo emite 'frameReady'. En modo NO nativo (web) no
+  // aplica: el <video> HTML del propio slide se muestra solo.
+  const [nativeFrameReady, setNativeFrameReady] = useState(true)
+  const nativeFrameReadyRef = useRef(true)
+  nativeFrameReadyRef.current = nativeFrameReady
 
   const containerRef = useRef<HTMLDivElement>(null)
   // Ref al "strip" (la tira con todos los slides). Durante el arrastre movemos su
@@ -394,6 +499,10 @@ export default function HorizontalCarousel({ video, isActive, isMuted, isExpande
   const directionRef = useRef<"h" | "v" | null>(null)
   const slideRef = useRef(slideIndex)
   slideRef.current = slideIndex
+  // Mirror de onHorizontalDrag para usarlo dentro de los listeners táctiles nativos
+  // (registrados una sola vez) sin recrearlos en cada render.
+  const onHorizontalDragRef = useRef(onHorizontalDrag)
+  onHorizontalDragRef.current = onHorizontalDrag
 
   // Slides actuales — slide 0 = video del feed, resto = del mismo usuario (sin duplicar el video principal)
   const slides = [video, ...userVideos.filter((v) => v.id !== video.id)]
@@ -418,9 +527,43 @@ export default function HorizontalCarousel({ video, isActive, isMuted, isExpande
       `translateX(${(dragPctValue - slideRef.current * 100) / (n + 1)}%)`
   }, [])
 
+  // ¿Hay un gesto/animación de arrastre en curso? Mientras sea true, el DOM (vía
+  // applyStripTransform) es el ÚNICO dueño del transform del strip; el render de
+  // React NO debe escribir su transform inline o pisaría el del DOM a media
+  // animación → "el frame se vuelve loco" al soltar sin completar el swipe.
+  const isDraggingRef = useRef(false)
+  // Timer que libera isDraggingRef cuando la animación de soltar/commit termina.
+  const settleTimerRef = useRef<number>(0)
+  // Forzar un re-render puntual cuando termina la animación, para que el style de
+  // React (autoritativo en reposo) vuelva a coincidir EXACTAMENTE con el DOM.
+  const [, forceSettle] = useReducer((x: number) => x + 1, 0)
+
+  // Si el nº de slides cambia (el cache trae más videos del usuario: extraCount 1→4),
+  // el denominador de la fórmula del transform cambia → el strip saltaría de posición.
+  // Reaplicamos el transform del DOM con el nuevo extraCount para mantener el slide
+  // actual EN SU SITIO (sin transición → sin animar el salto del re-cálculo).
   useEffect(() => {
-    onSlideChange?.(slideIndex, slides.length)
-  }, [slideIndex, slides.length])
+    if (isDraggingRef.current) return
+    applyStripTransform(0, false)
+  }, [slides.length, slideIndex, applyStripTransform])
+
+  // Notificar el cambio de slide SOLO cuando cambia el índice real, NO cuando crece
+  // slides.length (el cache trae más videos del usuario → length 2→5). Antes este
+  // effect dependía de slides.length y se re-disparaba para el MISMO slideIndex →
+  // onSlideChange→playUrl re-descargaba el mismo video N veces → el servidor
+  // respondía 429 (Too Many Requests) y el video horizontal se trababa.
+  const lastNotifiedSlideRef = useRef<number>(-1)
+  useEffect(() => {
+    if (lastNotifiedSlideRef.current === slideIndex) return
+    lastNotifiedSlideRef.current = slideIndex
+    const s = slides[slideIndex];
+    const url = s?.video ? (s.video.startsWith('http') ? s.video : getMediaUrl(s.video)) : undefined;
+    // nextSlide: el siguiente slide horizontal → su música se PRE-BUFERA en nativo
+    // para que al llegar suene al instante (baja latencia).
+    const nextSlide = slides[slideIndex + 1];
+    onSlideChange?.(slideIndex, slides.length, url, s, nextSlide)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slideIndex])
 
   // Escuchar el evento global de cache — se dispara cuando prefetchBatch termina
   useEffect(() => {
@@ -433,9 +576,29 @@ export default function HorizontalCarousel({ video, isActive, isMuted, isExpande
     return () => window.removeEventListener("buzzy:usercache", handler)
   }, [video.user_id.username, getFromCache])
 
+  // Frame nativo LISTO: el ExoPlayer pintó el 1er frame del video del slide actual
+  // (tras playUrl). Recién ahí revelamos el nativo (desvanecemos el thumbnail). Solo
+  // el carrusel ACTIVO reacciona: uno inactivo no debe revelar nada. Sin este gate el
+  // thumbnail se iba a un timer ciego de 420ms y, si playUrl tardaba más, se veía el
+  // frame del video principal ("feedback") en el slide.
+  useEffect(() => {
+    if (!isActive) return
+    const onFrame = () => {
+      nativeFrameReadyRef.current = true
+      setNativeFrameReady(true)
+    }
+    window.addEventListener("buzzy:nativeframeready", onFrame)
+    return () => window.removeEventListener("buzzy:nativeframeready", onFrame)
+  }, [isActive])
+
   // Reset al cambiar video principal
   useEffect(() => {
     setSlideIndex(0)
+    lastNotifiedSlideRef.current = 0 // nuevo video → su slide 0 ya es el activo nativo
+    // Slide 0 (video del feed) ya lo reproduce el nativo desde el arranque → su frame
+    // ya está listo (no hubo playUrl pendiente). No lo tapamos.
+    nativeFrameReadyRef.current = true
+    setNativeFrameReady(true)
     setUserVideos(getFromCache(video.user_id.username))
   }, [video.id, video.user_id.username, getFromCache])
 
@@ -447,6 +610,10 @@ export default function HorizontalCarousel({ video, isActive, isMuted, isExpande
     setSlideIndex(0)
     touchStart.current = null
     directionRef.current = null
+    // Cancelar cualquier gesto/animación en curso al salir del video → no dejar
+    // isDraggingRef pegado (bloquearía el transform de React al volver).
+    isDraggingRef.current = false
+    window.clearTimeout(settleTimerRef.current)
   }, [isActive])
 
   // Hint primera vez
@@ -462,10 +629,19 @@ export default function HorizontalCarousel({ video, isActive, isMuted, isExpande
   const commitSlide = useCallback((newIdx: number) => {
     const maxIdx = slidesLenRef.current - 1
     const clamped = Math.max(0, Math.min(newIdx, maxIdx))
+    const changed = clamped !== slideRef.current
     // Actualizar el ref ANTES de animar el strip al destino (con transición),
     // para que el DOM llegue suave al slide nuevo sin esperar el re-render.
     slideRef.current = clamped
     applyStripTransform(0, true)
+    // CAMBIO REAL de slide → el ExoPlayer nativo AÚN muestra el video anterior
+    // (playUrl es async). Marcar el frame como NO listo → el thumbnail del nuevo
+    // slide se mantiene OPACO (tapa el nativo) hasta que llegue 'frameReady' del
+    // video correcto. Esto elimina el destello del "video principal" en los slides.
+    if (changed) {
+      nativeFrameReadyRef.current = false
+      setNativeFrameReady(false)
+    }
     // React reconcilia el estado lógico (mismo valor → el style prop coincide con
     // lo que ya pusimos en el DOM, sin saltos).
     setSlideIndex(clamped)
@@ -493,6 +669,16 @@ export default function HorizontalCarousel({ video, isActive, isMuted, isExpande
         if (dist < 5) return
         const angle = Math.abs(Math.atan2(Math.abs(dy), Math.abs(dx)) * (180 / Math.PI))
         directionRef.current = angle > ANGLE_MAX ? "v" : "h"
+        // Confirmado arrastre HORIZONTAL → cortar YA el audio nativo (video + música)
+        // del slide que se deja. Cero "feedback" durante la transición horizontal.
+        if (directionRef.current === "h") {
+          isDraggingRef.current = true   // el DOM manda el transform mientras se arrastra
+          // Tapar TODOS los thumbnails (clase CSS aplicada al DOM DIRECTO, SIN setState):
+          // un re-render de React a mitad del gesto causaba un FRENO. Con la clase, los
+          // thumbnails se vuelven opacos por CSS sin reconciliar el carrusel.
+          stripRef.current?.classList.add('carousel-dragging')
+          onHorizontalDragRef.current?.(true)
+        }
       }
 
       if (directionRef.current === "v") return
@@ -516,20 +702,32 @@ export default function HorizontalCarousel({ video, isActive, isMuted, isExpande
     const onEnd = (e: TouchEvent) => {
       if (!touchStart.current) return
       const dx = e.changedTouches[0].clientX - touchStart.current.x
+      const dy = e.changedTouches[0].clientY - touchStart.current.y
       touchStart.current = null
 
       if (directionRef.current !== "h") {
-        // Fue gesto vertical: dejar el strip donde está (sin desplazamiento).
+        // TAP (no arrastre): el dedo casi no se movió → dirección nunca se decidió.
+        // Toggle de pausa/reproducción (mismo comportamiento que el video vertical).
+        // Umbral 10px para no confundir un tap con el arranque de un swipe.
+        if (directionRef.current === null && Math.abs(dx) < 10 && Math.abs(dy) < 10) {
+          onTapToggleRef.current?.()
+        }
+        // Fue gesto vertical o tap: dejar el strip donde está (sin desplazamiento).
         applyStripTransform(0, true); directionRef.current = null; return
       }
       directionRef.current = null
+      const committed = Math.abs(dx) >= SWIPE_COMMIT
 
-      if (Math.abs(dx) >= SWIPE_COMMIT) {
+      if (committed) {
+        // CAMBIA de slide. NO reanudar el audio aquí (onHorizontalDrag(false)): eso
+        // reanudaría el player activo que AÚN tiene el video ANTERIOR cargado → se
+        // reproducía a pantalla completa un instante antes de que playUrl cargue el
+        // nuevo. En su lugar, commitSlide→onSlideChange→playUrl carga y reproduce el
+        // NUEVO video. El anterior queda pausado (scrollPausing sigue true) hasta que
+        // playUrl lo reemplaza → nunca se ve reproducir el viejo.
         if (dx < 0) {
-          // Swipe izquierda → siguiente
           const nextIdx = slideRef.current + 1
           commitSlide(nextIdx)
-          // Al llegar al slide 1, expandir a 5 en background (el evento notifica cuando llega)
           if (nextIdx === 1) {
             const excludeIds = [video.id, ...userVideosRef.current.map(v => v.id)]
             expandInBackground(video.user_id.username, excludeIds)
@@ -538,9 +736,26 @@ export default function HorizontalCarousel({ video, isActive, isMuted, isExpande
           commitSlide(slideRef.current - 1)
         }
       } else {
-        // No alcanzó el umbral: animar de vuelta al slide actual.
+        // SNAP-BACK: vuelves al MISMO slide → no hay playUrl. Reanudar el audio del
+        // video actual (estaba cortado por scrollPausing durante el arrastre).
+        onHorizontalDragRef.current?.(false)
         applyStripTransform(0, true)
       }
+
+      // La animación (commit o snap-back) dura ~180ms. Mantener isDraggingRef=true
+      // hasta que ACABE para que React no reescriba el transform a media animación
+      // (lo que producía el salto). Al terminar, soltar el flag y forzar un settle:
+      // React reescribe el transform autoritativo, que ya coincide con el DOM.
+      window.clearTimeout(settleTimerRef.current)
+      settleTimerRef.current = window.setTimeout(() => {
+        isDraggingRef.current = false
+        // Fin del arrastre → quitar la clase (DOM directo) para que el slide activo y
+        // QUIETO revele el ExoPlayer. Su thumbnail se desvanece con su delay de 420ms
+        // (espera a que el nativo tenga el frame del nuevo video → sin pestañazo).
+        stripRef.current?.classList.remove('carousel-dragging')
+        applyStripTransform(0, false) // asegurar la posición final exacta en el DOM
+        forceSettle()                 // re-render → React toma de nuevo el control en reposo
+      }, 220)
     }
 
     el.addEventListener("touchstart", onStart, { passive: true })
@@ -550,6 +765,7 @@ export default function HorizontalCarousel({ video, isActive, isMuted, isExpande
       el.removeEventListener("touchstart", onStart)
       el.removeEventListener("touchmove", onMove)
       el.removeEventListener("touchend", onEnd)
+      window.clearTimeout(settleTimerRef.current)
     }
   }, [commitSlide, expandInBackground, applyStripTransform, video.id, video.user_id.username])
 
@@ -561,8 +777,17 @@ export default function HorizontalCarousel({ video, isActive, isMuted, isExpande
     <div
       ref={containerRef}
       className="relative h-full w-full overflow-hidden rounded-t-xl rounded-b-none"
-      style={{ contain: "layout style" }}
     >
+      {/* Mientras se arrastra de lado, la clase `carousel-dragging` (aplicada al strip
+          por DOM directo, sin setState → sin freno) fuerza TODOS los thumbnails opacos
+          (tapan el ExoPlayer): no se ve el video reproduciéndose en la transición. CSS
+          puro = el navegador lo aplica sin reconciliar React. */}
+      <style>{`
+        .carousel-dragging [data-slide-thumb] {
+          opacity: 1 !important;
+          transition: none !important;
+        }
+      `}</style>
       {/* All slides in one strip — slide 0 is children (main feed video + buttons) */}
       <div
         ref={stripRef}
@@ -570,13 +795,20 @@ export default function HorizontalCarousel({ video, isActive, isMuted, isExpande
         style={{
           width: extraCount > 0 ? `${(extraCount + 1) * 100}%` : "100%",
           height: "100%",
-          // En REPOSO el transform refleja slideIndex (sin dragPct: el arrastre lo
-          // maneja applyStripTransform escribiendo el DOM directo, sin re-render).
-          // La transición va siempre activa para que un cambio de slideIndex
-          // programático (no por gesto) también anime suave.
-          transform: extraCount > 0 ? `translateX(${(-(slideIndex * 100)) / (extraCount + 1)}%)` : undefined,
+          // En REPOSO el transform refleja slideIndex. Pero MIENTRAS se arrastra
+          // (isDraggingRef), NO escribimos el transform inline: el DOM (vía
+          // applyStripTransform) es el único dueño durante el gesto, si no React
+          // pisaría su valor a media animación → el frame "se vuelve loco" al soltar
+          // sin completar el swipe. En reposo, ambos coinciden (misma fórmula).
+          transform: (extraCount > 0 && !isDraggingRef.current)
+            ? `translateX(${(-(slideIndex * 100)) / (extraCount + 1)}%)`
+            : undefined,
           transition: extraCount > 0 ? "transform 0.18s cubic-bezier(0.22, 1, 0.36, 1)" : "none",
-          willChange: extraCount > 0 ? "transform" : undefined,
+          // SIN willChange permanente: en este WebView de Android una capa de
+          // composición fija CONGELA el repintado del texto de los botones (mismo bug
+          // que el feed vertical: los conteos no se actualizaban). El arrastre sigue
+          // fluido porque escribimos el transform al DOM directo cada frame
+          // (applyStripTransform), sin necesitar el hint de willChange.
         }}
       >
         {/* Slide 0 — main video with all its feed buttons */}
@@ -584,6 +816,25 @@ export default function HorizontalCarousel({ video, isActive, isMuted, isExpande
           className="relative h-full flex-shrink-0"
           style={{ width: extraCount > 0 ? `${100 / (extraCount + 1)}%` : "100%" }}
         >
+          {/* FRAME del slide 0 (video del feed) en modo nativo: cuando estamos en un
+              slide extra y arrastramos de vuelta, mostramos su thumbnail para que se
+              vea "otro video" llegando. Cuando slide 0 es el activo, transparente →
+              se ve el ExoPlayer nativo reproduciendo el video del feed. */}
+          {hideVideos && extraCount > 0 && (
+            <img
+              src={video.thumbnail_url?.startsWith("http") ? video.thumbnail_url : getMediaUrl(video.thumbnail_url)}
+              alt=""
+              aria-hidden="true"
+              className="absolute inset-0 h-full w-full object-cover pointer-events-none"
+              // Transparente cuando slide 0 está activo y quieto. La clase
+              // `.carousel-dragging` lo fuerza opaco mientras se arrastra (vía CSS).
+              data-slide-thumb={(slideIndex === 0 && nativeFrameReady) ? "active" : "idle"}
+              style={{
+                opacity: (slideIndex === 0 && nativeFrameReady) ? 0 : 1,
+                transition: (slideIndex === 0 && nativeFrameReady) ? "opacity 120ms ease-out" : "opacity 120ms",
+              }}
+            />
+          )}
           {children}
         </div>
 
@@ -595,9 +846,15 @@ export default function HorizontalCarousel({ video, isActive, isMuted, isExpande
           >
             <SlideWithUI
               video={s}
+              // Con ExoPlayer activo: NO montar el <video> HTML del slide (el nativo
+              // lo reproduce vía playUrl). Los botones/UI del slide SÍ se muestran.
+              hideVideo={hideVideos}
+              getLiveStats={getLiveStats}
               isMuted={isMuted}
+              onToggleMute={onToggleMute}
               isVisible={isActive && slideIndex === i + 1 && !adActive}
               isNear={isActive && Math.abs(slideIndex - (i + 1)) <= 1}
+              frameReady={nativeFrameReady}
               isPaused={isPaused}
               onLike={onLike}
               onComment={onComment}

@@ -13,6 +13,8 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        // Registrar el plugin del feed de video nativo (ExoPlayer) ANTES de super.
+        registerPlugin(VideoFeedPlugin.class);
         super.onCreate(savedInstanceState);
 
         // Aceleración por hardware a nivel de ventana. Es el lugar CORRECTO para

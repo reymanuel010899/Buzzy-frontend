@@ -30,14 +30,17 @@ export const getMedia = () => async (dispatch: (a: unknown) => void) => {
       saveFeed(response.data).catch(() => {});
     }
   } catch {
-    // La petición falló (probablemente nos quedamos sin internet a mitad): mostrar
-    // el cache como último recurso para no dejar el feed vacío.
-    try {
-      const cached = await loadFeed();
-      if (cached.length > 0) {
-        dispatch({ type: APPEND_MEDIA, payload: cached });
-      }
-    } catch { /* fallo silencioso */ }
+    // La petición falló. Mostrar cache SOLO si realmente estamos offline (las URLs
+    // firmadas cacheadas vencen tras horas → 403). Online: mejor reintentar que
+    // pintar URLs vencidas; el reproductor nativo re-firma vía 'playerError'.
+    if (!navigator.onLine) {
+      try {
+        const cached = await loadFeed();
+        if (cached.length > 0) {
+          dispatch({ type: APPEND_MEDIA, payload: cached });
+        }
+      } catch { /* fallo silencioso */ }
+    }
     dispatch({
       type: FAILED_MEDIA,
       payload: 'offline'
@@ -90,14 +93,19 @@ export const getRecommendedFeed = (forceRefresh = false) => async (dispatch: (a:
       return videos;
     }
   } catch {
-    // La petición falló (sin internet): AHORA sí mostramos el cache como respaldo
-    // para no dejar el feed vacío.
-    try {
-      const cached = await loadFeed();
-      if (cached.length > 0) {
-        dispatch({ type: APPEND_MEDIA, payload: cached });
-      }
-    } catch { /* fallo silencioso */ }
+    // La petición falló. Mostrar el cache SOLO si realmente estamos offline: las
+    // URLs cacheadas están firmadas y, tras horas, vencen (403). Si hay internet
+    // pero la petición falló transitoriamente, NO inundamos el feed con URLs
+    // vencidas — es mejor un feed vacío que reintenta. (El reproductor nativo, si
+    // igual recibe una URL vencida, la re-firma vía el evento 'playerError'.)
+    if (!navigator.onLine) {
+      try {
+        const cached = await loadFeed();
+        if (cached.length > 0) {
+          dispatch({ type: APPEND_MEDIA, payload: cached });
+        }
+      } catch { /* fallo silencioso */ }
+    }
     dispatch({ type: FAILED_MEDIA, payload: 'offline' });
   } finally {
     // Carga de reemplazo (no paginación): libera la guarda de inmediato para no

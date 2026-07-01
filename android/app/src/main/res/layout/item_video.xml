@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Item de un video del feed nativo. Ocupa toda la pantalla (match_parent) para
+     el efecto "una pantalla = un video" con PagerSnapHelper. -->
+<!-- Sin fondo negro: el negro del contenedor era parte del "flash" al cambiar de
+     video. Transparente + keepContentOnPlayerReset (en código) mantiene el último
+     frame hasta que el nuevo video pinta el suyo → sin parpadeo negro. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/transparent">
+
+    <!-- surface_view (no texture_view): SurfaceView tiene su propia superficie de
+         hardware dedicada → SIN tearing/rasgado al componer varios videos durante el
+         arrastre (es lo que usa TikTok). El texture_view causaba las franjas. -->
+    <androidx.media3.ui.PlayerView
+        android:id="@+id/player_view"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        app:use_controller="false"
+        app:resize_mode="zoom"
+        app:surface_type="surface_view" />
+
+</FrameLayout>

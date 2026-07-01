@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Feed de video nativo (Fase 1). RecyclerView vertical a pantalla completa;
+     cada item es un video con ExoPlayer. Fondo negro como TikTok. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/feed_recycler"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:clipToPadding="false" />
+
+    <!-- Botón de cerrar (volver al WebView). Fase 1: simple, esquina superior. -->
+    <TextView
+        android:id="@+id/feed_close"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:layout_margin="16dp"
+        android:padding="12dp"
+        android:text="✕"
+        android:textColor="#FFFFFF"
+        android:textSize="22sp" />
+
+</FrameLayout>

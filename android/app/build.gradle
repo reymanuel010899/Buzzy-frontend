@@ -45,6 +45,18 @@ dependencies {
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
+
+    // ── Feed de video nativo (Fase 1): ExoPlayer/Media3 + RecyclerView ──────────
+    // ExoPlayer es el reproductor que usa TikTok/Instagram en Android: maneja el
+    // pool de decoders, precarga y buffering de forma nativa (sin los problemas del
+    // <video> en WebView). RecyclerView+PagerSnapHelper da el scroll vertical snap.
+    implementation "androidx.media3:media3-exoplayer:1.3.1"
+    implementation "androidx.media3:media3-ui:1.3.1"
+    // datasource: DefaultDataSource para la música nativa (ProgressiveMediaSource +
+    // ClippingMediaSource → recorte/loop del rango que el usuario eligió).
+    implementation "androidx.media3:media3-datasource:1.3.1"
+    implementation "androidx.recyclerview:recyclerview:1.3.2"
+    implementation "androidx.viewpager2:viewpager2:1.1.0"
 }
 
 apply from: 'capacitor.build.gradle'

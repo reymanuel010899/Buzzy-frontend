@@ -19,6 +19,7 @@ import {
   Eye,
   Video,
   CreditCard,
+  Wallet,
   UserCog,
   Shield,
   Bell,
@@ -2948,6 +2949,20 @@ function ProfileSeccion({
                   </div>
                   <div className="text-emerald-400 shrink-0">
                     <span className="text-xs font-medium">{t('profile:settings.add')}</span>
+                  </div>
+                </div>
+
+                {/* Wallet — movido aquí desde el nav inferior. Link a /wallet. */}
+                <div
+                  onClick={() => { setShowSettingsModal(false); navigate('/wallet'); }}
+                  className="group flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-white/5 cursor-pointer transition-all active:scale-[0.985]"
+                >
+                  <div className="w-9 h-9 bg-cyan-500/10 text-cyan-400 rounded-xl flex items-center justify-center shrink-0">
+                    <Wallet size={18} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-sm text-white group-hover:text-cyan-400 transition-colors">Wallet</p>
+                    <p className="text-xs text-gray-400 truncate">Tu billetera y balance</p>
                   </div>
                 </div>
 

@@ -40,7 +40,20 @@ interface UseVideoAudioOptions {
 // never the ones evicted — eviction only frees blobs the user scrolled past long
 // ago, so revoking them is safe.
 const MAX_CACHE = 16
-const audioCache = new Map<string, Promise<string>>()  // original url → blob URL promise
+const audioCache = new Map<string, Promise<string>>()  // CACHE KEY (sin firma) → blob URL promise
+
+// La música ahora se sirve con URL FIRMADA (/media-signed/...?expires=..&sig=..).
+// Esos query params CAMBIAN en cada request (firma fresca), así que la URL completa
+// NO sirve como key de cache: la misma canción se vería como N URLs distintas →
+// nunca acertaría y se re-descargaría siempre, rompiendo además el precache offline.
+// La key estable es la RUTA del archivo (path), ignorando los query params de firma.
+function cacheKeyFor(url: string): string {
+  try {
+    return new URL(url, location.origin).pathname
+  } catch {
+    return url.split('?')[0]
+  }
+}
 
 function evictIfNeeded() {
   if (audioCache.size >= MAX_CACHE) {
@@ -60,13 +73,19 @@ export function prefetchAudioUrl(url: string): Promise<string> {
 }
 
 async function getResponseForAudio(url: string): Promise<Response> {
+  // El Cache API se indexa por la RUTA (sin firma) → un Request estable que sobrevive
+  // a las firmas cambiantes. El fetch de red, en cambio, usa la URL firmada completa.
+  const cacheKey = cacheKeyFor(url)
+
   // 1. Try network first — fastest path when online
   try {
     const r = await fetch(url)
     if (r.ok) {
-      // Opportunistically warm the persistent cache for future offline sessions
+      // Opportunistically warm the persistent cache for future offline sessions.
+      // Guardamos bajo la key sin firma para poder recuperarlo mañana (cuando la
+      // firma de hoy ya no exista).
       if ('caches' in window) {
-        caches.open('buzzy-audio-v1').then(c => c.put(url, r.clone())).catch(() => {})
+        caches.open('buzzy-audio-v1').then(c => c.put(cacheKey, r.clone())).catch(() => {})
       }
       return r
     }
@@ -76,7 +95,7 @@ async function getResponseForAudio(url: string): Promise<Response> {
 
   // 2. Network failed: look up the pre-populated Cache API (populated by feedCacheDB.ts)
   if ('caches' in window) {
-    const cached = await caches.match(url)
+    const cached = await caches.match(cacheKey)
     if (cached) return cached
   }
 
@@ -84,16 +103,17 @@ async function getResponseForAudio(url: string): Promise<Response> {
 }
 
 function prefetchAudio(url: string): Promise<string> {
-  if (audioCache.has(url)) return audioCache.get(url)!
+  const key = cacheKeyFor(url)
+  if (audioCache.has(key)) return audioCache.get(key)!
   evictIfNeeded()
   const p = getResponseForAudio(url)
     .then(r => r.arrayBuffer())
     .then(buf => URL.createObjectURL(new Blob([buf], { type: 'audio/mpeg' })))
     .catch(err => {
-      audioCache.delete(url)
+      audioCache.delete(key)
       return Promise.reject(err)
     })
-  audioCache.set(url, p)
+  audioCache.set(key, p)
   return p
 }
 
