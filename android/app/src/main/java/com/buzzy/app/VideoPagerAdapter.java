@@ -151,8 +151,9 @@ public class VideoPagerAdapter extends RecyclerView.Adapter<VideoPagerAdapter.Pa
     /** Silencia/activa TODO el feed (video + música) sin parar la reproducción. */
     void setMuted(boolean m) {
         muted = m;
-        // Aplicar a todos los players del pool (activo + vecinos).
+        // Aplicar a todos los players (pool vertical + pool horizontal de slides).
         for (ExoPlayer p : pool.values()) p.setVolume(m ? 0f : lastVideoVolume);
+        for (ExoPlayer p : hPool.values()) p.setVolume(m ? 0f : lastVideoVolume);
         if (musicPlayer != null) musicPlayer.setVolume(m ? 0f : lastMusicVolume);
     }
 
@@ -176,9 +177,10 @@ public class VideoPagerAdapter extends RecyclerView.Adapter<VideoPagerAdapter.Pa
         scrollPausing = pausing;
         if (pausing) {
             scrollStartPos = activePos;
-            // Pausar VIDEO activo + TODOS los vecinos (por si alguno quedó sonando) y
-            // la música. setPlayWhenReady(false) detiene el audio inmediatamente.
+            // Pausar VIDEO activo + TODOS los vecinos (verticales Y horizontales, por si
+            // alguno quedó sonando) y la música. setPlayWhenReady(false) corta el audio ya.
             for (ExoPlayer p : pool.values()) p.setPlayWhenReady(false);
+            for (ExoPlayer p : hPool.values()) p.setPlayWhenReady(false);
             if (musicPlayer != null) musicPlayer.setPlayWhenReady(false);
             // Empezó el arrastre → AHORA sí adjuntar los frames de los vecinos a sus
             // PlayerViews, para que el usuario vea el video que viene subiendo/bajando
@@ -186,9 +188,9 @@ public class VideoPagerAdapter extends RecyclerView.Adapter<VideoPagerAdapter.Pa
             // por eso no asomaban al asentar en el video anterior.
             attachNeighbors();
         } else {
-            // Soltó: reanudar el video activo (si el feed no está en pausa global). Los
-            // vecinos siguen pausados.
-            ExoPlayer act = active();
+            // Soltó: reanudar el video que se VE (slide horizontal o video del feed), si el
+            // feed no está en pausa global. Los demás siguen pausados.
+            ExoPlayer act = currentPlaying();
             if (act != null) act.setPlayWhenReady(!globalPaused);
             // Música: solo reanudar la actual si NO cambiamos de página. Si cambiamos,
             // applyNativeMusic pondrá la del nuevo video (evita feedback de la vieja).
@@ -237,9 +239,9 @@ public class VideoPagerAdapter extends RecyclerView.Adapter<VideoPagerAdapter.Pa
         // Guardar volúmenes "reales" para restaurarlos al quitar el mute.
         lastVideoVolume = volOriginal;
         lastMusicVolume = volMusic;
-        // Volumen del audio propio del video activo (se baja cuando hay música
-        // encima). Si el feed está MUTEADO, 0.
-        ExoPlayer act = active();
+        // Volumen del audio propio del video que se VE (se baja cuando hay música encima).
+        // Si el feed está MUTEADO, 0. Usa currentPlaying() para cubrir slides horizontales.
+        ExoPlayer act = currentPlaying();
         if (act != null) act.setVolume(muted ? 0f : volOriginal);
 
         if (url == null || url.isEmpty()) {
@@ -388,20 +390,12 @@ public class VideoPagerAdapter extends RecyclerView.Adapter<VideoPagerAdapter.Pa
                 }
             }
             @Override public void onRenderedFirstFrame() {
-                if (pool.get(activePos) != pl) return;
-                // CRÍTICO: onRenderedFirstFrame se dispara en CADA primer frame, INCLUYENDO
-                // cada reinicio del loop (REPEAT_MODE_ONE). Si avisáramos al JS siempre, el
-                // thumbnail se desvanecería con el frame del video VIEJO (el que sigue en loop
-                // mientras playUrl bufferea el nuevo) → se ve el "frame del video principal".
-                // Solo avisamos cuando ESPERAMOS el frame de un playUrl reciente (swap real).
-                if (!awaitingPlayUrlFrame) return;
-                awaitingPlayUrlFrame = false;
-                // El NUEVO video ya pintó su 1er frame → restaurar la retención para que
-                // futuros loops/rebuffers no muestren negro (playUrl la puso en false para
-                // descartar el frame del video anterior durante el swap).
-                PlayerView pv = playerViewForActive();
-                if (pv != null) pv.setKeepContentOnPlayerReset(true);
-                if (frameCallback != null) frameCallback.onFirstFrame(activePos);
+                // El pool horizontal (hPool) intercambia players YA pre-preparados: su frame
+                // se ve al instante y playUrl avisa al JS directamente. Aquí solo cubrimos el
+                // caso de un player VERTICAL (slide 0) que acabara de preparar su 1er frame.
+                if (pool.get(activePos) == pl && frameCallback != null && hActive == null) {
+                    frameCallback.onFirstFrame(activePos);
+                }
             }
             @Override public void onPlaybackStateChanged(int state) {
                 // Solo loguear el player ACTIVO: el pantallazo NEGRO vertical suele ser
@@ -540,6 +534,13 @@ public class VideoPagerAdapter extends RecyclerView.Adapter<VideoPagerAdapter.Pa
         // futuro slide horizontal del nuevo video sí se cargue (no lo bloquee el guard).
         if (prevActive != position) currentPlayUrlPath = null;
 
+        // SCROLL VERTICAL → salimos del carrusel del video anterior: liberar su pool de
+        // slides horizontales (no acumular decoders) y re-pegar el player VERTICAL al
+        // PlayerView (si un slide horizontal había dejado su player pegado, hActive!=null).
+        if (prevActive != position) {
+            releaseHorizontalPool();
+        }
+
         // ── 1) ACTIVO: reproducir ya (su player/frame ya están en el pool) ──────
         if (prevActive != position) {
             ExoPlayer old = pool.get(prevActive);
@@ -547,7 +548,7 @@ public class VideoPagerAdapter extends RecyclerView.Adapter<VideoPagerAdapter.Pa
         }
         ExoPlayer act = pool.get(position);
         if (act == null) act = ensurePlayerFor(pager, position, true);
-        else ensurePlayerFor(pager, position, true); // asegurar que el ACTIVO esté adjunto
+        else ensurePlayerFor(pager, position, true); // re-pegar el player vertical al PlayerView
         // NO reanudar si todavía estamos arrastrando/asentando (scrollPausing): el
         // audio debe permanecer en silencio hasta SOLTAR. Al llegar a IDLE, el plugin
         // llama setScrollPausing(false) que reanuda el video activo correcto. Sin esto,
@@ -597,9 +598,16 @@ public class VideoPagerAdapter extends RecyclerView.Adapter<VideoPagerAdapter.Pa
         }, 350);
     }
 
+    /** El player que se está VIENDO ahora: el del slide horizontal si hay uno pegado,
+     *  si no el del video vertical activo. Lo usan pausa/progreso/volumen. */
+    private ExoPlayer currentPlaying() {
+        return hActive != null ? hActive : pool.get(activePos);
+    }
+
     void setPaused(ViewPager2 pager, int position, boolean paused) {
         globalPaused = paused;
-        ExoPlayer act = active();
+        // Pausar/reanudar el player que se VE (slide horizontal o video del feed).
+        ExoPlayer act = currentPlaying();
         if (act != null) act.setPlayWhenReady(!paused);
         // La música se pausa/reanuda junto al video.
         if (musicPlayer != null && currentMusicUrl != null) musicPlayer.setPlayWhenReady(!paused);
@@ -613,50 +621,117 @@ public class VideoPagerAdapter extends RecyclerView.Adapter<VideoPagerAdapter.Pa
     // —y re-descargar— el MISMO video cuando el JS llama playUrl repetidamente (la URL
     // cambia solo en ?expires=&sig=). Esa re-descarga en bucle disparaba 429 del server.
     private String currentPlayUrlPath;
-    // true entre un playUrl (swap real) y el 1er frame renderizado del nuevo video. Solo
-    // durante esta ventana emitimos 'frameReady' al JS → así el thumbnail no se desvanece
-    // con el frame del video VIEJO (que sigue en loop mientras el nuevo bufferea).
-    private volatile boolean awaitingPlayUrlFrame = false;
+
+    // ── POOL DE SLIDES HORIZONTALES (mismo principio que los vecinos verticales) ──
+    // El bug del horizontal era que reutilizábamos UN player recargando el video en cada
+    // slide (setMediaItem+prepare) → SIEMPRE había buffering + recambio de frame. El
+    // vertical es fluido porque cada video tiene su PROPIO player con el frame ya
+    // decodificado. Aquí replicamos eso: un pool de ExoPlayers para los slides del video
+    // horizontal activo, indexados por ruta (sin firma). Al deslizar a un slide ya
+    // pre-preparado, en vez de recargar, SOLO pegamos ese player al PlayerView activo →
+    // instantáneo, sin buffering, sin frame viejo. Se libera al hacer scroll VERTICAL
+    // (releaseHorizontalPool) para no acumular decoders de hardware.
+    private final java.util.HashMap<String, ExoPlayer> hPool = new java.util.HashMap<>();
+    // El player horizontal actualmente pegado al PlayerView activo (para no re-pegarlo).
+    private ExoPlayer hActive;
+
+    /** Crea (o reusa del pool) un player horizontal para `url`, pre-preparado y pausado. */
+    private ExoPlayer ensureHorizontalPlayer(String url) {
+        String path = pathOf(url);
+        ExoPlayer p = hPool.get(path);
+        if (p == null) {
+            try {
+                p = buildPlayer();
+                p.setMediaItem(MediaItem.fromUri(url));
+                p.prepare();
+                p.setPlayWhenReady(false); // pre-preparar: frame listo, sin sonar
+                hPool.put(path, p);
+            } catch (Exception ex) {
+                android.util.Log.e("BuzzyVideo", "ensureHorizontalPlayer error", ex);
+                if (p != null) { try { p.release(); } catch (Exception ignored) {} }
+                return null;
+            }
+        }
+        return p;
+    }
+
+    /**
+     * PRE-PREPARA un slide horizontal (vecino) en el pool: crea su player con el frame
+     * decodificado y pausado, SIN pegarlo al PlayerView. Al deslizar hacia él, playUrl lo
+     * encuentra listo → cambio instantáneo (como un vecino vertical). El JS lo llama para
+     * el slide siguiente y el anterior cuando cambia de slide.
+     */
+    void prefetchHorizontalSlide(String url) {
+        if (url == null || url.isEmpty()) return;
+        ensureHorizontalPlayer(url);
+    }
+
+    /** Libera TODOS los players del pool horizontal (al hacer scroll vertical). */
+    void releaseHorizontalPool() {
+        for (ExoPlayer p : hPool.values()) {
+            try { p.release(); } catch (Exception ignored) {}
+        }
+        hPool.clear();
+        hActive = null;
+    }
 
     void playUrl(String url) {
-        ExoPlayer act = active();
-        if (url == null || url.isEmpty() || act == null) return;
+        if (url == null || url.isEmpty()) return;
         // playUrl SOLO se llama al SOLTAR en un slide horizontal → el arrastre terminó:
         // limpiar el flag de corte para que el nuevo video sí suene.
         scrollPausing = false;
         String path = pathOf(url);
-        if (path.equals(currentPlayUrlPath) && act.getMediaItemCount() > 0) {
-            // Mismo video ya cargado: NO re-preparar (evita re-descarga → 429). Solo
-            // asegurar que esté reproduciendo.
-            act.setPlayWhenReady(!globalPaused);
+
+        PlayerView activeView = playerViewForActive();
+        if (activeView == null) return;
+
+        // ── SLIDE 0 (video del feed): su player está en el pool VERTICAL (activePos), no
+        // en el horizontal. Si la URL coincide con la del video vertical activo, es el
+        // slide 0 → re-pegar el player vertical (que nunca se recargó → su frame sigue
+        // listo) y soltar el horizontal. Cambio instantáneo, sin buffering. ──
+        boolean isSlide0 = activePos >= 0 && activePos < urls.size()
+            && path.equals(pathOf(urls.get(activePos)));
+        if (isSlide0) {
+            ExoPlayer vp = pool.get(activePos);
+            if (vp != null) {
+                currentPlayUrlPath = path;
+                if (hActive != null) { hActive.setPlayWhenReady(false); hActive = null; }
+                activeView.setKeepContentOnPlayerReset(true);
+                if (activeView.getPlayer() != vp) activeView.setPlayer(vp);
+                vp.setPlayWhenReady(!globalPaused);
+                if (frameCallback != null) frameCallback.onFirstFrame(activePos);
+                return;
+            }
+        }
+
+        // ── SLIDES HORIZONTALES: buscar (o crear) su player pre-preparado en el pool. ──
+        ExoPlayer target = ensureHorizontalPlayer(url);
+        if (target == null) return;
+
+        currentPlayUrlPath = path;
+
+        if (hActive == target && activeView.getPlayer() == target) {
+            // Ya pegado y activo → solo reproducir (no re-pegar → sin parpadeo).
+            target.setPlayWhenReady(!globalPaused);
             return;
         }
-        currentPlayUrlPath = path;
-        awaitingPlayUrlFrame = true; // esperamos el 1er frame del NUEVO video → emitir frameReady
-        // SWAP REAL de video en el player activo. ExoPlayer, con keepContentOnPlayerReset,
-        // RETIENE en pantalla el último frame del video ANTERIOR (p.ej. el video principal)
-        // mientras el nuevo bufferea → ~100ms de "pantallazo del video anterior" en el slide.
-        // Para eliminarlo de raíz: desactivamos keepContentOnPlayerReset y ocultamos el
-        // PlayerView (setShutterBackgroundColor transparente + player detach) de modo que el
-        // frame viejo NO se pinte durante el prepare. El thumbnail del WebView (gate
-        // frameReady) cubre esa ventana; al llegar el 1er frame del NUEVO video, el listener
-        // onRenderedFirstFrame reactiva la retención y avisa al JS para revelar limpio.
-        //
-        // CLAVE del fix anterior fallido: NO reactivar keepContentOnPlayerReset en la misma
-        // llamada síncrona — eso re-retiene el frame viejo antes de que prepare lo descarte.
-        // Lo dejamos en false; onRenderedFirstFrame lo restaura cuando el nuevo frame ya pintó.
-        PlayerView activeView = playerViewForActive();
-        if (activeView != null) {
-            // Soltar el frame retenido: al hacer setMediaItem+prepare el PlayerView limpia su
-            // superficie (shutter transparente) en vez de conservar el frame viejo. NO hacemos
-            // detach+attach del player: eso re-renderiza el frame VIEJO que aún está en buffer
-            // y dispara un onRenderedFirstFrame PREMATURO → el gate frameReady revelaría el
-            // thumbnail mostrando el frame anterior (justo el bug del "video principal").
-            activeView.setKeepContentOnPlayerReset(false);
-        }
-        act.setMediaItem(MediaItem.fromUri(url));
-        act.prepare();
-        act.setPlayWhenReady(!globalPaused);
+
+        // INTERCAMBIO INSTANTÁNEO: pausar el player que se deja y pegar el nuevo, que YA
+        // tiene su frame decodificado. Sin setMediaItem/prepare → sin buffering ni frame
+        // viejo. keepContentOnPlayerReset queda true: al pegar un player ya con frame, se
+        // ve su frame de inmediato (no negro).
+        if (hActive != null && hActive != target) hActive.setPlayWhenReady(false);
+        ExoPlayer prevVertical = pool.get(activePos);
+        if (prevVertical != null) prevVertical.setPlayWhenReady(false); // pausar slide 0
+
+        activeView.setKeepContentOnPlayerReset(true);
+        if (activeView.getPlayer() != target) activeView.setPlayer(target);
+        hActive = target;
+
+        target.setPlayWhenReady(!globalPaused);
+        // Avisar al JS que el frame ya está (el player pre-preparado ya tiene su frame) →
+        // el thumbnail se desvanece de inmediato, sin esperar buffering.
+        if (frameCallback != null) frameCallback.onFirstFrame(activePos);
     }
 
     /** Ruta del archivo sin el query de firma (?expires=&sig=), para comparar igualdad. */
@@ -668,13 +743,13 @@ public class VideoPagerAdapter extends RecyclerView.Adapter<VideoPagerAdapter.Pa
 
     /** Posición actual del video en ms (para la barra de progreso/métricas). */
     long getPositionMs() {
-        ExoPlayer act = active();
+        ExoPlayer act = currentPlaying();
         return act != null ? Math.max(0, act.getCurrentPosition()) : 0;
     }
 
     /** Duración del video en ms (puede ser 0 si aún no se conoce). */
     long getDurationMs() {
-        ExoPlayer act = active();
+        ExoPlayer act = currentPlaying();
         if (act == null) return 0;
         long d = act.getDuration();
         return d > 0 ? d : 0; // C.TIME_UNSET viene negativo
@@ -682,13 +757,14 @@ public class VideoPagerAdapter extends RecyclerView.Adapter<VideoPagerAdapter.Pa
 
     /** ¿El video activo está reproduciéndose ahora mismo? */
     boolean isPlaying() {
-        ExoPlayer act = active();
+        ExoPlayer act = currentPlaying();
         return act != null && act.isPlaying();
     }
 
     void releaseAll() {
         for (ExoPlayer p : pool.values()) p.release();
         pool.clear();
+        releaseHorizontalPool();
         if (musicPlayer != null) { musicPlayer.release(); musicPlayer = null; }
         clearMusicPrefetch();
         prefetchExec.shutdownNow();

@@ -17,6 +17,11 @@ export interface BuzzyVideoFeedPlugin {
   /** Reproduce una URL arbitraria (carrusel horizontal del mismo usuario). */
   playUrl(options: { url: string }): Promise<void>;
   /**
+   * Pre-prepara un slide horizontal vecino (player con frame decodificado, pausado) →
+   * al deslizar hacia él el cambio es instantáneo, como un vecino del feed vertical.
+   */
+  prefetchHorizontalSlide(options: { url: string }): Promise<void>;
+  /**
    * Música NATIVA del video activo (segundo ExoPlayer). url vacío = sin música.
    * trimStart en segundos. Volúmenes 0..1.
    */

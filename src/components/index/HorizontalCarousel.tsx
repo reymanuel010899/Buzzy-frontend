@@ -8,6 +8,7 @@ import { Video } from "./main.interface"
 import { useUserVideos } from "../../hooks/useUserVideos"
 import { getMediaUrl } from "../../redux/client/api-client"
 import { prefetchAudioUrl } from "../../hooks/useVideoAudio"
+import { BuzzyVideoFeed } from "../../plugins/buzzyVideoFeed"
 
 const clampWords = (text: string, maxWords = 4): string => {
   const words = text.trim().split(/\s+/)
@@ -562,6 +563,19 @@ export default function HorizontalCarousel({ video, hideVideos, isActive, isMute
     // para que al llegar suene al instante (baja latencia).
     const nextSlide = slides[slideIndex + 1];
     onSlideChange?.(slideIndex, slides.length, url, s, nextSlide)
+
+    // PRE-PREPARAR el VIDEO de los slides vecinos (±1) en el pool nativo horizontal →
+    // al deslizar hacia ellos el cambio es INSTANTÁNEO (frame ya decodificado), igual
+    // que un vecino del feed vertical. Esto es lo que hace el horizontal tan fluido
+    // como el vertical (antes recargaba el video en cada slide → buffering).
+    if (isActive) {
+      const slideUrlOf = (v?: Video) => v?.video
+        ? (v.video.startsWith('http') ? v.video : getMediaUrl(v.video)) : undefined;
+      const nextUrl = slideUrlOf(slides[slideIndex + 1]);
+      const prevUrl = slideUrlOf(slides[slideIndex - 1]);
+      if (nextUrl) BuzzyVideoFeed.prefetchHorizontalSlide({ url: nextUrl }).catch(() => {});
+      if (prevUrl) BuzzyVideoFeed.prefetchHorizontalSlide({ url: prevUrl }).catch(() => {});
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slideIndex])
 
@@ -590,6 +604,19 @@ export default function HorizontalCarousel({ video, hideVideos, isActive, isMute
     window.addEventListener("buzzy:nativeframeready", onFrame)
     return () => window.removeEventListener("buzzy:nativeframeready", onFrame)
   }, [isActive])
+
+  // PRE-PREPARAR el slide 1 en cuanto el carrusel se activa (estando en el slide 0) →
+  // el PRIMER swipe hacia la derecha ya encuentra su player listo (instantáneo). Sin
+  // esto, el primer deslizamiento del video sí tendría buffering (los siguientes no,
+  // porque el effect de slideIndex prefetchea los vecinos).
+  useEffect(() => {
+    if (!isActive || slideIndex !== 0 || slides.length < 2) return
+    const next = slides[1]
+    const nextUrl = next?.video
+      ? (next.video.startsWith('http') ? next.video : getMediaUrl(next.video)) : undefined
+    if (nextUrl) BuzzyVideoFeed.prefetchHorizontalSlide({ url: nextUrl }).catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isActive, slides.length])
 
   // Reset al cambiar video principal
   useEffect(() => {

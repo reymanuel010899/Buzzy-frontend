@@ -484,6 +484,20 @@ public class VideoFeedPlugin extends Plugin {
         });
     }
 
+    /**
+     * PRE-PREPARA un slide horizontal vecino (crea su player con el frame decodificado,
+     * pausado) para que al deslizar hacia él el cambio sea INSTANTÁNEO (sin buffering),
+     * igual que un vecino del feed vertical. El JS lo llama para el slide +1 y -1.
+     */
+    @PluginMethod
+    public void prefetchHorizontalSlide(PluginCall call) {
+        String url = call.getString("url");
+        getActivity().runOnUiThread(() -> {
+            if (adapter != null) adapter.prefetchHorizontalSlide(url);
+            call.resolve();
+        });
+    }
+
     /** Mueve el pager a un índice (p.ej. para sincronizar desde el JS si hiciera falta). */
     @PluginMethod
     public void setActive(PluginCall call) {
