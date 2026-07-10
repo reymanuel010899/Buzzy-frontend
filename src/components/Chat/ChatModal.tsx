@@ -1603,7 +1603,18 @@ const ChatModal: React.FC = () => {
                     )}
                   </AnimatePresence>
 
-                  <div className="flex-1 overflow-y-auto overscroll-y-contain pt-20 pb-2 px-4 space-y-2" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', overscrollBehaviorY: 'contain' }} onClick={() => { setMsgMenuTarget(null); }}>
+                  <div
+                    className="flex-1 overflow-y-auto overscroll-y-contain pt-20 pb-2 px-4 space-y-2"
+                    style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', overscrollBehaviorY: 'contain' }}
+                    onClick={() => { setMsgMenuTarget(null); }}
+                    onScroll={() => {
+                      // Guarda a prueba de balas: si el contenedor scrollea LO QUE SEA, no es un
+                      // long-press. No depende de que el WebView siga entregando touchmove/touchend
+                      // (deja de hacerlo al apropiarse del gesto de scroll). Cancela el timer pendiente.
+                      if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; }
+                      msgTouchStartRef.current = null;
+                    }}
+                  >
                     {realtimeMessages.map((msg) => {
                       const isMe = msg.sender_username === user.username
 
@@ -1646,16 +1657,27 @@ const ChatModal: React.FC = () => {
                             }, 2000);
                           }}
                           onTouchEnd={() => {
-                            if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+                            if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; }
+                            msgTouchStartRef.current = null;
+                          }}
+                          onTouchCancel={() => {
+                            // Android WebView dispara touchCANCEL (no touchEnd) cuando se apropia del
+                            // gesto como scroll nativo, y deja de emitir touchmove. Sin limpiar aquí el
+                            // timer de long-press sobrevive y abre el menú a los 2s → causa raíz del bug
+                            // "scroll abre el menú de reenviar/eliminar".
+                            console.log('[BuzzyChat] touchCancel → cancela longPress (scroll nativo)');
+                            if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; }
                             msgTouchStartRef.current = null;
                           }}
                           onTouchMove={(e) => {
-                            // Si el dedo se movió más de 10px (scroll), cancelar el long-press.
+                            // Si el dedo se movió más de 6px (scroll), cancelar el long-press. Umbral
+                            // cercano al slop de scroll de Android (~4-8px) para atrapar el movimiento
+                            // antes de que el WebView se apropie del gesto y deje de emitir touchmove.
                             const start = msgTouchStartRef.current;
                             if (start) {
                               const t = e.touches[0];
                               const dx = Math.abs(t.clientX - start.x), dy = Math.abs(t.clientY - start.y);
-                              if (dx > 10 || dy > 10) {
+                              if (dx > 6 || dy > 6) {
                                 console.log(`[BuzzyChat] touchMove dx=${dx.toFixed(0)} dy=${dy.toFixed(0)} → cancela longPress`);
                                 if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
                               }
