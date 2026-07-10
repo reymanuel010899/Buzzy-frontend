@@ -181,7 +181,10 @@ export const loadMoreFollowingFeed = () => async (dispatch: (a: unknown) => void
   _feedFetchInFlight = true;
 
   try {
-    const response = await apiClient.get('/api/recommendations/following/');
+    // ?more=1 → el backend NO aplica el fallback de "repetir lo más reciente": si ya
+    // no hay videos nuevos devuelve vacío (fin del feed). Sin esto, la paginación
+    // repetía los mismos videos → el front los deduplicaba → el scroll quedaba trabado.
+    const response = await apiClient.get('/api/recommendations/following/?more=1');
     if (response.status === 200) {
       const videos = response.data?.results ?? response.data;
       dispatch({ type: APPEND_MEDIA, payload: videos });

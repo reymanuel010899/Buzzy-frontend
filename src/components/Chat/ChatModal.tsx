@@ -28,7 +28,6 @@ import { loadChatMessages } from "../../redux/actions/message/chatMeesage"
 import { getAvailabilityStatus } from "../../redux/actions/saveAvailability"
 import { sendMessage } from "../../redux/actions/message/sendMessage"
 import { useWsEvent, useWebSocketContext } from "../../context/WebSocketContext"
-import { allEmojis } from "../comments/emojis";
 import { startCall } from "../../redux/actions/subscriptionActions"
 import { useTypingUsers } from "../../context/useTyping";
 import { useUnreadMessages } from "../../context/UnreadAcount";
@@ -90,7 +89,6 @@ const ChatModal: React.FC = () => {
   void notifUnreadCount;
   const [clickedMessage, setClickedMessage] = useState<string | null>(null)
   const clickedMessageTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const [reactionsMap, setReactionsMap] = useState<Record<string, Record<string, string[]>>>({});
   const markAsRead = useUnreadMessages((state) => state.markAsRead);
   const setUnreadCount = useUnreadMessages((state) => state.setUnreadCount);
   const incrementUnread = useUnreadMessages((state) => state.incrementUnread);
@@ -154,6 +152,10 @@ const ChatModal: React.FC = () => {
   // Message action menu
   const [msgMenuTarget, setMsgMenuTarget] = useState<string | null>(null);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Posición inicial del toque sobre un mensaje. Si el dedo se MUEVE más que un umbral,
+  // es un SCROLL (ver mensajes) → cancelamos el long-press para que no abra el menú de
+  // reenviar/eliminar. Sin esto, arrastrar para scrollear disparaba el menú.
+  const msgTouchStartRef = useRef<{ x: number; y: number } | null>(null);
   // Edit message
   const [editingMsgUuid, setEditingMsgUuid] = useState<string | null>(null);
   const [editingContent, setEditingContent] = useState("");
@@ -413,8 +415,6 @@ const ChatModal: React.FC = () => {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const [emojiTarget, setEmojiTarget] = useState<string | null>(null)
-
   const inputRef = useRef<HTMLInputElement>(null)
   const dispatch = useDispatch()
 
@@ -660,23 +660,6 @@ const ChatModal: React.FC = () => {
       removeTypingUser(data.chat_uuid, data.user_id);
     }
   }, [user.id, setTypingUser, removeTypingUser]));
-
-  useWsEvent("reaction", useCallback((data: any) => {
-    if (!data.message_uuid || !data.emoji) return;
-    setReactionsMap(prev => {
-      const msgReactions = { ...(prev[data.message_uuid] || {}) };
-      let users = [...(msgReactions[data.emoji] || [])];
-      if (data.action === "removed") {
-        users = users.filter((u: string) => u !== data.username);
-        if (users.length === 0) delete msgReactions[data.emoji];
-        else msgReactions[data.emoji] = users;
-      } else {
-        if (!users.includes(data.username)) users.push(data.username);
-        msgReactions[data.emoji] = users;
-      }
-      return { ...prev, [data.message_uuid]: msgReactions };
-    });
-  }, []));
 
   useWsEvent("message_deleted", useCallback((data: any) => {
     if (!data.uuid) return;
@@ -972,7 +955,6 @@ const ChatModal: React.FC = () => {
   useEffect(() => {
     if (!selectedChat) return;
     setRealtimeMessages([]);
-    setReactionsMap({});
     seededChatRef.current = null;
     markedReadRef.current = null;
     wsReadSentRef.current = null;
@@ -984,13 +966,6 @@ const ChatModal: React.FC = () => {
     seededChatRef.current = selectedChat;
 
     setRealtimeMessages(backendMessages.messages);
-    const seeded: Record<string, Record<string, string[]>> = {};
-    for (const msg of backendMessages.messages) {
-      if (msg.reactions && Object.keys(msg.reactions).length > 0) {
-        seeded[msg.uuid] = msg.reactions;
-      }
-    }
-    setReactionsMap(seeded);
   }, [backendMessages?.messages, selectedChat]);
 
   // Once backendMessages loads, notify sender so ✓✓ updates without reload (only once per chat)
@@ -1049,25 +1024,6 @@ const ChatModal: React.FC = () => {
     setMessageText("")
   }
 
-  const sendReaction = (messageUuid: string, emoji: string) => {
-    wsSend({ type: "reaction", message_uuid: messageUuid, emoji });
-    setReactionsMap(prev => {
-      const msgReactions = { ...(prev[messageUuid] || {}) };
-      let users = [...(msgReactions[emoji] || [])];
-
-      if (users.includes(user.username)) {
-        users = users.filter(u => u !== user.username);
-        if (users.length === 0) delete msgReactions[emoji];
-        else msgReactions[emoji] = users;
-      } else {
-        users.push(user.username);
-        msgReactions[emoji] = users;
-      }
-      return { ...prev, [messageUuid]: msgReactions };
-    });
-
-    setEmojiTarget(null)
-  }
 
   const typingContest = (chat: any) => {
     const chatTypingUsers = typingByChat[chat.uuid];
@@ -1180,7 +1136,7 @@ const ChatModal: React.FC = () => {
                       </button>
                     </div>
                   )}
-                  <div className="h-[70vh] overflow-hidden relative">
+                  <div className="h-[55vh] overflow-hidden relative">
                     <AnimatePresence mode="wait" initial={false}>
                       <motion.div
                         key={chatFolder}
@@ -1590,7 +1546,14 @@ const ChatModal: React.FC = () => {
                       }}
                       className="w-12 h-12 flex items-center justify-center text-white/60 hover:bg-white/10 hover:text-white transition-all"
                     >
-                      <X className="w-[18px] h-[18px]" />
+                      {/* Gira una vuelta completa cada ~4s para llamar la atención (salir del chat). */}
+                      <motion.span
+                        animate={{ rotate: [0, 360] }}
+                        transition={{ duration: 0.8, ease: "easeInOut", repeat: Infinity, repeatDelay: 3.2 }}
+                        className="flex items-center justify-center"
+                      >
+                        <X className="w-[18px] h-[18px]" />
+                      </motion.span>
                     </motion.button>
                   </motion.div>
 
@@ -1640,7 +1603,7 @@ const ChatModal: React.FC = () => {
                     )}
                   </AnimatePresence>
 
-                  <div className="flex-1 overflow-y-auto pt-20 pb-2 px-4 space-y-2" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }} onClick={() => { setMsgMenuTarget(null); }}>
+                  <div className="flex-1 overflow-y-auto overscroll-y-contain pt-20 pb-2 px-4 space-y-2" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', overscrollBehaviorY: 'contain' }} onClick={() => { setMsgMenuTarget(null); }}>
                     {realtimeMessages.map((msg) => {
                       const isMe = msg.sender_username === user.username
 
@@ -1656,11 +1619,9 @@ const ChatModal: React.FC = () => {
                             if (clickedMessageTimerRef.current) clearTimeout(clickedMessageTimerRef.current);
                             if (clickedMessage === msg.uuid) {
                               setClickedMessage(null);
-                              setEmojiTarget(null);
                               setMsgMenuTarget(null);
                               return;
                             }
-                            setEmojiTarget(null);
                             setMsgMenuTarget(null);
                             setClickedMessage(msg.uuid);
                             clickedMessageTimerRef.current = setTimeout(() => {
@@ -1668,41 +1629,47 @@ const ChatModal: React.FC = () => {
                             }, 3000);
                           }}
                           onContextMenu={(e) => {
+                            // Solo prevenir el menú CONTEXTUAL nativo del navegador (que en
+                            // Android WebView se dispara al arrastrar/mantener). NO abrimos el
+                            // menú de opciones aquí: eso solo lo hace el long-press de 2s con
+                            // el dedo quieto (onTouchStart). Sin esto, arrastrar abría el menú.
                             e.preventDefault();
-                            setMsgMenuTarget(msg.uuid);
-                            setClickedMessage(msg.uuid);
                           }}
-                          onTouchStart={() => {
+                          onTouchStart={(e) => {
+                            const t = e.touches[0];
+                            msgTouchStartRef.current = { x: t.clientX, y: t.clientY };
+                            // Long-press de 2s (dedo quieto) para abrir las opciones del mensaje.
                             longPressTimerRef.current = setTimeout(() => {
+                              console.log('[BuzzyChat] longPress 2s → abre menu');
                               setMsgMenuTarget(msg.uuid);
                               setClickedMessage(msg.uuid);
-                            }, 500);
+                            }, 2000);
                           }}
                           onTouchEnd={() => {
                             if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+                            msgTouchStartRef.current = null;
                           }}
-                          onTouchMove={() => {
-                            if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+                          onTouchMove={(e) => {
+                            // Si el dedo se movió más de 10px (scroll), cancelar el long-press.
+                            const start = msgTouchStartRef.current;
+                            if (start) {
+                              const t = e.touches[0];
+                              const dx = Math.abs(t.clientX - start.x), dy = Math.abs(t.clientY - start.y);
+                              if (dx > 10 || dy > 10) {
+                                console.log(`[BuzzyChat] touchMove dx=${dx.toFixed(0)} dy=${dy.toFixed(0)} → cancela longPress`);
+                                if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+                              }
+                            } else if (longPressTimerRef.current) {
+                              clearTimeout(longPressTimerRef.current);
+                            }
                           }}
                           className="relative flex items-end justify-end gap-2"
+                          // pan-y: el gesto vertical es SCROLL (no long-press). Sin callout/
+                          // selección nativa del WebView, que en Android disparaba el menú al
+                          // arrastrar sobre el texto del mensaje.
+                          style={{ touchAction: 'pan-y', WebkitTouchCallout: 'none', WebkitUserSelect: 'none', userSelect: 'none' } as React.CSSProperties}
                         >
                           <div className="relative flex items-center">
-
-                            {clickedMessage === msg.uuid && (
-                              <motion.button
-                                initial={{ opacity: 0, scale: 0.5, x: -8 }}
-                                animate={{ opacity: 1, scale: 1, x: 0 }}
-                                exit={{ opacity: 0, scale: 0.5 }}
-                                className="mr-2 w-7 h-7 flex items-center justify-center bg-black/50 backdrop-blur-md rounded-full shadow-xl border border-white/15 text-gray-300 hover:text-yellow-400 transition-all cursor-pointer flex-shrink-0"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (clickedMessageTimerRef.current) clearTimeout(clickedMessageTimerRef.current);
-                                  setEmojiTarget(emojiTarget === msg.uuid ? null : msg.uuid);
-                                }}
-                              >
-                                <span className="text-sm">😊</span>
-                              </motion.button>
-                            )}
 
                             <div
                               className={`max-w-[72vw] ${msg.message_type === 'text' ? 'px-4 py-3' : msg.message_type === 'contact' ? 'p-0 overflow-hidden' : 'p-[1px]'} ${isMe ? 'rounded-tl-[20px] rounded-tr-[20px] rounded-bl-[20px] rounded-br-[4px]' : 'rounded-tl-[20px] rounded-tr-[20px] rounded-br-[20px] rounded-bl-[4px]'} shadow-xl transition-all duration-300 ${
@@ -1816,27 +1783,6 @@ const ChatModal: React.FC = () => {
                                     <p className={`text-[10px] ${isMe ? "text-purple-200/70" : "text-gray-500"}`}>
                                       {new Date(msg.created_at).toLocaleTimeString("es-DO", { hour: "2-digit", minute: "2-digit" })}
                                     </p>
-                                    {reactionsMap[msg.uuid] && Object.keys(reactionsMap[msg.uuid]).length > 0 && (
-                                      <div className="flex items-center gap-1 z-10">
-                                        {Object.entries(reactionsMap[msg.uuid]).map(([emoji, users]) => {
-                                          const iMine = users.includes(user.username);
-                                          return (
-                                            <motion.button
-                                              key={emoji}
-                                              initial={{ scale: 0, opacity: 0 }}
-                                              animate={{ scale: 1, opacity: 1 }}
-                                              whileHover={{ scale: 1.25 }}
-                                              whileTap={{ scale: 0.9 }}
-                                              className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] shadow-lg border transition-all cursor-pointer ${iMine ? 'bg-purple-600/30 border-purple-500/40 text-white' : 'bg-[#1e1e35]/90 border-white/10 text-gray-200'}`}
-                                              onClick={(e) => { e.stopPropagation(); sendReaction(msg.uuid, emoji); }}
-                                            >
-                                              <span>{emoji}</span>
-                                              {users.length > 1 && <span className="font-semibold ml-0.5">{users.length}</span>}
-                                            </motion.button>
-                                          );
-                                        })}
-                                      </div>
-                                    )}
                                   </div>
                                 </div>
                               ) : msg.message_type === "document" || msg.message_type === "file" ? (
@@ -1977,102 +1923,9 @@ const ChatModal: React.FC = () => {
                                         : <Check size={12} className="text-white/30" />
                                     )}
                                   </div>
-                                  {reactionsMap[msg.uuid] && Object.keys(reactionsMap[msg.uuid]).length > 0 && (
-                                    <div className="flex items-center gap-1 z-10">
-                                      {Object.entries(reactionsMap[msg.uuid]).map(([emoji, users]) => {
-                                        const iMine = users.includes(user.username);
-                                        return (
-                                          <motion.button
-                                            key={emoji}
-                                            initial={{ scale: 0, opacity: 0 }}
-                                            animate={{ scale: 1, opacity: 1 }}
-                                            whileHover={{ scale: 1.25 }}
-                                            whileTap={{ scale: 0.9 }}
-                                            title={users.join(', ')}
-                                            className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] shadow-lg border transition-all cursor-pointer ${iMine ? 'bg-purple-600/30 border-purple-500/40 text-white' : 'bg-[#1e1e35]/90 border-white/10 text-gray-200'}`}
-                                            onClick={(e) => { e.stopPropagation(); sendReaction(msg.uuid, emoji); }}
-                                          >
-                                            <span>{emoji}</span>
-                                            {users.length > 1 && <span className="font-semibold ml-0.5">{users.length}</span>}
-                                          </motion.button>
-                                        );
-                                      })}
-                                    </div>
-                                  )}
                                 </div>
                               )}
                             </div>
-
-                            <AnimatePresence>
-                              {emojiTarget === msg.uuid && (
-                                <motion.div
-                                  initial={{ opacity: 0, scale: 0.85, y: 8 }}
-                                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                                  exit={{ opacity: 0, scale: 0.85, y: 8 }}
-                                  transition={{ type: "spring", damping: 20, stiffness: 300 }}
-                                  className={`absolute -top-16 ${isMe ? 'right-10' : 'left-10'} bg-[#1a1a2e]/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl z-50 overflow-hidden`}
-                                  onClick={(e) => e.stopPropagation()}
-                                >
-                                  <div className="flex items-center gap-1 px-3 py-2 border-b border-white/5">
-                                    {["❤️", "😂", "😮", "😢", "😡", "👍"].map((emoji) => (
-                                      <motion.button
-                                        key={emoji}
-                                        whileHover={{ scale: 1.4, y: -4 }}
-                                        whileTap={{ scale: 0.9 }}
-                                        transition={{ type: "spring", damping: 12, stiffness: 400 }}
-                                        className="text-2xl cursor-pointer p-1 rounded-lg hover:bg-white/10 transition-colors"
-                                        onClick={() => { sendReaction(msg.uuid, emoji); setEmojiTarget(null); setClickedMessage(null); }}
-                                      >
-                                        {emoji}
-                                      </motion.button>
-                                    ))}
-                                    <div className="w-px h-6 bg-white/10 mx-1" />
-                                    <motion.button
-                                      whileHover={{ scale: 1.1 }}
-                                      whileTap={{ scale: 0.9 }}
-                                      className="w-8 h-8 flex items-center justify-center rounded-full bg-white/5 hover:bg-white/15 text-gray-400 hover:text-white transition-all text-sm font-bold"
-                                      onClick={(e) => { e.stopPropagation(); setEmojiTarget(`${msg.uuid}-full`); }}
-                                    >
-                                      +
-                                    </motion.button>
-                                  </div>
-                                </motion.div>
-                              )}
-                            </AnimatePresence>
-
-                            <AnimatePresence>
-                              {emojiTarget === `${msg.uuid}-full` && (
-                                <motion.div
-                                  initial={{ opacity: 0, scale: 0.9, y: 8 }}
-                                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                                  exit={{ opacity: 0, scale: 0.9, y: 8 }}
-                                  transition={{ type: "spring", damping: 20, stiffness: 300 }}
-                                  className={`absolute -top-56 ${isMe ? 'right-10' : 'left-10'} bg-[#1a1a2e]/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl z-50 w-64 overflow-hidden`}
-                                  onClick={(e) => e.stopPropagation()}
-                                >
-                                  <div className="flex items-center justify-between px-3 py-2 border-b border-white/5">
-                                    <span className="text-xs text-gray-400 font-semibold">Reaccionar</span>
-                                    <button
-                                      className="text-gray-500 hover:text-white text-xs"
-                                      onClick={() => { setEmojiTarget(null); setClickedMessage(null); }}
-                                    >✕</button>
-                                  </div>
-                                  <div className="grid grid-cols-8 gap-1 p-3 max-h-44 overflow-y-auto custom-scrollbar">
-                                    {allEmojis.map((emoji) => (
-                                      <motion.button
-                                        key={emoji}
-                                        whileHover={{ scale: 1.3 }}
-                                        whileTap={{ scale: 0.9 }}
-                                        className="text-xl cursor-pointer p-1 rounded-lg hover:bg-white/10 transition-colors"
-                                        onClick={() => { sendReaction(msg.uuid, emoji); setEmojiTarget(null); setClickedMessage(null); }}
-                                      >
-                                        {emoji}
-                                      </motion.button>
-                                    ))}
-                                  </div>
-                                </motion.div>
-                              )}
-                            </AnimatePresence>
 
                             {/* Message action menu */}
                             <AnimatePresence>

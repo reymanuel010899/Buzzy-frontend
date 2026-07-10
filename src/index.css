@@ -1,6 +1,15 @@
 @import "tailwindcss/index";
 @custom-variant dark (&:is(.dark *));
 
+/* Desactivar el PULL-TO-REFRESH nativo del WebView de Android. Al arrastrar hacia abajo
+   estando en el tope de un scroll (p.ej. el historial de mensajes del chat), el WebView
+   mostraba el spinner de "recargar página". overscroll-behavior-y: none en html/body evita
+   que ese gesto se propague al refresco de la página. Los scrolls internos siguen igual. */
+html,
+body {
+  overscroll-behavior-y: none;
+}
+
 .cover-container {
   display: flex;
   flex-direction: column;

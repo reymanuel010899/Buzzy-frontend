@@ -39,12 +39,11 @@ import { GiftI } from "../../interfaces/gift"
 import { ShowComments } from "../comments/modalComents"
 import { useChat } from "../../context/ChatContext"
 import { apiClient, getBaseUrl, getMediaUrl } from "../../redux/client/api-client";
+import { buildExoUrls as buildExoUrlsUtil, buildMusicPayload } from "../../lib/nativeFeed";
 import { useTypingUsers } from "../../context/useTyping";
 import { useNotificationsStore } from "../../context/NotificationsStore";
 import { isNotifEnabled } from "../../utils/notifPrefs";
-import HorizontalCarousel from "./HorizontalCarousel";
 import StoryFilterCanvas from "./StoryFilterCanvas";
-import { useUserVideos } from "../../hooks/useUserVideos";
 import { pickMedia } from "../../hooks/useMediaPicker";
 import { useVideoMetrics } from "../../hooks/useVideoMetrics";
 import typingSound from "../../assets/sounds/whatsapp-typing.mp3";
@@ -184,7 +183,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const isPlayTransitioningRef = useRef(false)
   const hasLeftInitialVideoRef = useRef(false)
   const videosPausedRef = useRef(true)
-  const activeCarouselSlideRef = useRef(0)
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([])
   const [isMuted, setIsMuted] = useState(false)
   const [videosPaused, setVideosPaused] = useState(true)
@@ -240,7 +238,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const [mediaVideo, setMedia] = useState<videoI[] | null>(media);
   // Separate like state so updating a like never mutates mediaVideo → prevents video src re-assignment on Android
   const [likeOverrides, setLikeOverrides] = useState<Record<string, { liked: boolean; like_count: number }>>({});
-  const { prefetchBatch } = useUserVideos();
   const { onVideoPlay, onTimeUpdate: trackTimeUpdate, resetVideo, pruneTo } = useVideoMetrics();
   const [currentVideoId, setCurrentVideoId] = useState<string | null>(null);
   const currentVideoIdRef = useRef<string | null>(null);
@@ -358,7 +355,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const giftAnimBlobRef = useRef<string | null>(null);
 
   const [expandedDescriptions, setExpandedDescriptions] = useState<{ [key: string]: boolean }>({});
-  const [carouselDots, setCarouselDots] = useState<{ [key: string]: { index: number; total: number } }>({});
   const [ads, setAds] = useState<any[]>([]);
   const [activeAdIndex, setActiveAdIndex] = useState<number | null>(null);
   const [selectedAd, setSelectedAd] = useState<any | null>(null);
@@ -410,8 +406,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const activeVideoNativeRef = useRef(0);
   // Último uuid re-firmado, para no entrar en bucle si la URL fresca también falla.
   const lastRefreshedUuidRef = useRef<string | null>(null);
-  const buildExoUrls = useCallback(() => buildExoItems()
-    .map(v => (v.video.startsWith('http') ? v.video : getMediaUrl(v.video))), [buildExoItems]);
+  const buildExoUrls = useCallback(() => buildExoUrlsUtil(buildExoItems()), [buildExoItems]);
   // Mantener exoItemsRef sincronizado con la lista que ve el nativo.
   useEffect(() => { exoItemsRef.current = buildExoItems(); }, [buildExoItems]);
   useEffect(() => {
@@ -496,6 +491,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     // Depende también del PRIMER id: al cambiar de tab, dos feeds pueden tener la
     // misma longitud pero distinto contenido → sin el id, el efecto no correría y el
     // replaceUrls no se enviaría.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mediaVideo?.length, mediaVideo?.[0]?.id, buildExoUrls]);
 
   // Mide el navbar (arriba) y el nav inferior y se los pasa al feed nativo para que
@@ -541,22 +537,13 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     if (!exoActiveRef.current) return;
     const blocked = feedLockedRef.current || isMuted || activeAdIndex !== null
       || viewingStoryUserIndex !== null;
-    if (!item || item.type !== 'video' || !item.audio_track_url || blocked) {
+    // Si está bloqueado o el item no es un video, silenciar (conservando el volumen
+    // original). Si no, el payload lo arma buildMusicPayload (util compartido).
+    if (!item || item.type !== 'video' || blocked) {
       BuzzyVideoFeed.setMusic({ url: '', volumeOriginal: item?.volume_original ?? 1.0 }).catch(() => {});
       return;
     }
-    const trimStart = Math.max(0, item.audio_trim_start ?? 0);
-    const trimEndRaw = item.audio_trim_end;
-    // trimEnd válido solo si es un número > trimStart; si no, 0 = sin recorte final.
-    const trimEnd = (typeof trimEndRaw === 'number' && isFinite(trimEndRaw) && trimEndRaw > trimStart)
-      ? trimEndRaw : 0;
-    BuzzyVideoFeed.setMusic({
-      url: item.audio_track_url,
-      volumeMusic: Math.min(Math.max(item.volume_music ?? 0.8, 0), 1),
-      volumeOriginal: Math.min(Math.max(item.volume_original ?? 1.0, 0), 1),
-      trimStart,
-      trimEnd,
-    }).catch(() => {});
+    BuzzyVideoFeed.setMusic(buildMusicPayload(item)).catch(() => {});
   }, [isMuted, activeAdIndex, viewingStoryUserIndex]);
 
     // El nativo da un índice en la lista de SOLO-videos (exoItems). Lo mapeamos al
@@ -580,9 +567,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       const { mergedIdx, item } = nativeToMergedIndex(index);
       activeVideoNativeRef.current = index; // índice CRUDO en exoItems (para re-firma)
       lastRefreshedUuidRef.current = null;  // nuevo video → permitir re-firma de nuevo
-      // Scroll VERTICAL: liberar la música horizontal prebuferada del video anterior
-      // → no acumular pistas en memoria entre videos del feed.
-      BuzzyVideoFeed.clearMusicPrefetch().catch(() => {});
       activeVideoRef.current = mergedIdx;
       setActiveVideo(mergedIdx);
       // ID del video ACTIVO según el nativo (fuente de verdad). La opacity del slide
@@ -644,16 +628,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       });
     }).then(h => { errHandle = h; }).catch(() => {});
 
-    // FRAME LISTO del player nativo (tras playUrl al cambiar de slide horizontal).
-    // Lo retransmitimos como evento global del DOM → el HorizontalCarousel activo lo
-    // escucha y RECIÉN AHÍ desvanece el thumbnail del slide (revela el ExoPlayer). Así
-    // nunca se ve el frame del slide vecino mientras el nuevo video aún bufferea.
-    let frameHandle: { remove: () => void } | undefined;
-    BuzzyVideoFeed.addListener('frameReady', () => {
-      window.dispatchEvent(new Event('buzzy:nativeframeready'));
-    }).then(h => { frameHandle = h; }).catch(() => {});
-
-    return () => { handle?.remove(); scrollHandle?.remove(); progHandle?.remove(); errHandle?.remove(); frameHandle?.remove(); };
+    return () => { handle?.remove(); scrollHandle?.remove(); progHandle?.remove(); errHandle?.remove(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -855,14 +830,12 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     const saved: Record<string, boolean> = {};
     media.forEach(v => { if (v.is_saved) saved[String(v.id)] = true; });
     if (Object.keys(saved).length) setSavedMap(prev => ({ ...prev, ...saved }));
-    const entries = media.map(v => ({ username: v.user_id.username, excludeId: v.id }))
-    prefetchBatch(entries)
     // Pre-fetch only first 2 music tracks — suficiente para arranque inmediato
     // sin descargar de mas (balance fluidez/datos moviles).
     media.slice(0, 2).forEach(v => {
       if (v.audio_track_url) prefetchAudioUrl(v.audio_track_url)
     })
-  }, [media, prefetchBatch]);
+  }, [media]);
 
   useEffect(() => {
     if (activeVideo === null || !mediaVideo?.length) return;
@@ -1008,6 +981,58 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     }
   }, [feedMode, dispatch]);
 
+  // ── SWIPE HORIZONTAL entre tabs "Para ti" ↔ "Seguidos" ──────────────────────
+  // El feed nativo (VideoFeedPlugin) reenvía los gestos VERTICALES al ViewPager2 y deja
+  // los HORIZONTALES al WebView. Aquí capturamos ese swipe horizontal a nivel del feed:
+  //   • arrastrar de DERECHA a IZQUIERDA (dx<0)  → avanzar a "Seguidos".
+  //   • arrastrar de IZQUIERDA a DERECHA (dx>0)  → volver a "Para ti".
+  // Un ref con el feedMode actual evita recrear los listeners en cada cambio.
+  const feedModeRef = useRef(feedMode);
+  feedModeRef.current = feedMode;
+  useEffect(() => {
+    const el = feedScrollRef.current;
+    if (!el) return;
+    let startX = 0, startY = 0, tracking = false, decided = false, isHorizontal = false;
+    const SWIPE_MIN = 60;   // px mínimos para confirmar el cambio de tab
+    const ANGLE_MAX = 1.2;  // dx debe superar a dy*1.2 (mismo criterio que el nativo)
+
+    const onStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) { tracking = false; return; }
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      tracking = true; decided = false; isHorizontal = false;
+    };
+    const onMove = (e: TouchEvent) => {
+      if (!tracking || decided) return;
+      const dx = e.touches[0].clientX - startX;
+      const dy = e.touches[0].clientY - startY;
+      if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+      decided = true;
+      // Horizontal claro (no diagonal/vertical) → es un swipe de cambio de tab.
+      isHorizontal = Math.abs(dx) > Math.abs(dy) * ANGLE_MAX;
+    };
+    const onEnd = (e: TouchEvent) => {
+      if (!tracking) return;
+      tracking = false;
+      if (!isHorizontal) return;
+      const dx = e.changedTouches[0].clientX - startX;
+      if (Math.abs(dx) < SWIPE_MIN) return;
+      if (dx < 0 && feedModeRef.current === 'for-you') {
+        setFeedMode('following');   // ← derecha a izquierda
+      } else if (dx > 0 && feedModeRef.current === 'following') {
+        setFeedMode('for-you');     // → izquierda a derecha
+      }
+    };
+    el.addEventListener('touchstart', onStart, { passive: true });
+    el.addEventListener('touchmove', onMove, { passive: true });
+    el.addEventListener('touchend', onEnd, { passive: true });
+    return () => {
+      el.removeEventListener('touchstart', onStart);
+      el.removeEventListener('touchmove', onMove);
+      el.removeEventListener('touchend', onEnd);
+    };
+  }, [setFeedMode]);
+
   // ── Ventana de virtualización (memoria acotada) ──────────────────────────
   // Solo se montan los slides dentro de [activeVideo - BEHIND, activeVideo + AHEAD].
   // El resto se renderiza como un placeholder de la MISMA altura para preservar
@@ -1071,7 +1096,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     }
     setShowLikeAnimation(p => pruneRecord(p, live));
     setExpandedDescriptions(p => pruneRecord(p, live));
-    setCarouselDots(p => pruneRecord(p, live));
     setVideoLoopCount(p => pruneRecord(p, live));
     // refs: borrar in-place las claves fuera de la ventana
     for (const k in videoProgressRef.current) {
@@ -1611,19 +1635,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
   // ─── WebSocket events (via singleton context) ─────────────────────────────
 
-  // Stats en VIVO de un video para el carrusel (botones del WebView): combina el
-  // override de likes del socket (likeOverrides) y el comments_count actualizado en
-  // mediaVideo. Así los botones reflejan el tiempo real, no el valor del montaje.
-  const getLiveStats = useCallback((videoId: number) => {
-    const lo = likeOverrides[String(videoId)];
-    const vid = mediaVideo?.find(v => String(v.id) === String(videoId));
-    return {
-      liked: lo ? lo.liked : undefined,
-      likeCount: lo ? lo.like_count : undefined,
-      commentsCount: vid?.comments_count,
-    };
-  }, [likeOverrides, mediaVideo]);
-
   useWsEvent("like_updated", useCallback((data: any) => {
     // Aceptar varios nombres posibles del backend (video_id/video/id, likes/like_count).
     const key = String(data.video_id ?? data.video ?? data.id);
@@ -2092,10 +2103,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
             const shouldBlockInitialAutoplay = index === 0 && !hasUserInteracted.current && !hasLeftInitialVideoRef.current;
             const isSameFirstVideo = index === 0 && activeVideoRef.current === 0 && hasUserInteracted.current;
-            // If returning to a video whose carousel is on a slide > 0, the feed
-            // video (slide 0) should stay paused — the carousel slide is the active media.
-            const carouselIsOnExtraSlide = index === activeVideoRef.current && activeCarouselSlideRef.current > 0;
-            if (!isSameFirstVideo && !carouselIsOnExtraSlide) {
+            if (!isSameFirstVideo) {
               video.currentTime = 0;
               if (activeAdIndex !== index && !shouldBlockInitialAutoplay && !feedLockedRef.current) {
                 // Solo marcamos "reproduciendo" cuando DE VERDAD vamos a reproducir.
@@ -2108,10 +2116,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
               } else {
                 video.pause()
               }
-            }
-            // When scrolling away from a carousel video, reset its slide to 0
-            if (activeVideoRef.current !== null && activeVideoRef.current !== index) {
-              activeCarouselSlideRef.current = 0;
             }
             activeVideoRef.current = index;
             setActiveVideo(index)
@@ -2480,6 +2484,10 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     return () => useHeaderStoriesStore.getState().reset();
   }, []);
 
+  // Punto de inicio del gesto en el viewer de historias (swipe abajo = cerrar,
+  // swipe horizontal = cambiar de grupo). decided/isVertical se fijan una vez por gesto.
+  const storyGestureRef = useRef<{ x: number; y: number; decided: boolean; isVertical: boolean; isHorizontal: boolean } | null>(null);
+
   const closeStoryViewer = useCallback(() => {
     stopStoryAudio(true);
     setViewingStoryUserIndex(null);
@@ -2684,6 +2692,87 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     setIsStoryPaused(false);
   }, [viewingStoryUserIndex, currentStoryItemIndex, groupedStories, getCurrentProgress, updateProgress, closeStoryViewer, viewedItems, dispatch]);
 
+
+  // ── Swipe HORIZONTAL en el viewer de historias: salta directo de GRUPO (usuario),
+  // no item por item. Derecha→izquierda = grupo siguiente; izquierda→derecha = anterior.
+  const goToNextGroup = useCallback(() => {
+    if (viewingStoryUserIndex === null) return;
+    if (viewingStoryUserIndex < groupedStories.length - 1) {
+      const nextIndex = viewingStoryUserIndex + 1;
+      const nextGroup = groupedStories[nextIndex];
+      setTransitionDirection('next');
+      setIsSwitchingUser(true);
+      setIsStoryPaused(true);
+      setTimeout(() => {
+        setGroupProgresses(prev => ({
+          ...prev,
+          [nextGroup.user.id]: new Array(nextGroup.media.length).fill(0)
+        }));
+        setViewingStoryUserIndex(nextIndex);
+        setCurrentStoryItemIndex(0);
+        setIsSwitchingUser(false);
+        setTransitionDirection(null);
+        setIsStoryPaused(false);
+      }, 300);
+    } else {
+      closeStoryViewer();
+    }
+  }, [viewingStoryUserIndex, groupedStories, closeStoryViewer]);
+
+  const goToPrevGroup = useCallback(() => {
+    if (viewingStoryUserIndex === null) return;
+    if (viewingStoryUserIndex > 0) {
+      const prevIndex = viewingStoryUserIndex - 1;
+      const prevGroup = groupedStories[prevIndex];
+      setTransitionDirection('prev');
+      setIsSwitchingUser(true);
+      setIsStoryPaused(true);
+      setTimeout(() => {
+        setGroupProgresses(prev => ({
+          ...prev,
+          [prevGroup.user.id]: new Array(prevGroup.media.length).fill(0)
+        }));
+        setViewingStoryUserIndex(prevIndex);
+        setCurrentStoryItemIndex(0);
+        setIsSwitchingUser(false);
+        setTransitionDirection(null);
+        setIsStoryPaused(false);
+      }, 300);
+    }
+  }, [viewingStoryUserIndex, groupedStories]);
+
+  // Gestos del viewer de historias: swipe ABAJO cierra; swipe HORIZONTAL cambia de grupo.
+  const onStoryTouchStart = useCallback((e: React.TouchEvent) => {
+    if (e.touches.length !== 1) { storyGestureRef.current = null; return; }
+    storyGestureRef.current = {
+      x: e.touches[0].clientX, y: e.touches[0].clientY,
+      decided: false, isVertical: false, isHorizontal: false,
+    };
+  }, []);
+  const onStoryTouchMove = useCallback((e: React.TouchEvent) => {
+    const g = storyGestureRef.current;
+    if (!g || g.decided) return;
+    const dx = e.touches[0].clientX - g.x;
+    const dy = e.touches[0].clientY - g.y;
+    if (Math.abs(dx) < 12 && Math.abs(dy) < 12) return;
+    g.decided = true;
+    g.isVertical = Math.abs(dy) > Math.abs(dx) * 1.2;
+    g.isHorizontal = Math.abs(dx) > Math.abs(dy) * 1.2;
+  }, []);
+  const onStoryTouchEnd = useCallback((e: React.TouchEvent) => {
+    const g = storyGestureRef.current;
+    storyGestureRef.current = null;
+    if (!g || !g.decided) return;
+    const dx = e.changedTouches[0].clientX - g.x;
+    const dy = e.changedTouches[0].clientY - g.y;
+    // Swipe hacia ABAJO (claramente vertical) → cerrar la historia.
+    if (g.isVertical && dy > 80) { closeStoryViewer(); return; }
+    // Swipe HORIZONTAL → cambiar de grupo (usuario).
+    if (g.isHorizontal && Math.abs(dx) > 60) {
+      if (dx < 0) goToNextGroup();   // derecha → izquierda: grupo siguiente
+      else goToPrevGroup();          // izquierda → derecha: grupo anterior
+    }
+  }, [closeStoryViewer, goToNextGroup, goToPrevGroup]);
 
   const isOwner = viewingStoryUserIndex !== null && user.username === groupedStories[viewingStoryUserIndex]?.user.username;
   const handleReport = () => {
@@ -3434,114 +3523,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                           visibility: (isActiveVideo && !feedScrolling) ? 'visible' : 'hidden' } as React.CSSProperties
                       : { contain: "layout" } as React.CSSProperties}
                   >
-                  <HorizontalCarousel
-                    video={data}
-                    feedIndex={index}
-                    hideVideos={exoActive}
-                    isActive={isActiveVideo}
-                    isMuted={isMuted}
-                    isExpanded={!!expandedDescriptions[videoId]}
-                    isPaused={(exoActive ? exoPaused : videosPaused) && activeVideo === index}
-                    adActive={adActive}
-                    feedScrollRef={feedScrollRef}
-                    onTapToggle={() => {
-                      // Tap sobre un slide horizontal → pausar/reanudar el video nativo,
-                      // igual que un tap en el video vertical. Reusa handleVideoClick, que
-                      // en modo ExoPlayer hace toggle de exoPaused + setPaused nativo (el
-                      // player activo es el del slide horizontal en curso).
-                      if (activeVideo === index) handleVideoClick(index);
-                    }}
-                    onHorizontalDrag={(dragging) => {
-                      // Cortar el audio nativo (video + música) mientras se arrastra de
-                      // lado entre slides del carrusel → sin "feedback" del slide viejo.
-                      if (exoActiveRef.current) {
-                        BuzzyVideoFeed.setScrollPausing({ pausing: dragging }).catch(() => {});
-                      }
-                    }}
-                    getLiveStats={getLiveStats}
-                    onToggleMute={toggleMute}
-                    onCarouselAudio={(playing) => {
-                      // Belt-and-suspenders: when a slide's track actually starts
-                      // (async), make sure the feed music is silenced. Resuming the
-                      // feed music is handled by onSlideChange when returning to
-                      // slide 0, so we never re-start it here (that caused two tracks
-                      // to overlap).
-                      if (playing) {
-                        musicAudioRef.current?.pause();
-                      }
-                    }}
-                    onLike={(_uuid, id) => createLike({ video_id: id })(dispatch)}
-                    onComment={(uuid, id) => {
-                      setComments(null)
-                      setCurrentVideoId(String(id))
-                      currentVideoIdRef.current = String(id)
-                      setShowCommentsModal(true)
-                      getComment({ video_id: uuid })(dispatch).then((res: any) => {
-                        const list = Array.isArray(res) ? res : []
-                        setComments(list)
-                        // Corregir el contador del badge con la cantidad REAL del
-                        // servidor (el comments_count del feed podía venir cacheado/
-                        // viejo → "3" cuando en realidad hay 0).
-                        const realCount = list.length
-                        setMedia(prev => prev ? prev.map(v =>
-                          v.id === id ? { ...v, comments_count: realCount } : v
-                        ) : prev)
-                      })
-                    }}
-                    onGift={(id) => handleVideoGiftClick(id)}
-                    onMoreOptions={() => setActiveOptionsVideoId(videoId)}
-                    onSlideChange={(idx, total, slideUrl, slide, nextSlide) => {
-                      setCarouselDots(prev => ({ ...prev, [videoId]: { index: idx, total } }));
-                      if (activeVideo === index) {
-                        activeCarouselSlideRef.current = idx;
-                        // MODO ExoPlayer nativo: el carrusel horizontal cambia de slide,
-                        // pero el video lo reproduce el nativo. Le pasamos la URL del
-                        // slide para que ExoPlayer cambie de video (slide 0 = video del
-                        // feed, slide >0 = otros videos del mismo usuario).
-                        if (exoActiveRef.current) {
-                          if (slideUrl) BuzzyVideoFeed.playUrl({ url: slideUrl }).catch(() => {});
-                          // Música nativa del slide actual (PASO 6): cada slide es un
-                          // video con su PROPIA canción → applyNativeMusic con el item
-                          // del slide (slide 0 = video del feed; slides extra = su música).
-                          // CRÍTICO: los slides del carrusel vienen del prefetch (useUserVideos)
-                          // y NO pasan por mergedFeed, así que NO traen `type: 'video'`.
-                          // applyNativeMusic descarta cualquier item con type !== 'video'
-                          // (lo trata como "sin música" → silencia). Por eso la música de
-                          // los videos horizontales no se oía. Le inyectamos el type aquí.
-                          const slideItem = idx === 0
-                            ? mergedFeedRef.current[index]
-                            : (slide ? { ...slide, type: 'video' as const } : undefined);
-                          applyNativeMusic(slideItem);
-                          // PRE-BUFERAR la música del SIGUIENTE slide horizontal → al
-                          // llegar suena al instante (baja latencia). Solo si tiene
-                          // pista; si no, no-op. El nativo la libera al scroll vertical.
-                          if (nextSlide?.audio_track_url && !isMuted) {
-                            const ts = Math.max(0, nextSlide.audio_trim_start ?? 0);
-                            const teRaw = nextSlide.audio_trim_end;
-                            const te = (typeof teRaw === 'number' && isFinite(teRaw) && teRaw > ts) ? teRaw : 0;
-                            BuzzyVideoFeed.prefetchMusic({
-                              url: nextSlide.audio_track_url, trimStart: ts, trimEnd: te,
-                            }).catch(() => {});
-                          }
-                          return;
-                        }
-                        // Coordinate the feed (slide 0) audio/video with the carousel.
-                        // On an extra slide, the SlideVideo owns playback — fully stop
-                        // the feed video AND its music so they don't play on top of the
-                        // slide's track ("two songs at once" bug).
-                        const feedVideo = videoRefs.current[index];
-                        if (idx > 0) {
-                          if (feedVideo && !feedVideo.paused) feedVideo.pause();
-                          musicAudioRef.current?.pause();
-                        } else {
-                          // Back on the main slide — resume unless the feed is paused.
-                          if (!videosPausedRef.current && feedVideo && feedVideo.paused) {
-                            feedVideo.play().catch(() => {});
-                          }
-                        }
-                      }
-                    }}
-                  >
+                  <div className="relative h-full w-full">
                     <div className="absolute inset-0 overflow-hidden pt-0 group">
 
                       <div className={`relative h-full w-full overflow-hidden ${exoActive ? '' : 'bg-black'}`}>
@@ -3874,24 +3856,6 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
 {/* FOOTER INFERIOR — música + audio + dots */}
                         <div className={`absolute bottom-8 left-0 right-0 px-3 pb-[calc(env(safe-area-inset-bottom)+2.85rem)] pt-10 pointer-events-none flex flex-col justify-end gap-2 transition-opacity ${isExpanded ? 'z-[80]' : 'z-20'} ${adActive ? 'opacity-0 pointer-events-none' : ''}`}>
-
-                          {/* Dots carrusel */}
-                          {carouselDots[videoId] && carouselDots[videoId].total > 1 && (
-                            <div className="flex justify-center gap-1.5 pointer-events-none">
-                              {Array.from({ length: Math.max(carouselDots[videoId].total, 4) }).map((_, i) => {
-                                const isActiveDot = i === carouselDots[videoId].index
-                                const isReal = i < carouselDots[videoId].total
-                                return (
-                                  <motion.div
-                                    key={i}
-                                    animate={{ width: isActiveDot ? 16 : 5, opacity: isActiveDot ? 1 : isReal ? 0.45 : 0.2 }}
-                                    transition={{ duration: 0.2 }}
-                                    className="h-1.5 rounded-full bg-white"
-                                  />
-                                )
-                              })}
-                            </div>
-                          )}
 
                           {/* Fila: botón seguir izquierda + música centro + mute derecha.
                               items-center → los 3 alineados en la misma línea.
@@ -4296,7 +4260,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
                       </div>
                     </div>
-                  </HorizontalCarousel>
+                  </div>
                 </div>
               );
             })}
@@ -4406,6 +4370,9 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
             {/* Story Main Content - With slide animation during user switch */}
             <motion.div
               className="flex-1 relative z-10 flex items-center justify-center bg-transparent"
+              onTouchStart={onStoryTouchStart}
+              onTouchMove={onStoryTouchMove}
+              onTouchEnd={onStoryTouchEnd}
               animate={{
                 x: isSwitchingUser ? (transitionDirection === 'next' ? -30 : 30) : 0,
                 opacity: isSwitchingUser ? 0.7 : 1

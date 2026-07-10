@@ -74,6 +74,10 @@ import EditProfileModal from "./EditProfileModal"
 import ChatPrivacyModal from "./ChatPrivacyModal"
 import BankAccountModal from "./BankAccountModal"
 import SocialConnectionsModal from "./SocialConnectionsModal"
+import { BuzzyVideoFeed } from "../../plugins/buzzyVideoFeed"
+import { filterVideoItems, buildExoUrls, buildMusicPayload } from "../../lib/nativeFeed"
+import { fetchFreshMediaUrl } from "../../hooks/useFreshMediaUrl"
+import { App as CapApp } from "@capacitor/app"
 import { getActiveStories } from "../../redux/actions/history/listActiveHistory"
 import { viewStory } from "../../redux/actions/history/makeViewed"
 import { createStory } from "../../redux/actions/history/createHistory"
@@ -307,6 +311,21 @@ function ProfileSeccion({
   const modalVideoRefs = useRef<(HTMLVideoElement | null)[]>([])
   const modalScrollSettleTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const modalMusicRef = useRef<HTMLAudioElement | null>(null)
+
+  // ── FEED NATIVO (ExoPlayer) para el visor del perfil ────────────────────────
+  // El modal a pantalla completa reproduce los videos con el reproductor NATIVO (como
+  // el feed de inicio), con el WebView transparente encima mostrando los botones. El
+  // nativo es SOLO videos: `nativeItemsRef` es la lista filtrada (sin imágenes) en el
+  // orden del ViewPager2 = fuente de verdad índice-nativo → item.
+  const exoActiveRef = useRef(false)
+  const [exoActive, setExoActive] = useState(false)
+  const exoShownRef = useRef(false)
+  const nativeItemsRef = useRef<any[]>([])
+  const exoPausedRef = useRef(false)
+  const lastRefreshedUuidRef = useRef<string | null>(null)
+  // ¿El modal abrió en una IMAGEN? Entonces usamos el visor HTML clásico (el nativo no
+  // reproduce imágenes). Solo cuando abre en un VIDEO montamos el feed nativo.
+  const modalIsImageRef = useRef(false)
 
   // Lógica importada de StreamingUI
   const [localMedia, setLocalMedia] = useState<VideoItem[]>([]);
@@ -1064,6 +1083,9 @@ function ProfileSeccion({
   };
 
   const handleSeek = (videoId: string, newTime: number) => {
+    // Con el reproductor NATIVO el seek por arrastre no está soportado (el plugin no
+    // expone seekTo, igual que el feed de inicio). La barra sigue mostrando el progreso.
+    if (exoActive) return;
     const index = localMedia?.findIndex(v => v.id?.toString() === videoId);
     if (index === undefined || index === -1) return;
     if (isModalOpen) {
@@ -1154,20 +1176,93 @@ function ProfileSeccion({
   };
 
   // --- 5. Lógica Modal FullScreen ---
+  // Monta el feed NATIVO (ExoPlayer) para el visor. `nativeItems` = lista solo-videos,
+  // `startIndex` = posición en esa lista. Muestra el nativo detrás del WebView transparente.
+  const showNativeViewer = useCallback((nativeItems: any[], startIndex: number) => {
+    if (!nativeItems.length) return;
+    nativeItemsRef.current = nativeItems;
+    exoShownRef.current = true;
+    exoPausedRef.current = false;
+    lastRefreshedUuidRef.current = null;
+    // Cortar cualquier música HTML (modalMusicRef) que el visor HTML pudiera haber
+    // arrancado en el gap entre isModalOpen=true y exoActive=true → si no, ese <audio>
+    // sigue en loop sonando sobre TODOS los videos nativos (bug de "música en todos").
+    if (modalMusicRef.current) {
+      modalMusicRef.current.pause();
+      modalMusicRef.current.src = '';
+      modalMusicRef.current = null;
+    }
+    const urls = buildExoUrls(nativeItems);
+    BuzzyVideoFeed.show({ videoUrls: urls, startIndex })
+      .then(() => {
+        exoActiveRef.current = true;
+        setExoActive(true);
+        document.documentElement.classList.add('native-video-feed');
+        // El modal es PANTALLA COMPLETA (sin navbar) → sin insets. OJO: al navegar desde
+        // home, su `syncNativeInsets` puede llegar TARDE con top=85 (altura del navbar) y
+        // pisar este valor → franja negra arriba en la primera apertura. Por eso lo
+        // re-aplicamos: aquí, en el reveal, y con un pequeño delay para ganar ese race.
+        BuzzyVideoFeed.setInsets({ top: 0, bottom: 0 }).catch(() => {});
+        // El video del perfil ARRANCA REPRODUCIÉNDOSE (el feed nativo nace pausado por el
+        // candado del home; aquí no hay candado → play directo).
+        exoPausedRef.current = false;
+        BuzzyVideoFeed.setPaused({ paused: false }).catch(() => {});
+        // Música del video inicial.
+        BuzzyVideoFeed.setMusic(buildMusicPayload(nativeItems[startIndex])).catch(() => {});
+        // Revelar solo cuando el WebView ya pintó su capa (anti-destello, como home).
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          BuzzyVideoFeed.setInsets({ top: 0, bottom: 0 }).catch(() => {});
+          BuzzyVideoFeed.reveal().catch(() => {});
+        }));
+        // Segundo refuerzo tras un tick, por si el syncNativeInsets de home llega aún más
+        // tarde (el nativo ignora un setInsets idéntico, así que no hay parpadeo).
+        setTimeout(() => {
+          if (exoActiveRef.current) BuzzyVideoFeed.setInsets({ top: 0, bottom: 0 }).catch(() => {});
+        }, 350);
+      })
+      .catch(() => { exoShownRef.current = false; });
+  }, []);
+
+  // Libera el feed nativo y restaura el WebView opaco.
+  const hideNativeViewer = useCallback(() => {
+    if (!exoShownRef.current) return;
+    BuzzyVideoFeed.hide().catch(() => {});
+    BuzzyVideoFeed.removeAllListeners?.().catch?.(() => {});
+    exoShownRef.current = false;
+    exoActiveRef.current = false;
+    setExoActive(false);
+    nativeItemsRef.current = [];
+    document.documentElement.classList.remove('native-video-feed');
+  }, []);
+
   const openModalAtIndex = (index: number, source: 'local' | 'saved' = 'local') => {
     videoRefs.current.forEach(v => v?.pause());
     setIsGridVideoPlaying({});
+    const modalList = source === 'saved' ? savedVideos : localMedia;
+    const tapped = modalList[index];
+    // ¿Abriste en una IMAGEN? El nativo solo reproduce videos → usar el visor HTML clásico.
+    const isImage = tapped?.media_type === 'image';
+    modalIsImageRef.current = isImage;
     setInitialScrollIndex(index);
     setActiveModalIndex(index);
     setModalVideoSource(source);
     setIsModalOpen(true);
+
+    if (!isImage) {
+      // Lista solo-videos + mapeo del índice de grilla (con imágenes) al índice nativo.
+      const nativeItems = filterVideoItems(modalList);
+      const startIndex = Math.max(0, nativeItems.findIndex(v => v.id === tapped?.id));
+      showNativeViewer(nativeItems, startIndex);
+    }
   };
 
   const closeModal = () => {
+    hideNativeViewer();
     setIsModalOpen(false);
     setActiveModalIndex(-1);
     setShowCommentsModal(false);
     setModalVideoSource('local');
+    modalIsImageRef.current = false;
     if (modalMusicRef.current) {
       modalMusicRef.current.pause();
       modalMusicRef.current = null;
@@ -1187,8 +1282,58 @@ function ProfileSeccion({
   };
   // const generateAudioLevels = () => Array.from({ length: 15 }, () => Math.random() * 100);
 
+  // ── EVENTOS DEL FEED NATIVO (solo cuando el visor nativo está activo) ────────────
+  // pageChanged → índice activo + música del nuevo video + marcar vista.
+  // progress    → barra de progreso + vistas.
+  // playerError → re-firma (403 por firma vencida) y reproduce de nuevo.
   useEffect(() => {
-    if (!isModalOpen || !modalContainerRef.current) return;
+    if (!exoActive) return;
+    let pageH: { remove: () => void } | undefined;
+    let progH: { remove: () => void } | undefined;
+    let errH: { remove: () => void } | undefined;
+
+    BuzzyVideoFeed.removeAllListeners?.().catch?.(() => {});
+
+    BuzzyVideoFeed.addListener('pageChanged', ({ index }) => {
+      const item = nativeItemsRef.current[index];
+      setActiveModalIndex(index);
+      lastRefreshedUuidRef.current = null;
+      if (item) {
+        BuzzyVideoFeed.setMusic(buildMusicPayload(item)).catch(() => {});
+        // Marcar vista del video que entra (una vez).
+        const vid = item.id?.toString();
+        if (vid) onVideoPlay(vid);
+      }
+    }).then(h => { pageH = h; }).catch(() => {});
+
+    BuzzyVideoFeed.addListener('progress', ({ index, position, duration }) => {
+      const item = nativeItemsRef.current[index];
+      const vid = item?.id?.toString();
+      if (!vid) return;
+      setVideoProgress(prev => ({ ...prev, [vid]: position / 1000 }));
+      if (duration > 0) setVideoDuration(prev => ({ ...prev, [vid]: duration / 1000 }));
+    }).then(h => { progH = h; }).catch(() => {});
+
+    BuzzyVideoFeed.addListener('playerError', ({ index }) => {
+      const item = nativeItemsRef.current[index];
+      const uuid = item?.uuid?.toString();
+      if (!uuid || lastRefreshedUuidRef.current === uuid) return;
+      lastRefreshedUuidRef.current = uuid;
+      fetchFreshMediaUrl(uuid).then(fresh => {
+        if (!fresh?.video) return;
+        BuzzyVideoFeed.playUrl({ url: fresh.video }).catch(() => {});
+        BuzzyVideoFeed.setMusic(buildMusicPayload({ ...item, audio_track_url: fresh.audio_track_url })).catch(() => {});
+      });
+    }).then(h => { errH = h; }).catch(() => {});
+
+    return () => { pageH?.remove(); progH?.remove(); errH?.remove(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exoActive]);
+
+  useEffect(() => {
+    // El scroll JS del modal solo aplica al visor HTML (imágenes). Con el nativo activo,
+    // el ViewPager2 maneja el scroll → no registramos este listener.
+    if (!isModalOpen || exoActive || !modalContainerRef.current) return;
 
     const container = modalContainerRef.current;
 
@@ -1217,10 +1362,16 @@ function ProfileSeccion({
         modalScrollSettleTimeoutRef.current = null;
       }
     };
-  }, [isModalOpen, localMedia.length]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isModalOpen, exoActive, localMedia.length]);
 
   useEffect(() => {
-    if (!isModalOpen) return;
+    // Reproducción + música HTML solo para el visor HTML de IMÁGENES. Con el nativo activo
+    // (o cuando el modal abrió en un video → será nativo), el ExoPlayer reproduce y setMusic
+    // maneja la música. Saltamos también si abrió en video para NO arrancar un <audio> HTML
+    // en el gap entre isModalOpen=true y exoActive=true (ese audio quedaba en loop sonando
+    // sobre todos los videos nativos).
+    if (!isModalOpen || exoActive || !modalIsImageRef.current) return;
     modalVideoRefs.current.forEach((video, index) => {
       if (!video) return;
       if (index === activeModalIndex) {
@@ -1286,13 +1437,49 @@ function ProfileSeccion({
   }, [activeModalIndex, isModalOpen]);
 
   useEffect(() => {
-    if (isModalOpen && modalContainerRef.current) {
+    // Scroll-to-index inicial solo para el visor HTML (imágenes). El nativo ya abre en
+    // startIndex → no hace falta.
+    if (isModalOpen && !exoActive && modalContainerRef.current) {
       setTimeout(() => {
         const element = document.getElementById(`modal-video-${initialScrollIndex}`);
         if (element) element.scrollIntoView({ behavior: 'auto' });
       }, 10);
     }
-  }, [isModalOpen, initialScrollIndex]);
+  }, [isModalOpen, exoActive, initialScrollIndex]);
+
+  // Al DESMONTAR el perfil (navegar fuera) con el visor nativo abierto: liberar ExoPlayer
+  // y restaurar el WebView. Sin esto quedaría un pager huérfano y audio colgado. (Al volver
+  // a "/", el feed de inicio se remonta y reconstruye su feed solo.)
+  useEffect(() => {
+    return () => { hideNativeViewer(); };
+  }, [hideNativeViewer]);
+
+  // App a BACKGROUND (minimizar/bloquear/llamada) con el visor nativo abierto → pausar el
+  // ExoPlayer. Al volver a foreground, reanudar si no quedó pausado manualmente.
+  useEffect(() => {
+    if (!exoActive) return;
+    let handle: { remove: () => void } | undefined;
+    CapApp.addListener('appStateChange', ({ isActive }) => {
+      if (!exoActiveRef.current) return;
+      if (!isActive) {
+        BuzzyVideoFeed.setPaused({ paused: true }).catch(() => {});
+      } else if (!exoPausedRef.current) {
+        BuzzyVideoFeed.setPaused({ paused: false }).catch(() => {});
+      }
+    }).then(h => { handle = h; }).catch(() => {});
+    return () => { handle?.remove(); };
+  }, [exoActive]);
+
+  // Cambio de PERFIL (mismo componente, otro :username) con el modal abierto → cerrarlo y
+  // liberar el nativo, para no mezclar los videos del perfil anterior con el nuevo.
+  const prevUsernameRef = useRef(username);
+  useEffect(() => {
+    if (prevUsernameRef.current !== username) {
+      prevUsernameRef.current = username;
+      if (isModalOpen) closeModal();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [username]);
 
   // === FUNCIONES DE LOS NUEVOS MODALES ===
   const handleSaveBankAccount = () => {
@@ -1793,7 +1980,14 @@ function ProfileSeccion({
 
   return (
     <>
-      <div className="min-h-screen text-white flex flex-col items-center bg-black font-sans">
+      {/* Con el visor NATIVO activo, el contenido del perfil (grilla, avatar, fondos negros
+          opacos) TAPARÍA el ExoPlayer que se inserta al fondo detrás del WebView. Lo
+          ocultamos con visibility:hidden (conserva scroll/layout para restaurarlo al
+          cerrar). El modal a pantalla completa es HERMANO de este div → queda visible. */}
+      <div
+        className="min-h-screen text-white flex flex-col items-center bg-black font-sans"
+        style={exoActive ? { visibility: 'hidden' } : undefined}
+      >
         {/* Fondo Dinámico */}
         <div className="fixed inset-0 z-0 pointer-events-none">
           <div className="absolute inset-0 bg-black opacity-100"></div>
@@ -3541,7 +3735,9 @@ function ProfileSeccion({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black z-50 flex flex-col"
+              // Con el reproductor NATIVO activo el fondo debe ser TRANSPARENTE para ver
+              // el ExoPlayer detrás; con el visor HTML (imágenes) queda negro.
+              className={`fixed inset-0 z-50 flex flex-col ${exoActive ? 'bg-transparent' : 'bg-black'}`}
             >
               <div className="absolute top-4 right-4 z-[60]">
                 <motion.button onClick={closeModal} className="p-2 rounded-full bg-black/20 backdrop-blur-md text-white border border-white/10 hover:bg-white/10">
@@ -3551,17 +3747,45 @@ function ProfileSeccion({
 
               <div
                 ref={modalContainerRef}
-                className="w-full h-full overflow-y-scroll snap-y snap-mandatory no-scrollbar overscroll-contain"
+                // NATIVO: sin scroll/snap (el ViewPager2 scrollea) y transparente; el tap de
+                // pausa lo maneja la zona de fondo de cada slide. HTML: scroll-snap clásico.
+                className={exoActive
+                  ? "w-full h-full relative"
+                  : "w-full h-full overflow-y-scroll snap-y snap-mandatory no-scrollbar overscroll-contain"}
                 style={{ scrollbarWidth: 'none' }}
               >
-                {(modalVideoSource === 'saved' ? savedVideos : localMedia).map((video, index) => (
+                {(modalVideoSource === 'saved' ? savedVideos : localMedia)
+                  // Con el nativo activo solo renderizamos el overlay del video ACTIVO (una
+                  // sola capa sobre el único ExoPlayer). El video activo se identifica por su
+                  // id en la lista NATIVA (solo-videos), porque activeModalIndex es el índice
+                  // que da 'pageChanged' (indexa en nativeItemsRef, sin imágenes). En HTML se
+                  // apilan todos como antes.
+                  .filter((video) => !exoActive || nativeItemsRef.current[activeModalIndex]?.id === video.id)
+                  .map((video, mapIndex) => {
+                  const index = exoActive
+                    ? (modalVideoSource === 'saved' ? savedVideos : localMedia).findIndex(v => v.id === video.id)
+                    : mapIndex;
+                  return (
                   <div
                     key={video.id}
                     id={`modal-video-${index}`}
                     data-index={index}
-                    className="modal-video-item w-full h-full snap-center relative flex items-center justify-center bg-black"
+                    className={exoActive
+                      ? "absolute inset-0 w-full h-full flex items-center justify-center"
+                      : "modal-video-item w-full h-full snap-center relative flex items-center justify-center bg-black"}
                   >
-                    {video.media_type === 'image' ? (
+                    {/* NATIVO: zona de fondo para el tap de pausa/reproducir (los botones
+                        del overlay van encima con su propio pointer-events). */}
+                    {exoActive && (
+                      <div
+                        className="absolute inset-0 z-0"
+                        onClick={() => {
+                          exoPausedRef.current = !exoPausedRef.current;
+                          BuzzyVideoFeed.setPaused({ paused: exoPausedRef.current }).catch(() => {});
+                        }}
+                      />
+                    )}
+                    {exoActive ? null : video.media_type === 'image' ? (
                       <img
                         src={getMediaUrl(video.video_url || video.video)}
                         className="w-full h-full object-cover md:object-contain max-h-screen"
@@ -3818,7 +4042,8 @@ function ProfileSeccion({
                       </div>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </motion.div>
           )

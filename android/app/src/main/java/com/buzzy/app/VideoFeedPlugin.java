@@ -87,7 +87,10 @@ public class VideoFeedPlugin extends Plugin {
         progressHandler.removeCallbacks(progressTick);
     }
 
-    /** Inserta el ViewPager2 nativo detrás del WebView y arranca en la página 0. */
+    /**
+     * Inserta el ViewPager2 nativo detrás del WebView. Arranca en `startIndex` (default 0).
+     * El perfil pasa startIndex para abrir directo en el video tocado (sin destello del 0).
+     */
     @PluginMethod
     public void show(PluginCall call) {
         JSArray arr = call.getArray("videoUrls");
@@ -101,6 +104,10 @@ public class VideoFeedPlugin extends Plugin {
             }
         }
         if (urls.isEmpty()) { call.reject("No se pasaron videoUrls"); return; }
+
+        // Índice inicial (default 0). Clamp al rango válido para no crashear.
+        int rawStart = call.getInt("startIndex", 0);
+        final int startIndex = Math.max(0, Math.min(rawStart, urls.size() - 1));
 
         getActivity().runOnUiThread(() -> {
             WebView web = getBridge().getWebView();
@@ -135,14 +142,6 @@ public class VideoFeedPlugin extends Plugin {
                     JSObject d = new JSObject();
                     d.put("index", position);
                     notifyListeners("playerError", d);
-                });
-                // El player activo pintó su primer frame (tras playUrl en un cambio de
-                // slide horizontal) → el JS desvanece el thumbnail recién ahora, sin
-                // mostrar el frame del slide vecino mientras prepare() bufferea.
-                adapter.setFrameCallback(position -> {
-                    JSObject d = new JSObject();
-                    d.put("index", position);
-                    notifyListeners("frameReady", d);
                 });
                 pager.setAdapter(adapter);
                 // Reproducir la página visible; pausar las demás. Y avisar al JS.
@@ -227,7 +226,8 @@ public class VideoFeedPlugin extends Plugin {
                                 if (dx > touchSlop || dy > touchSlop) {
                                     // Margen anti-diagonal: para reenviar al pager (vertical)
                                     // exigir que sea CLARAMENTE vertical (dy > dx*1.2). Si es
-                                    // horizontal o diagonal, es del carrusel → WebView.
+                                    // horizontal o diagonal, se deja al WebView (React), que
+                                    // lo usa para cambiar de tab "Para ti" ↔ "Seguidos".
                                     boolean clearlyVertical = dy > dx * 1.2f;
                                     // EXCEPCIÓN: en la PÁGINA 0, arrastre hacia ABAJO no va al
                                     // pager (no hay anterior) → WebView para el pull-to-refresh.
@@ -254,9 +254,46 @@ public class VideoFeedPlugin extends Plugin {
                     return false;
                 });
 
-                // Arrancar el primero cuando el pager esté listo.
-                pager.post(() -> adapter.setActivePage(pager, 0));
+                // Arrancar en startIndex (default 0). CLAVE anti-destello: fijamos la página
+                // SIN animación DENTRO de pager.post (tras el primer layout) para que el
+                // ViewPager2 no muestre la página 0 antes de saltar. El feed sigue INVISIBLE
+                // hasta que se posicione en el índice correcto → NO se ve el primer video.
+                // Cuando startIndex>0 el propio nativo AUTO-REVELA tras posicionar (más
+                // fiable que un reveal() a ciegas del JS con rAF). startIndex=0 lo revela el JS.
+                if (startIndex > 0) {
+                    pager.post(() -> {
+                        pager.setCurrentItem(startIndex, false);
+                        pager.post(() -> {
+                            adapter.setActivePage(pager, startIndex);
+                            // Ya en el video correcto → revelar (una vez más en el próximo
+                            // frame para asegurar que el 1er frame de ese video se pintó).
+                            pager.post(() -> {
+                                if (pagerRoot != null) pagerRoot.setVisibility(View.VISIBLE);
+                                revealed = true;
+                            });
+                        });
+                    });
+                } else {
+                    pager.post(() -> adapter.setActivePage(pager, startIndex));
+                }
                 startProgress();
+            } else {
+                // Ya existe un pager (p.ej. sobrevivió una transición home→perfil): NO crear
+                // otro. Repointar la lista existente a las nuevas URLs y arrancar en startIndex.
+                // replaceUrls limpia players/música y notifica el cambio; luego saltamos al
+                // índice pedido. Así el perfil reutiliza el mismo pager sin duplicar decoders.
+                if (adapter != null && pager != null) {
+                    adapter.replaceUrls(pager, new ArrayList<>(urls));
+                    if (startIndex > 0) {
+                        pager.post(() -> {
+                            pager.setCurrentItem(startIndex, false);
+                            adapter.setActivePage(pager, startIndex);
+                        });
+                    }
+                    pagerRoot.setVisibility(View.VISIBLE);
+                    revealed = true;
+                    startProgress();
+                }
             }
             call.resolve();
         });
@@ -484,19 +521,6 @@ public class VideoFeedPlugin extends Plugin {
         });
     }
 
-    /**
-     * PRE-PREPARA un slide horizontal vecino (crea su player con el frame decodificado,
-     * pausado) para que al deslizar hacia él el cambio sea INSTANTÁNEO (sin buffering),
-     * igual que un vecino del feed vertical. El JS lo llama para el slide +1 y -1.
-     */
-    @PluginMethod
-    public void prefetchHorizontalSlide(PluginCall call) {
-        String url = call.getString("url");
-        getActivity().runOnUiThread(() -> {
-            if (adapter != null) adapter.prefetchHorizontalSlide(url);
-            call.resolve();
-        });
-    }
 
     /** Mueve el pager a un índice (p.ej. para sincronizar desde el JS si hiciera falta). */
     @PluginMethod

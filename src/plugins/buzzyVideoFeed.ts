@@ -6,21 +6,19 @@ import { registerPlugin, type PluginListenerHandle } from '@capacitor/core';
  * el swipe cambia de video. Solo Android; en web es no-op.
  */
 export interface BuzzyVideoFeedPlugin {
-  /** Inserta el feed nativo detrás del WebView y arranca en la página 0. */
-  show(options: { videoUrls: string[] }): Promise<void>;
+  /**
+   * Inserta el feed nativo detrás del WebView. Arranca en `startIndex` (default 0).
+   * El perfil pasa startIndex para abrir directo en el video tocado (sin destello del 0).
+   */
+  show(options: { videoUrls: string[]; startIndex?: number }): Promise<void>;
   /** Agrega más videos al final del feed (paginación infinita). */
   appendUrls(options: { videoUrls: string[] }): Promise<void>;
   /** Reemplaza toda la lista del feed y reinicia en la página 0 (cambio de tab). */
   replaceUrls(options: { videoUrls: string[] }): Promise<void>;
   /** Mueve el pager a un índice (sincronización desde JS si hace falta). */
   setActive(options: { index: number }): Promise<void>;
-  /** Reproduce una URL arbitraria (carrusel horizontal del mismo usuario). */
+  /** Recarga el video activo con una URL fresca (re-firma tras 403 por firma vencida). */
   playUrl(options: { url: string }): Promise<void>;
-  /**
-   * Pre-prepara un slide horizontal vecino (player con frame decodificado, pausado) →
-   * al deslizar hacia él el cambio es instantáneo, como un vecino del feed vertical.
-   */
-  prefetchHorizontalSlide(options: { url: string }): Promise<void>;
   /**
    * Música NATIVA del video activo (segundo ExoPlayer). url vacío = sin música.
    * trimStart en segundos. Volúmenes 0..1.
@@ -99,15 +97,6 @@ export interface BuzzyVideoFeedPlugin {
    */
   addListener(
     eventName: 'playerError',
-    listener: (data: { index: number }) => void,
-  ): Promise<PluginListenerHandle>;
-  /**
-   * El player nativo ACTIVO pintó su PRIMER frame (tras un playUrl al cambiar de slide
-   * horizontal). El JS desvanece el thumbnail del slide recién ahora → no se ve el
-   * frame del slide vecino mientras el nuevo video bufferea.
-   */
-  addListener(
-    eventName: 'frameReady',
     listener: (data: { index: number }) => void,
   ): Promise<PluginListenerHandle>;
   /** Quita TODOS los listeners de este plugin (evita acumular duplicados). */
