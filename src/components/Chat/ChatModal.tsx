@@ -1642,19 +1642,19 @@ const ChatModal: React.FC = () => {
                           onContextMenu={(e) => {
                             // Solo prevenir el menú CONTEXTUAL nativo del navegador (que en
                             // Android WebView se dispara al arrastrar/mantener). NO abrimos el
-                            // menú de opciones aquí: eso solo lo hace el long-press de 2s con
-                            // el dedo quieto (onTouchStart). Sin esto, arrastrar abría el menú.
+                            // menú de opciones aquí: eso solo lo hace el long-press con el
+                            // dedo quieto (onTouchStart). Sin esto, arrastrar abría el menú.
                             e.preventDefault();
                           }}
                           onTouchStart={(e) => {
                             const t = e.touches[0];
+                            if (!t) return;
                             msgTouchStartRef.current = { x: t.clientX, y: t.clientY };
-                            // Long-press de 2s (dedo quieto) para abrir las opciones del mensaje.
+                            // Long-press de 500ms (dedo quieto) para abrir las opciones del mensaje.
                             longPressTimerRef.current = setTimeout(() => {
-                              console.log('[BuzzyChat] longPress 2s → abre menu');
                               setMsgMenuTarget(msg.uuid);
                               setClickedMessage(msg.uuid);
-                            }, 2000);
+                            }, 500);
                           }}
                           onTouchEnd={() => {
                             if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; }
@@ -1663,9 +1663,8 @@ const ChatModal: React.FC = () => {
                           onTouchCancel={() => {
                             // Android WebView dispara touchCANCEL (no touchEnd) cuando se apropia del
                             // gesto como scroll nativo, y deja de emitir touchmove. Sin limpiar aquí el
-                            // timer de long-press sobrevive y abre el menú a los 2s → causa raíz del bug
+                            // timer de long-press sobrevive y abre el menú → causa raíz del bug
                             // "scroll abre el menú de reenviar/eliminar".
-                            console.log('[BuzzyChat] touchCancel → cancela longPress (scroll nativo)');
                             if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; }
                             msgTouchStartRef.current = null;
                           }}
@@ -1674,15 +1673,16 @@ const ChatModal: React.FC = () => {
                             // cercano al slop de scroll de Android (~4-8px) para atrapar el movimiento
                             // antes de que el WebView se apropie del gesto y deje de emitir touchmove.
                             const start = msgTouchStartRef.current;
-                            if (start) {
-                              const t = e.touches[0];
+                            const t = e.touches[0];
+                            if (start && t) {
                               const dx = Math.abs(t.clientX - start.x), dy = Math.abs(t.clientY - start.y);
                               if (dx > 6 || dy > 6) {
-                                console.log(`[BuzzyChat] touchMove dx=${dx.toFixed(0)} dy=${dy.toFixed(0)} → cancela longPress`);
-                                if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+                                if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; }
+                                msgTouchStartRef.current = null;
                               }
                             } else if (longPressTimerRef.current) {
                               clearTimeout(longPressTimerRef.current);
+                              longPressTimerRef.current = null;
                             }
                           }}
                           className="relative flex items-end justify-end gap-2"
