@@ -1533,11 +1533,12 @@ const ChatModal: React.FC = () => {
                               itemBg = "bg-amber-400/5 hover:bg-amber-400/10";
                             }
 
+                            const borderColor = planName === 'FRIEND' ? 'border-cyan-400/50' : planName === 'VIP' ? 'border-amber-400/50' : planName === 'PLUS' ? 'border-purple-400/50' : 'border-white/10';
                             return (
                               <motion.li
                                 key={chat.uuid}
                                 onClick={() => setSelectedChat(chat.uuid)}
-                                className={`p-4 mx-2 my-1 rounded-2xl transition-all cursor-pointer flex items-center gap-3 border border-white/5 last:border-b-0 group relative overflow-hidden ${itemBg}`}
+                                className={`p-4 mx-2 my-2 rounded-2xl transition-all cursor-pointer flex items-center gap-3 border-2 ${borderColor} last:border-b-2 group relative overflow-hidden ${itemBg}`}
                                 whileTap={{ scale: 0.98 }}
                               >
                                 {(planName === 'FRIEND' || planName === 'PLUS' || planName === 'VIP') && (
