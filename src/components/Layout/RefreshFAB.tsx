@@ -4,15 +4,20 @@ import { RefreshCw } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { useRefreshPage } from "../../hooks/useRefreshPage";
 import { usePullToRefresh } from "../../hooks/usePullToRefresh";
+import { useChat } from "../../context/ChatContext";
 
 const RefreshFAB: React.FC = () => {
   const { triggerRefresh } = useRefreshPage();
   const { pathname } = useLocation();
   const [spinning, setSpinning] = useState(false);
+  const { showMessages, selectedChat } = useChat();
 
   // El home (/) tiene su propio pull-to-refresh en el feed
   const isHome = pathname === "/";
   const isAuthPage = pathname === "/sign-in" || pathname === "/sign-up" || pathname.startsWith("/register") || pathname.startsWith("/verify");
+  // Con el modal de chats abierto (lista o conversación) el pull-to-refresh queda inerte
+  const chatOpen = showMessages || selectedChat != null;
+  const enabled = !isHome && !isAuthPage && !chatOpen;
 
   const handleRefresh = useCallback(async () => {
     if (spinning) return;
@@ -25,15 +30,16 @@ const RefreshFAB: React.FC = () => {
   const { isPulling, pullProgress } = usePullToRefresh({
     onRefresh: handleRefresh,
     global: !isHome && !isAuthPage,
+    enabled,
   });
 
   const isActive = isPulling || pullProgress > 0;
 
   return (
     <>
-      {/* Indicador visual del pull — solo fuera del home y auth */}
+      {/* Indicador visual del pull — solo fuera del home y auth, y con el chat cerrado */}
       <AnimatePresence>
-        {!isHome && !isAuthPage && isActive && (
+        {enabled && isActive && (
           <motion.div
             key="pull-indicator"
             initial={{ opacity: 0, y: -20 }}
@@ -55,8 +61,8 @@ const RefreshFAB: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* Botón flotante — solo fuera del home y auth */}
-      {!isHome && !isAuthPage && (
+      {/* Botón flotante — solo fuera del home y auth, oculto con el chat abierto */}
+      {enabled && (
         <motion.button
           initial={{ opacity: 0, scale: 0.7 }}
           animate={{ opacity: 1, scale: 1 }}
