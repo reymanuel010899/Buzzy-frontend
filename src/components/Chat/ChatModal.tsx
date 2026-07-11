@@ -1353,7 +1353,7 @@ const ChatModal: React.FC = () => {
                 transition={{ duration: 0.12, ease: "easeOut" }}
                 className="fixed inset-x-0 top-0 z-[101] mx-auto w-full max-w-md"
               >
-                <div className="bg-gradient-to-b from-[#0f1419]/95 to-[#151b24]/92 border-x border-b border-[#00f0ff]/20 rounded-b-2xl shadow-2xl overflow-hidden">
+                <div className="bg-black border-x border-b border-white/8 rounded-b-2xl shadow-2xl overflow-hidden">
                   <div className="flex items-center justify-between px-5 py-4 border-b border-gray-700/50">
                     <h3 className="text-xl font-bold text-white">{t('common:messages.title', 'Mensajes')}</h3>
                     <motion.button
