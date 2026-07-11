@@ -664,15 +664,28 @@ const ChatModal: React.FC = () => {
     }
   }, [user.id, setUnreadCount, incrementUnread]));
 
+  // Expiración del "escribiendo..." en el receptor: si el evento de fin se
+  // pierde (desconexión del emisor), el indicador se limpia solo a los 6s.
+  const typingExpiryRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
   useWsEvent("typing", useCallback((data: any) => {
     if (data.user_id === user.id) return;
     if (data.chat_uuid && data.chat_uuid === selectedChatRef.current && isNotifEnabled('notif_messages')) {
       typingAudioRef.current?.play().catch(() => {});
     }
+    const key = `${data.chat_uuid}:${data.user_id}`;
+    const timers = typingExpiryRef.current;
+    const prevTimer = timers.get(key);
+    if (prevTimer) clearTimeout(prevTimer);
     if (data.is_typing) {
       setTypingUser(data.chat_uuid, data.user_id, data.username ?? "Alguien");
+      timers.set(key, setTimeout(() => {
+        removeTypingUser(data.chat_uuid, data.user_id);
+        timers.delete(key);
+      }, 6000));
     } else {
       removeTypingUser(data.chat_uuid, data.user_id);
+      timers.delete(key);
     }
   }, [user.id, setTypingUser, removeTypingUser]));
 
@@ -1058,6 +1071,65 @@ const ChatModal: React.FC = () => {
     const node = messagesContainerRef.current;
     if (node) node.scrollTop = node.scrollHeight - anchor.prevHeight + anchor.prevTop;
   }, [realtimeMessages]);
+
+  // Espejo de la lista para leerla dentro de callbacks sin re-crearlos
+  const realtimeMessagesRef = useRef(realtimeMessages);
+  realtimeMessagesRef.current = realtimeMessages;
+
+  // Resincronización: trae los mensajes posteriores al último conocido
+  // (cursor `after` del endpoint paginado) y los mergea deduplicando por
+  // uuid real, sin tocar los optimistas `temp-`. Se dispara al reconectar
+  // el socket y al volver la app al frente con el chat abierto.
+  const resyncMessages = useCallback(async () => {
+    const chat = selectedChat;
+    if (!chat) return;
+    const msgs = realtimeMessagesRef.current;
+    let lastReal: { created_at?: string } | null = null;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (!String(msgs[i].uuid).startsWith("temp-")) { lastReal = msgs[i]; break; }
+    }
+    // Sin base conocida el load inicial (última página) ya cubre el hueco
+    if (!lastReal?.created_at) return;
+    try {
+      const resp = await apiClient.get(`/api/chats/${chat}/messages/`, {
+        params: { after: lastReal.created_at },
+      });
+      if (selectedChatRef.current !== chat) return; // cambió de chat mientras cargaba
+      const news = resp.data?.messages ?? [];
+      if (!news.length) return;
+      let added = false;
+      setRealtimeMessages((prev) => {
+        const existing = new Set(prev.map((m) => String(m.uuid)));
+        const fresh = news.filter((m: { uuid: string | number }) => !existing.has(String(m.uuid)));
+        if (!fresh.length) return prev;
+        added = true;
+        return [...prev, ...fresh.map((m: object) => ({ ...m, is_read: true }))];
+      });
+      if (added) {
+        // El chat está abierto: marcar leído en servidor y avisar al emisor
+        apiClient.post(`/api/chats/${chat}/read-messages/`).catch(() => {});
+      }
+    } catch {
+      // Silencioso: el próximo trigger (reconexión/foreground) reintenta
+    }
+  }, [selectedChat]);
+
+  // Trigger 1: el socket (re)abrió — el provider emite "ws_open"
+  useWsEvent("ws_open", useCallback(() => { resyncMessages(); }, [resyncMessages]));
+
+  // Trigger 2: la app vuelve al frente o recupera red con el chat abierto
+  useEffect(() => {
+    const onWake = () => {
+      if (document.visibilityState !== "visible") return;
+      resyncMessages();
+    };
+    document.addEventListener("visibilitychange", onWake);
+    window.addEventListener("online", onWake);
+    return () => {
+      document.removeEventListener("visibilitychange", onWake);
+      window.removeEventListener("online", onWake);
+    };
+  }, [resyncMessages]);
 
   // Once backendMessages loads, notify sender so ✓✓ updates without reload (only once per chat)
   const wsReadSentRef = useRef<string | null>(null);

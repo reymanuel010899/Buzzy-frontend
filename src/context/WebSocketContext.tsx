@@ -132,6 +132,10 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         drainQueue(ws);
 
         startHeartbeat();
+
+        // Avisar a los consumidores (p.ej. el chat abierto resincroniza los
+        // mensajes que pudieron perderse mientras el socket estuvo caído)
+        emit({ type: "ws_open" } as unknown as WsIncomingEvent);
       };
 
       ws.onmessage = (event) => {
@@ -188,6 +192,46 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     },
     [drainQueue, emit, startHeartbeat, stopHeartbeat]
   );
+
+  // ─── Reconexión inmediata al volver al frente o recuperar la red ──────────
+  // El backoff con timer cubre las caídas normales, pero al volver del segundo
+  // plano o recuperar conexión no hay que esperar el próximo reintento: si el
+  // socket no está OPEN se fuerza la reconexión ya (reset del backoff).
+
+  const forceReconnect = useCallback(() => {
+    if (!shouldReconnectRef.current || !urlRef.current) return;
+    const ws = socketRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) return;
+    if (retryTimerRef.current) {
+      clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+    retryCountRef.current = 0;
+    connect(urlRef.current);
+  }, [connect]);
+
+  useEffect(() => {
+    const wake = () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      forceReconnect();
+    };
+    document.addEventListener("visibilitychange", wake);
+    window.addEventListener("online", wake);
+    // En el APK, el evento `resume` de Capacitor es más fiable que visibilitychange
+    let removeResume: (() => void) | undefined;
+    import("@capacitor/app")
+      .then(({ App }) =>
+        App.addListener("resume", wake).then((h) => {
+          removeResume = () => h.remove();
+        })
+      )
+      .catch(() => {});
+    return () => {
+      document.removeEventListener("visibilitychange", wake);
+      window.removeEventListener("online", wake);
+      removeResume?.();
+    };
+  }, [forceReconnect]);
 
   // ─── Conectar / desconectar cuando cambia el usuario ─────────────────────
 
