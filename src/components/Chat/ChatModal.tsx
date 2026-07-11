@@ -9,7 +9,7 @@ import { useTranslation } from "react-i18next"
 import {
   FileText, Image as ImageIcon, Camera, Headphones, User,
   Mic, Trash2, StopCircle, Search, X, Phone, Video, Plus, Send, Download, Play, MessageCircleMore,
-  Sparkles, Shield, ChevronRight, Users, EyeOff, Inbox, UserCheck, Forward, CheckCheck, Check,
+  Sparkles, Shield, ChevronRight, ChevronDown, Users, EyeOff, Inbox, UserCheck, Forward, CheckCheck, Check,
 } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 import { useNavigate } from "react-router-dom"
@@ -84,6 +84,13 @@ const ChatModal: React.FC = () => {
   const [callAlert, setCallAlert] = useState<string | null>(null);
   const callAlertTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  // Política de auto-scroll: solo bajar al fondo si el lector está cerca del fondo
+  // (o el mensaje es propio); si está leyendo mensajes antiguos, acumular la píldora.
+  const messagesContainerRef = useRef<HTMLDivElement>(null)
+  const isNearBottomRef = useRef(true)
+  const prevMsgCountRef = useRef(0)
+  const lastMsgUuidRef = useRef<string | null>(null)
+  const [newMsgCount, setNewMsgCount] = useState(0)
   const unreadCounts = useUnreadMessages((state) => state.unreadCounts);
   const notifUnreadCount = useNotificationsStore((state) => state.unreadCount);
   void notifUnreadCount;
@@ -982,15 +989,38 @@ const ChatModal: React.FC = () => {
     });
   }, [backendMessages?.other_user?.id, selectedChat, showMessages, wsSend, user.username]);
 
-  // Scroll instantáneo al abrir un chat, suave al recibir mensajes nuevos
+  // Scroll instantáneo al abrir un chat
   useEffect(() => {
     if (!selectedChat) return;
+    isNearBottomRef.current = true;
+    setNewMsgCount(0);
     messagesEndRef.current?.scrollIntoView({ behavior: "instant" })
   }, [selectedChat])
 
+  // Auto-scroll al fondo SOLO si el lector está cerca del fondo o el último mensaje
+  // es propio. Si está leyendo mensajes antiguos, acumular la píldora de "mensajes
+  // nuevos" en vez de robarle la posición. Un prepend de historial (el último uuid
+  // no cambia) nunca mueve el scroll.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [realtimeMessages.length])
+    const len = realtimeMessages.length;
+    const last = len ? realtimeMessages[len - 1] : null;
+    const lastUuid = last ? String(last.uuid) : null;
+    const prevLen = prevMsgCountRef.current;
+    const prevLastUuid = lastMsgUuidRef.current;
+    prevMsgCountRef.current = len;
+    lastMsgUuidRef.current = lastUuid;
+
+    if (len <= prevLen) return;               // seed/reset/borrado: lo maneja el efecto de apertura
+    if (lastUuid === prevLastUuid) return;    // prepend de mensajes antiguos: no tocar el scroll
+
+    const isOwn = last?.sender_username === user.username;
+    if (isNearBottomRef.current || isOwn) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+      setNewMsgCount(0);
+    } else {
+      setNewMsgCount((c) => c + (len - prevLen));
+    }
+  }, [realtimeMessages, user.username])
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault()
@@ -1604,15 +1634,22 @@ const ChatModal: React.FC = () => {
                   </AnimatePresence>
 
                   <div
+                    ref={messagesContainerRef}
                     className="flex-1 overflow-y-auto overscroll-y-contain pt-20 pb-2 px-4 space-y-2"
                     style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', overscrollBehaviorY: 'contain' }}
                     onClick={() => { setMsgMenuTarget(null); }}
-                    onScroll={() => {
+                    onScroll={(e) => {
                       // Guarda a prueba de balas: si el contenedor scrollea LO QUE SEA, no es un
                       // long-press. No depende de que el WebView siga entregando touchmove/touchend
                       // (deja de hacerlo al apropiarse del gesto de scroll). Cancela el timer pendiente.
                       if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; }
                       msgTouchStartRef.current = null;
+                      // Tracking de cercanía al fondo para la política de auto-scroll; llegar
+                      // al fondo por scroll manual también limpia la píldora de mensajes nuevos.
+                      const el = e.currentTarget;
+                      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+                      isNearBottomRef.current = nearBottom;
+                      if (nearBottom && newMsgCount > 0) setNewMsgCount(0);
                     }}
                   >
                     {realtimeMessages.map((msg) => {
@@ -2028,6 +2065,28 @@ const ChatModal: React.FC = () => {
                   </div>
 
                   <form onSubmit={handleSendMessage} className="px-4 pb-4 pt-1.5 bg-transparent relative">
+                    {/* Píldora de "mensajes nuevos": anclada sobre el input (sigue al teclado).
+                        Área táctil mínima de 44px. */}
+                    <AnimatePresence>
+                      {newMsgCount > 0 && (
+                        <motion.button
+                          type="button"
+                          key="new-messages-pill"
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: 8 }}
+                          onClick={() => {
+                            setNewMsgCount(0);
+                            isNearBottomRef.current = true;
+                            messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+                          }}
+                          className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 z-40 flex items-center gap-2 px-4 min-h-[44px] rounded-full bg-cyan-600/90 backdrop-blur-md text-white text-sm font-medium shadow-lg border border-cyan-400/30"
+                        >
+                          <ChevronDown className="w-4 h-4" />
+                          {newMsgCount === 1 ? "1 mensaje nuevo" : `${newMsgCount} mensajes nuevos`}
+                        </motion.button>
+                      )}
+                    </AnimatePresence>
                     <AnimatePresence>
                       {showAttachmentMenu && (
                         <motion.div
