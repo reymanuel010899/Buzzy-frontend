@@ -8,9 +8,11 @@ import { loadMessages, saveMessages } from '../../../services/chatCacheDB';
 
 export const loadChatMessages = (chat_uuid: string) => async (dispatch: any) => {
   // 1. Mostrar cache inmediatamente (sin spinner si ya hay datos)
+  let cacheSeeded = false;
   try {
     const cached = await loadMessages(chat_uuid);
     if (cached.length > 0) {
+      cacheSeeded = true;
       dispatch({
         type: SUCCESS_LOAD_MESSAGES,
         payload: { messages: cached, chat_uuid, fromCache: true },
@@ -44,9 +46,10 @@ export const loadChatMessages = (chat_uuid: string) => async (dispatch: any) => 
     }
 
   } catch (error: any) {
-    // Si ya mostramos cache, no pisar con error — solo loggear
-    const hasCachedData = true; // ya despachamos cache arriba si había
-    if (!hasCachedData) {
+    // Si ya mostramos cache, no pisar con error — solo loggear.
+    // Sin cache, despachar el error para que el chat muestre su estado
+    // de error con reintento en vez de quedarse en blanco.
+    if (!cacheSeeded) {
       dispatch({
         type: FAILED_LOAD_MESSAGES,
         payload: error.response?.data?.error || error.message || 'Error al cargar los mensajes',

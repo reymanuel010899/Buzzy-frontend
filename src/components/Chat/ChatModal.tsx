@@ -9,7 +9,7 @@ import { useTranslation } from "react-i18next"
 import {
   FileText, Image as ImageIcon, Camera, Headphones, User,
   Mic, Trash2, StopCircle, Search, X, Phone, Video, Plus, Send, Download, Play, MessageCircleMore,
-  Sparkles, Shield, ChevronRight, ChevronDown, Users, EyeOff, Inbox, UserCheck, Forward, CheckCheck, Check,
+  Sparkles, Shield, ChevronRight, ChevronDown, Users, EyeOff, Inbox, UserCheck, Forward, CheckCheck, Check, Clock, RotateCcw,
 } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 import { useNavigate } from "react-router-dom"
@@ -263,11 +263,7 @@ const ChatModal: React.FC = () => {
     };
     setRealtimeMessages(prev => [...prev, optimisticMsg]);
 
-    sendMessage(formData)(dispatch).then((real: any) => {
-      if (real?.uuid) {
-        setRealtimeMessages(prev => prev.map(m => m.uuid === tempId ? { ...real } : m));
-      }
-    });
+    dispatchSend(formData, tempId);
     setShowContactModal(false);
     setShowAttachmentMenu(false);
   };
@@ -292,11 +288,7 @@ const ChatModal: React.FC = () => {
     formData.append("message_type", type);
     formData.append("content", content);
 
-    sendMessage(formData)(dispatch).then((real: any) => {
-      if (real?.uuid) {
-        setRealtimeMessages(prev => prev.map(m => m.uuid === tempId ? { ...real } : m));
-      }
-    });
+    dispatchSend(formData, tempId);
   };
 
   const handleFileUploadDirect = async (file: File) => {
@@ -332,11 +324,7 @@ const ChatModal: React.FC = () => {
     };
     setRealtimeMessages(prev => [...prev, optimisticMsg]);
 
-    sendMessage(formData)(dispatch).then((real: any) => {
-      if (real?.uuid) {
-        setRealtimeMessages(prev => prev.map(m => m.uuid === tempId ? { ...real } : m));
-      }
-    });
+    dispatchSend(formData, tempId);
   };
 
   const [isRecording, setIsRecording] = useState(false);
@@ -417,11 +405,7 @@ const ChatModal: React.FC = () => {
     };
     setRealtimeMessages(prev => [...prev, optimisticMsg]);
 
-    sendMessage(formData)(dispatch).then((real: any) => {
-      if (real?.uuid) {
-        setRealtimeMessages(prev => prev.map(m => m.uuid === tempId ? { ...real } : m));
-      }
-    });
+    dispatchSend(formData, tempId);
   };
 
   const formatTime = (seconds: number) => {
@@ -486,12 +470,40 @@ const ChatModal: React.FC = () => {
     });
   }, [displayChats, chatFolder]);
 
-  const { messages: backendMessages, loading: messagesLoading } = useSelector(
+  const { messages: backendMessages, loading: messagesLoading, error: messagesError } = useSelector(
     (state: RootState) => state.chatMessagesReducer
   )
-  void messagesLoading;
 
   const currentBackendChat = displayChats.find(c => c.uuid === selectedChat) || null
+
+  // Envío con estado: guarda el FormData para poder reintentar, marca el
+  // mensaje optimista como fallido si el POST falla o no responde en 15s.
+  const pendingSendsRef = useRef<Map<string, FormData>>(new Map());
+
+  const dispatchSend = useCallback((formData: FormData, tempId: string) => {
+    pendingSendsRef.current.set(tempId, formData);
+    const markFailed = () =>
+      setRealtimeMessages(prev => prev.map(m => m.uuid === tempId ? { ...m, send_failed: true } : m));
+    const failTimer = setTimeout(markFailed, 15000);
+    sendMessage(formData)(dispatch)
+      .then((real: { uuid?: string } | undefined) => {
+        clearTimeout(failTimer);
+        if (real?.uuid) {
+          pendingSendsRef.current.delete(tempId);
+          setRealtimeMessages(prev => prev.map(m => m.uuid === tempId ? { ...real } : m));
+        } else {
+          markFailed();
+        }
+      })
+      .catch(() => { clearTimeout(failTimer); markFailed(); });
+  }, [dispatch]);
+
+  const retrySend = useCallback((tempId: string) => {
+    const formData = pendingSendsRef.current.get(tempId);
+    if (!formData) return;
+    setRealtimeMessages(prev => prev.map(m => m.uuid === tempId ? { ...m, send_failed: false } : m));
+    dispatchSend(formData, tempId);
+  }, [dispatchSend]);
 
   useEffect(() => {
     if (selectedChat && currentBackendChat?.other_user?.username) {
@@ -996,6 +1008,7 @@ const ChatModal: React.FC = () => {
     loadingOlderRef.current = false;
     nextCursorRef.current = null;
     pendingAnchorRef.current = null;
+    pendingSendsRef.current.clear();
   }, [selectedChat]);
 
   // Siembra la conversación: la caché puede sembrar primero (offline-friendly),
@@ -1216,11 +1229,7 @@ const ChatModal: React.FC = () => {
     formData.append("content", content);
     formData.append("message_type", "text");
 
-    sendMessage(formData)(dispatch).then((real: any) => {
-      if (real?.uuid) {
-        setRealtimeMessages(prev => prev.map(m => m.uuid === tempId ? { ...real } : m));
-      }
-    });
+    dispatchSend(formData, tempId);
     input.value = ""
     setMessageText("")
   }
@@ -1827,6 +1836,40 @@ const ChatModal: React.FC = () => {
                       if (el.scrollTop < 200 && hasMoreOlder) loadOlderMessages();
                     }}
                   >
+                    {/* Estados de la conversación: skeleton mientras carga, error con
+                        reintento, o estado vacío para chats sin mensajes */}
+                    {messagesLoading && realtimeMessages.length === 0 && (
+                      <div className="space-y-3 pt-2">
+                        {[64, 40, 56, 32, 48].map((w, i) => (
+                          <div key={i} className={`flex ${i % 2 ? "justify-end" : "justify-start"}`}>
+                            <div
+                              className="h-10 rounded-2xl bg-white/10 animate-pulse"
+                              style={{ width: `${w}%` }}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {!messagesLoading && messagesError && realtimeMessages.length === 0 && (
+                      <div className="flex flex-col items-center justify-center gap-3 pt-16 text-center px-6">
+                        <p className="text-sm text-gray-400">No se pudieron cargar los mensajes</p>
+                        <button
+                          type="button"
+                          onClick={() => { if (selectedChat) loadChatMessages(selectedChat)(dispatch); }}
+                          className="flex items-center gap-2 px-5 min-h-[44px] rounded-full bg-white/10 text-white text-sm font-medium active:bg-white/20"
+                        >
+                          <RotateCcw size={14} />
+                          Reintentar
+                        </button>
+                      </div>
+                    )}
+                    {!messagesLoading && !messagesError && realtimeMessages.length === 0 && (
+                      <div className="flex flex-col items-center justify-center gap-2 pt-16 text-center px-6">
+                        <MessageCircleMore className="w-10 h-10 text-white/20" />
+                        <p className="text-sm text-gray-400">No hay mensajes todavía</p>
+                        <p className="text-xs text-gray-500">Escribe el primero para empezar la conversación</p>
+                      </div>
+                    )}
                     {/* Cabecera del historial: spinner de carga, error con reintento
                         por gesto, o marca de inicio de la conversación */}
                     {loadingOlder && (
@@ -2171,9 +2214,22 @@ const ChatModal: React.FC = () => {
                                       {new Date(msg.created_at).toLocaleTimeString("es-DO", { hour: "2-digit", minute: "2-digit" })}
                                     </p>
                                     {isMe && (
-                                      msg.is_read
-                                        ? <CheckCheck size={12} className="text-[#00f0ff]" />
-                                        : <Check size={12} className="text-white/30" />
+                                      msg.send_failed
+                                        ? (
+                                          <button
+                                            type="button"
+                                            onClick={(e) => { e.stopPropagation(); retrySend(String(msg.uuid)); }}
+                                            className="flex items-center gap-1 text-[11px] text-red-400 font-medium py-1 px-1.5 -my-1 rounded-lg active:bg-red-400/10"
+                                          >
+                                            <RotateCcw size={12} />
+                                            no enviado · reintentar
+                                          </button>
+                                        )
+                                        : String(msg.uuid).startsWith("temp-")
+                                          ? <Clock size={12} className="text-white/30" />
+                                          : msg.is_read
+                                            ? <CheckCheck size={12} className="text-[#00f0ff]" />
+                                            : <Check size={12} className="text-white/30" />
                                     )}
                                   </div>
                                 </div>
