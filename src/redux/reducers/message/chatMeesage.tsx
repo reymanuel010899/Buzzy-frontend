@@ -24,6 +24,11 @@ interface ChatMessagesState {
     messages: Message[];
     chat_uuid?: string;
     other_user?: any;
+    // Paginación por cursor (solo la trae el fetch fresco del servidor)
+    has_more?: boolean;
+    next_cursor?: string | null;
+    // true cuando la siembra vino de la caché local (offline-first)
+    fromCache?: boolean;
   } | null;   // Objeto que contiene mensajes y metadata
   loading: boolean;
   error: string | null;
@@ -43,6 +48,9 @@ interface SuccessLoadMessagesAction {
     messages: Message[];
     chat_uuid?: string;
     other_user?: any;
+    has_more?: boolean;
+    next_cursor?: string | null;
+    fromCache?: boolean;
   };
 }
 

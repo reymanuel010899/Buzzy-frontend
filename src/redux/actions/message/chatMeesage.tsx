@@ -23,9 +23,10 @@ export const loadChatMessages = (chat_uuid: string) => async (dispatch: any) => 
     dispatch({ type: LOADING_LOAD_MESSAGES });
   }
 
-  // 2. Pedir mensajes frescos al servidor
+  // 2. Pedir la página más reciente al servidor (paginación por cursor:
+  //    los mensajes anteriores se cargan al hacer scroll hacia arriba)
   try {
-    const response = await apiClient.get(`/api/chats/${chat_uuid}/messages/`);
+    const response = await apiClient.get(`/api/chats/${chat_uuid}/messages/`, { params: { limit: 30 } });
 
     if (response.status === 200 || response.status === 201) {
       dispatch({

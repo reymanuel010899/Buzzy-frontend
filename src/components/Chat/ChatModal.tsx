@@ -4,7 +4,7 @@ import type React from "react"
 import sendMessageSound from "../../assets/sounds/sendMessage.mp3";
 import typingSound from "../../assets/sounds/whatsapp-typing.mp3";
 
-import { useState, useEffect, useRef, useCallback, useMemo } from "react"
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react"
 import { useTranslation } from "react-i18next"
 import {
   FileText, Image as ImageIcon, Camera, Headphones, User,
@@ -91,6 +91,14 @@ const ChatModal: React.FC = () => {
   const prevMsgCountRef = useRef(0)
   const lastMsgUuidRef = useRef<string | null>(null)
   const [newMsgCount, setNewMsgCount] = useState(0)
+  // Paginación del historial: cursor hacia atrás + estado de carga/error
+  const [loadingOlder, setLoadingOlder] = useState(false)
+  const [olderError, setOlderError] = useState(false)
+  const [hasMoreOlder, setHasMoreOlder] = useState(false)
+  const loadingOlderRef = useRef(false)
+  const nextCursorRef = useRef<string | null>(null)
+  // Anclaje de scroll pendiente tras un prepend de mensajes antiguos
+  const pendingAnchorRef = useRef<{ prevHeight: number; prevTop: number } | null>(null)
   const unreadCounts = useUnreadMessages((state) => state.unreadCounts);
   const notifUnreadCount = useNotificationsStore((state) => state.unreadCount);
   void notifUnreadCount;
@@ -959,21 +967,97 @@ const ChatModal: React.FC = () => {
 
   const seededChatRef = useRef<string | null>(null);
 
+  const freshSeededChatRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!selectedChat) return;
     setRealtimeMessages([]);
     seededChatRef.current = null;
+    freshSeededChatRef.current = null;
     markedReadRef.current = null;
     wsReadSentRef.current = null;
+    // Reset de la paginación del historial al cambiar de chat
+    setLoadingOlder(false);
+    setOlderError(false);
+    setHasMoreOlder(false);
+    loadingOlderRef.current = false;
+    nextCursorRef.current = null;
+    pendingAnchorRef.current = null;
   }, [selectedChat]);
 
+  // Siembra la conversación: la caché puede sembrar primero (offline-friendly),
+  // pero los datos frescos del servidor SIEMPRE re-siembran una vez, conservando
+  // los mensajes optimistas (temp-) en vuelo. Antes la caché bloqueaba al fresco
+  // y el chat podía quedarse mostrando solo los mensajes cacheados.
   useEffect(() => {
     if (!backendMessages?.messages || !selectedChat) return;
-    if (seededChatRef.current === selectedChat) return;
+    const isFresh = !backendMessages.fromCache;
+    if (freshSeededChatRef.current === selectedChat) return;
+    if (seededChatRef.current === selectedChat && !isFresh) return;
     seededChatRef.current = selectedChat;
+    if (isFresh) {
+      freshSeededChatRef.current = selectedChat;
+      // Metadatos de paginación (solo el fetch fresco los trae)
+      setHasMoreOlder(!!backendMessages.has_more);
+      nextCursorRef.current = backendMessages.next_cursor ?? null;
+    }
 
-    setRealtimeMessages(backendMessages.messages);
-  }, [backendMessages?.messages, selectedChat]);
+    const fetched = backendMessages.messages;
+    setRealtimeMessages((prev) => {
+      const fetchedUuids = new Set(fetched.map((m: { uuid: string | number }) => String(m.uuid)));
+      const extras = prev.filter(
+        (m) => String(m.uuid).startsWith("temp-") && !fetchedUuids.has(String(m.uuid))
+      );
+      return extras.length ? [...fetched, ...extras] : fetched;
+    });
+  }, [backendMessages, selectedChat]);
+
+  // Cargar la página anterior del historial (scroll cerca del tope)
+  const loadOlderMessages = useCallback(async () => {
+    if (loadingOlderRef.current) return;
+    if (!selectedChat || !nextCursorRef.current) return;
+    const el = messagesContainerRef.current;
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    setOlderError(false);
+    const chatAtFetch = selectedChat;
+    try {
+      const resp = await apiClient.get(`/api/chats/${selectedChat}/messages/`, {
+        params: { before: nextCursorRef.current, limit: 30 },
+      });
+      // Si el usuario cambió de chat mientras cargaba, descartar el resultado
+      if (chatAtFetch !== selectedChat) return;
+      const older = resp.data?.messages ?? [];
+      nextCursorRef.current = resp.data?.next_cursor ?? null;
+      setHasMoreOlder(!!resp.data?.has_more);
+      if (older.length && el) {
+        // Guardar la geometría para re-anclar la posición tras el prepend
+        pendingAnchorRef.current = { prevHeight: el.scrollHeight, prevTop: el.scrollTop };
+      }
+      if (older.length) {
+        setRealtimeMessages((prev) => {
+          const existing = new Set(prev.map((m) => String(m.uuid)));
+          const fresh = older.filter((m: { uuid: string | number }) => !existing.has(String(m.uuid)));
+          return fresh.length ? [...fresh, ...prev] : prev;
+        });
+      }
+    } catch {
+      setOlderError(true);
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+    }
+  }, [selectedChat]);
+
+  // Re-anclaje síncrono (antes del paint) tras prepend de mensajes antiguos:
+  // el mensaje que se estaba leyendo no se mueve visualmente.
+  useLayoutEffect(() => {
+    const anchor = pendingAnchorRef.current;
+    if (!anchor) return;
+    pendingAnchorRef.current = null;
+    const node = messagesContainerRef.current;
+    if (node) node.scrollTop = node.scrollHeight - anchor.prevHeight + anchor.prevTop;
+  }, [realtimeMessages]);
 
   // Once backendMessages loads, notify sender so ✓✓ updates without reload (only once per chat)
   const wsReadSentRef = useRef<string | null>(null);
@@ -1650,8 +1734,31 @@ const ChatModal: React.FC = () => {
                       const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
                       isNearBottomRef.current = nearBottom;
                       if (nearBottom && newMsgCount > 0) setNewMsgCount(0);
+                      // Cerca del tope: cargar la página anterior del historial.
+                      // Solo se dispara con eventos de scroll, así un fallo no
+                      // reintenta en bucle — el próximo gesto lo vuelve a intentar.
+                      if (el.scrollTop < 200 && hasMoreOlder) loadOlderMessages();
                     }}
                   >
+                    {/* Cabecera del historial: spinner de carga, error con reintento
+                        por gesto, o marca de inicio de la conversación */}
+                    {loadingOlder && (
+                      <div className="flex justify-center py-3">
+                        <div className="w-5 h-5 border-2 border-cyan-400/60 border-t-transparent rounded-full animate-spin" />
+                      </div>
+                    )}
+                    {olderError && !loadingOlder && (
+                      <div className="text-center text-xs text-red-400/80 py-2">
+                        No se pudo cargar el historial — desliza hacia arriba para reintentar
+                      </div>
+                    )}
+                    {!hasMoreOlder && !loadingOlder && realtimeMessages.length > 0 && (
+                      <div className="flex items-center gap-3 py-2 text-[11px] text-gray-500">
+                        <div className="flex-1 h-px bg-white/10" />
+                        inicio de la conversación
+                        <div className="flex-1 h-px bg-white/10" />
+                      </div>
+                    )}
                     {realtimeMessages.map((msg) => {
                       const isMe = msg.sender_username === user.username
 
