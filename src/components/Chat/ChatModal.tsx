@@ -1383,8 +1383,11 @@ const ChatModal: React.FC = () => {
                       />
                     </div>
                     <button className="p-2 rounded-xl hover:bg-white/10 transition-colors text-gray-400 hover:text-white" title="Filtrar chats">
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                      <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                        <circle cx="6" cy="6" r="1.5" />
+                        <circle cx="6" cy="12" r="1.5" />
+                        <circle cx="6" cy="18" r="1.5" />
+                        <path d="M9 6h10M9 12h10M9 18h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
                       </svg>
                     </button>
                   </div>
