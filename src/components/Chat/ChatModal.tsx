@@ -1131,6 +1131,21 @@ const ChatModal: React.FC = () => {
     };
   }, [resyncMessages]);
 
+  // Teclado Android (adjustResize): al abrir el teclado el WebView se
+  // redimensiona (evento resize). Si el lector estaba al fondo, mantener el
+  // fondo visible para que el teclado no tape los últimos mensajes; si estaba
+  // leyendo arriba, no tocar su posición.
+  useEffect(() => {
+    const onResize = () => {
+      if (!selectedChatRef.current) return;
+      if (isNearBottomRef.current) {
+        messagesEndRef.current?.scrollIntoView({ behavior: "instant" });
+      }
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
   // Once backendMessages loads, notify sender so ✓✓ updates without reload (only once per chat)
   const wsReadSentRef = useRef<string | null>(null);
   useEffect(() => {
