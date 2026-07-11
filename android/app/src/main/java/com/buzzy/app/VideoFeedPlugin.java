@@ -562,6 +562,18 @@ public class VideoFeedPlugin extends Plugin {
     }
 
     @Override
+    protected void handleOnResume() {
+        super.handleOnResume();
+        // Reset feed visibility when the app resumes from background.
+        // The WebView is re-initializing, so reset the plugin state so video
+        // and UI render together (not video-first flash).
+        revealed = false;
+        if (pagerRoot != null) {
+            pagerRoot.setVisibility(View.GONE);
+        }
+    }
+
+    @Override
     protected void handleOnDestroy() {
         super.handleOnDestroy();
         stopProgress();
