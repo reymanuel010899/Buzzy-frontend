@@ -164,6 +164,9 @@ const ChatModal: React.FC = () => {
   // Forward message
   const [forwardMsg, setForwardMsg] = useState<any | null>(null);
   const [forwardRecipients, setForwardRecipients] = useState<number[]>([]);
+  // Multi-select messages
+  const [selectedMessages, setSelectedMessages] = useState<Set<string>>(new Set());
+  const maxSelectedMessages = 10;
   // Message action menu
   const [msgMenuTarget, setMsgMenuTarget] = useState<string | null>(null);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -808,6 +811,41 @@ const ChatModal: React.FC = () => {
     setForwardRecipients([]);
   };
 
+  // ── Multi-select messages ───────────────────────────────────────────
+  const toggleMessageSelection = (msgUuid: string) => {
+    setSelectedMessages(prev => {
+      const next = new Set(prev);
+      if (next.has(msgUuid)) {
+        next.delete(msgUuid);
+      } else if (next.size < maxSelectedMessages) {
+        next.add(msgUuid);
+      }
+      return next;
+    });
+  };
+
+  const clearSelection = () => {
+    setSelectedMessages(new Set());
+  };
+
+  const handleDeleteSelectedMessages = async (forAll: boolean) => {
+    for (const uuid of selectedMessages) {
+      await handleDeleteMessage(uuid, forAll);
+    }
+    clearSelection();
+  };
+
+  const handleCopySelectedMessages = () => {
+    const messages = realtimeMessages.filter(m => selectedMessages.has(m.uuid));
+    const text = messages.map(m => `${m.sender_username}: ${m.content}`).join('\n');
+    navigator.clipboard.writeText(text).then(() => {
+      showChatToast("Mensaje(s) copiado(s).");
+    }).catch(() => {
+      showChatToast("No se pudo copiar.", true);
+    });
+    clearSelection();
+  };
+
   // ── Search messages ──────────────────────────────────────────────────
   const handleChatSearch = async (q: string) => {
     setChatSearchQuery(q);
@@ -950,6 +988,17 @@ const ChatModal: React.FC = () => {
       showChatToast("No se pudo mover el chat.", true);
     }
   }, [currentBackendChat, chatFolder, loadChatsForFolder, setSelectedChat, showChatToast]);
+
+  // Pausa el video del feed cuando se abre el modal de chats
+  useEffect(() => {
+    if (showMessages || storyViewer) {
+      // Pausa cualquier video que esté reproduciéndose en el feed
+      const videoElements = document.querySelectorAll('video');
+      videoElements.forEach(video => {
+        if (!video.paused) video.pause();
+      });
+    }
+  }, [showMessages, storyViewer]);
 
   useEffect(() => {
     if (!showMessages) return;
@@ -1294,7 +1343,7 @@ const ChatModal: React.FC = () => {
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 onClick={() => setShowMessages(false)}
-                className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60]"
+                className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[100]"
               />
 
               <motion.div
@@ -1302,9 +1351,9 @@ const ChatModal: React.FC = () => {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.12, ease: "easeOut" }}
-                className="fixed inset-x-0 top-0 z-[60] mx-auto w-full max-w-md"
+                className="fixed inset-x-0 top-0 z-[101] mx-auto w-full max-w-md"
               >
-                <div className="bg-black border-x border-b border-white/8 rounded-b-2xl shadow-2xl overflow-hidden">
+                <div className="bg-gradient-to-b from-[#050811]/98 to-[#0a0f1a]/95 border-x border-b border-[#00f0ff]/20 rounded-b-2xl shadow-2xl overflow-hidden">
                   <div className="flex items-center justify-between px-5 py-4 border-b border-gray-700/50">
                     <h3 className="text-xl font-bold text-white">{t('common:messages.title', 'Mensajes')}</h3>
                     <motion.button
@@ -1902,6 +1951,12 @@ const ChatModal: React.FC = () => {
                           onClick={(e) => {
                             if ((e.target as HTMLElement).closest('button, a, input, video, audio')) return;
                             if (clickedMessageTimerRef.current) clearTimeout(clickedMessageTimerRef.current);
+                            // Si hay mensajes seleccionados, modo multi-select: toggle selección
+                            if (selectedMessages.size > 0) {
+                              toggleMessageSelection(msg.uuid);
+                              return;
+                            }
+                            // Sino, mantener comportamiento original
                             if (clickedMessage === msg.uuid) {
                               setClickedMessage(null);
                               setMsgMenuTarget(null);
@@ -1924,11 +1979,11 @@ const ChatModal: React.FC = () => {
                             const t = e.touches[0];
                             if (!t) return;
                             msgTouchStartRef.current = { x: t.clientX, y: t.clientY };
-                            // Long-press de 500ms (dedo quieto) para abrir las opciones del mensaje.
+                            // Long-press de 3 segundos (dedo quieto) para entrar en modo selección
                             longPressTimerRef.current = setTimeout(() => {
-                              setMsgMenuTarget(msg.uuid);
+                              toggleMessageSelection(msg.uuid);
                               setClickedMessage(msg.uuid);
-                            }, 500);
+                            }, 3000);
                           }}
                           onTouchEnd={() => {
                             if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; }
@@ -1968,7 +2023,7 @@ const ChatModal: React.FC = () => {
                           <div className="relative flex items-center">
 
                             <div
-                              className={`max-w-[72vw] ${msg.message_type === 'text' ? 'px-4 py-3' : msg.message_type === 'contact' ? 'p-0 overflow-hidden' : 'p-[1px]'} ${isMe ? 'rounded-tl-[20px] rounded-tr-[20px] rounded-bl-[20px] rounded-br-[4px]' : 'rounded-tl-[20px] rounded-tr-[20px] rounded-br-[20px] rounded-bl-[4px]'} shadow-xl transition-all duration-300 ${
+                              className={`max-w-[72vw] ${msg.message_type === 'text' ? 'px-4 py-3' : msg.message_type === 'contact' ? 'p-0 overflow-hidden' : 'p-[1px]'} ${isMe ? 'rounded-tl-[20px] rounded-tr-[20px] rounded-bl-[20px] rounded-br-[4px]' : 'rounded-tl-[20px] rounded-tr-[20px] rounded-br-[20px] rounded-bl-[4px]'} shadow-xl transition-all duration-300 ${selectedMessages.has(msg.uuid) ? 'ring-2 ring-cyan-400/50 bg-white/5' : ''} ${
                                 isMe
                                   ? (msg.message_type === 'text' || msg.message_type === 'contact')
                                     ? user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND'
@@ -2235,6 +2290,19 @@ const ChatModal: React.FC = () => {
                                 </div>
                               )}
                             </div>
+
+                            {/* Selection checkbox */}
+                            {selectedMessages.size > 0 && (
+                              <div className={`flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all ${
+                                selectedMessages.has(msg.uuid)
+                                  ? 'bg-cyan-500 border-cyan-400'
+                                  : 'border-gray-600 hover:border-gray-500'
+                              }`}>
+                                {selectedMessages.has(msg.uuid) && (
+                                  <Check size={14} className="text-white font-bold" />
+                                )}
+                              </div>
+                            )}
 
                             {/* Message action menu */}
                             <AnimatePresence>
@@ -2621,6 +2689,78 @@ const ChatModal: React.FC = () => {
                 </button>
               </motion.div>
             </>
+          )}
+        </AnimatePresence>
+
+        {/* Multi-select floating menu */}
+        <AnimatePresence>
+          {selectedMessages.size > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: 100 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 100 }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              className="fixed bottom-0 left-0 right-0 max-w-md mx-auto z-[150] bg-gradient-to-t from-[#0c1033]/98 to-[#1a1a2e]/90 backdrop-blur-xl border-t border-[#00f0ff]/20 rounded-t-3xl p-4 shadow-2xl"
+            >
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-sm font-semibold text-white">
+                  {selectedMessages.size} mensaje{selectedMessages.size !== 1 ? 's' : ''} seleccionado{selectedMessages.size !== 1 ? 's' : ''}
+                </span>
+                <button
+                  onClick={clearSelection}
+                  className="text-gray-400 hover:text-white transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+              <div className="grid grid-cols-4 gap-2">
+                <button
+                  onClick={() => {
+                    const msg = realtimeMessages.find(m => selectedMessages.has(m.uuid));
+                    if (msg) setForwardMsg(msg);
+                  }}
+                  className="flex flex-col items-center gap-1.5 py-3 px-2 rounded-xl hover:bg-white/5 transition-colors text-gray-300 hover:text-white text-xs"
+                  title="Reenviar"
+                >
+                  <Forward size={18} />
+                  <span>Reenviar</span>
+                </button>
+                <button
+                  onClick={() => {
+                    if (selectedMessages.size === 1) {
+                      const msg = realtimeMessages.find(m => selectedMessages.has(m.uuid));
+                      if (msg && msg.message_type === 'text') {
+                        setEditingMsgUuid(msg.uuid);
+                        setEditingContent(msg.content);
+                        clearSelection();
+                      }
+                    }
+                  }}
+                  disabled={selectedMessages.size !== 1}
+                  className="flex flex-col items-center gap-1.5 py-3 px-2 rounded-xl hover:bg-white/5 transition-colors text-gray-300 hover:text-white text-xs disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Editar (solo 1 mensaje)"
+                >
+                  <span className="text-lg">✏️</span>
+                  <span>Editar</span>
+                </button>
+                <button
+                  onClick={handleCopySelectedMessages}
+                  className="flex flex-col items-center gap-1.5 py-3 px-2 rounded-xl hover:bg-white/5 transition-colors text-gray-300 hover:text-white text-xs"
+                  title="Copiar"
+                >
+                  <span className="text-lg">📋</span>
+                  <span>Copiar</span>
+                </button>
+                <button
+                  onClick={() => handleDeleteSelectedMessages(false)}
+                  className="flex flex-col items-center gap-1.5 py-3 px-2 rounded-xl hover:bg-red-500/20 transition-colors text-red-400 hover:text-red-300 text-xs"
+                  title="Eliminar para mí"
+                >
+                  <Trash2 size={18} />
+                  <span>Eliminar</span>
+                </button>
+              </div>
+            </motion.div>
           )}
         </AnimatePresence>
 
