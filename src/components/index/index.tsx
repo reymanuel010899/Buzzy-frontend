@@ -2488,7 +2488,34 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   // swipe horizontal = cambiar de grupo). decided/isVertical se fijan una vez por gesto.
   const storyGestureRef = useRef<{ x: number; y: number; decided: boolean; isVertical: boolean; isHorizontal: boolean } | null>(null);
 
+  // Timer de la transición de grupo pendiente (next/prev). Debe cancelarse al
+  // cerrar el viewer: un setTimeout huérfano reabría la historia después de
+  // salir (parpadeo + video del feed sonando detrás).
+  const storyTransitionTimerRef = useRef<number | null>(null);
+
+  const scheduleStoryTransition = useCallback((fn: () => void, delay: number) => {
+    if (storyTransitionTimerRef.current !== null) {
+      window.clearTimeout(storyTransitionTimerRef.current);
+    }
+    storyTransitionTimerRef.current = window.setTimeout(() => {
+      storyTransitionTimerRef.current = null;
+      fn();
+    }, delay);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (storyTransitionTimerRef.current !== null) {
+        window.clearTimeout(storyTransitionTimerRef.current);
+      }
+    };
+  }, []);
+
   const closeStoryViewer = useCallback(() => {
+    if (storyTransitionTimerRef.current !== null) {
+      window.clearTimeout(storyTransitionTimerRef.current);
+      storyTransitionTimerRef.current = null;
+    }
     stopStoryAudio(true);
     setViewingStoryUserIndex(null);
     const shouldBlockInitialAutoplay = activeVideo === 0 && !hasUserInteracted.current && !hasLeftInitialVideoRef.current;
@@ -2577,6 +2604,9 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
 
   const handleNextStory = useCallback(() => {
     if (viewingStoryUserIndex === null) return;
+    // Ya hay una transición de grupo en curso: ignorar taps/onEnded extra para
+    // no encolar timeouts duplicados con índices viejos.
+    if (isSwitchingUser) return;
     const currentGroup = groupedStories[viewingStoryUserIndex];
     if (!currentGroup) {
       closeStoryViewer();
@@ -2609,6 +2639,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       np[currentStoryItemIndex] = 1;
       updateProgress(np);
       setCurrentStoryItemIndex(prev => prev + 1);
+      setIsStoryPaused(false);
     } else {
       // Next group - complete current group and animate transition
       const completeProgress = new Array(currentGroup.media.length).fill(1);
@@ -2620,7 +2651,10 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         setTransitionDirection('next');
         setIsSwitchingUser(true);
         setIsStoryPaused(true);
-        setTimeout(() => {
+        // setIsStoryPaused(true) no pausa el <video> por sí solo, y si el video
+        // termina durante la transición, onEnded re-dispara este handler.
+        storyVideoRef.current?.pause();
+        scheduleStoryTransition(() => {
           setGroupProgresses(prev => ({
             ...prev,
             [nextGroup.user.id]: new Array(nextGroup.media.length).fill(0)
@@ -2636,11 +2670,11 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         closeStoryViewer();
       }
     }
-    setIsStoryPaused(false);
-  }, [viewingStoryUserIndex, currentStoryItemIndex, groupedStories, getCurrentProgress, updateProgress, closeStoryViewer, viewedItems, dispatch]);
+  }, [viewingStoryUserIndex, currentStoryItemIndex, isSwitchingUser, groupedStories, getCurrentProgress, updateProgress, closeStoryViewer, scheduleStoryTransition, viewedItems, dispatch]);
 
   const handlePrevStory = useCallback(() => {
     if (viewingStoryUserIndex === null) return;
+    if (isSwitchingUser) return;
     const currentGroup = groupedStories[viewingStoryUserIndex];
     if (!currentGroup) {
       closeStoryViewer();
@@ -2662,6 +2696,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       np[currentStoryItemIndex - 1] = 0;
       updateProgress(np);
       setCurrentStoryItemIndex(prev => prev - 1);
+      setIsStoryPaused(false);
     } else {
       // Prev group - animate transition
       if (viewingStoryUserIndex > 0) {
@@ -2673,7 +2708,8 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         setTransitionDirection('prev');
         setIsSwitchingUser(true);
         setIsStoryPaused(true);
-        setTimeout(() => {
+        storyVideoRef.current?.pause();
+        scheduleStoryTransition(() => {
           const prevProgress = new Array(prevLength).fill(1);
           prevProgress[prevLength - 1] = 0;
           setGroupProgresses(prev => ({
@@ -2689,21 +2725,22 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         }, 500);
       }
     }
-    setIsStoryPaused(false);
-  }, [viewingStoryUserIndex, currentStoryItemIndex, groupedStories, getCurrentProgress, updateProgress, closeStoryViewer, viewedItems, dispatch]);
+  }, [viewingStoryUserIndex, currentStoryItemIndex, isSwitchingUser, groupedStories, getCurrentProgress, updateProgress, closeStoryViewer, scheduleStoryTransition, viewedItems, dispatch]);
 
 
   // ── Swipe HORIZONTAL en el viewer de historias: salta directo de GRUPO (usuario),
   // no item por item. Derecha→izquierda = grupo siguiente; izquierda→derecha = anterior.
   const goToNextGroup = useCallback(() => {
     if (viewingStoryUserIndex === null) return;
+    if (isSwitchingUser) return;
     if (viewingStoryUserIndex < groupedStories.length - 1) {
       const nextIndex = viewingStoryUserIndex + 1;
       const nextGroup = groupedStories[nextIndex];
       setTransitionDirection('next');
       setIsSwitchingUser(true);
       setIsStoryPaused(true);
-      setTimeout(() => {
+      storyVideoRef.current?.pause();
+      scheduleStoryTransition(() => {
         setGroupProgresses(prev => ({
           ...prev,
           [nextGroup.user.id]: new Array(nextGroup.media.length).fill(0)
@@ -2717,17 +2754,19 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     } else {
       closeStoryViewer();
     }
-  }, [viewingStoryUserIndex, groupedStories, closeStoryViewer]);
+  }, [viewingStoryUserIndex, isSwitchingUser, groupedStories, closeStoryViewer, scheduleStoryTransition]);
 
   const goToPrevGroup = useCallback(() => {
     if (viewingStoryUserIndex === null) return;
+    if (isSwitchingUser) return;
     if (viewingStoryUserIndex > 0) {
       const prevIndex = viewingStoryUserIndex - 1;
       const prevGroup = groupedStories[prevIndex];
       setTransitionDirection('prev');
       setIsSwitchingUser(true);
       setIsStoryPaused(true);
-      setTimeout(() => {
+      storyVideoRef.current?.pause();
+      scheduleStoryTransition(() => {
         setGroupProgresses(prev => ({
           ...prev,
           [prevGroup.user.id]: new Array(prevGroup.media.length).fill(0)
@@ -2739,7 +2778,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         setIsStoryPaused(false);
       }, 300);
     }
-  }, [viewingStoryUserIndex, groupedStories]);
+  }, [viewingStoryUserIndex, isSwitchingUser, groupedStories, scheduleStoryTransition]);
 
   // Gestos del viewer de historias: swipe ABAJO cierra; swipe HORIZONTAL cambia de grupo.
   const onStoryTouchStart = useCallback((e: React.TouchEvent) => {
