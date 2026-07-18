@@ -2544,6 +2544,21 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     setViewerGiftReady(false);
   }, [activeVideo, stopStoryAudio]);
 
+  // Si groupedStories cambia con el visor abierto (refresh del feed, historias
+  // que expiran), los índices congelados pueden quedar fuera de rango: cerrar
+  // si el grupo desapareció, o retroceder al último item disponible.
+  useEffect(() => {
+    if (viewingStoryUserIndex === null) return;
+    const group = groupedStories[viewingStoryUserIndex];
+    if (!group || group.media.length === 0) {
+      closeStoryViewer();
+      return;
+    }
+    if (currentStoryItemIndex >= group.media.length) {
+      setCurrentStoryItemIndex(group.media.length - 1);
+    }
+  }, [groupedStories, viewingStoryUserIndex, currentStoryItemIndex, closeStoryViewer]);
+
   // Red de seguridad: un blackout jamás debe sobrevivir a su overlay. Si el
   // overlay desaparece por cualquier vía (desmontaje, error, cierre externo)
   // sin pasar por onEnded, esto apaga la pantalla negra.
@@ -4447,6 +4462,10 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
               {/* Media Display - Video or Image */}
               {(() => {
                 const currentMediaItem = groupedStories[viewingStoryUserIndex].media[currentStoryItemIndex];
+                // La lista de historias puede encoger con el visor abierto
+                // (refresh/expiración): sin este guard, currentMediaItem.file
+                // lanzaba TypeError y el visor moría a pantalla en blanco.
+                if (!currentMediaItem) return null;
                 const storyForThisMedia = (stories as Story[])?.find(s => s.id === currentMediaItem?.story);
                 const hasCustomAudio = Boolean(storyForThisMedia?.audio_track_url);
                 const hasStoryFilter = Boolean(storyForThisMedia?.filter_css && storyForThisMedia.filter_css !== "none");
