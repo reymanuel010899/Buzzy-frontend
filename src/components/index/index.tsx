@@ -754,6 +754,10 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   // Pull-to-refresh — usa el hook compartido
   const { isPulling: isPullRefreshing, pullProgress } = usePullToRefresh({
     onRefresh: async () => {
+      // El refresh REEMPLAZA el feed: sin esta marca, el efecto de sync caía en
+      // la rama append y el ExoPlayer nativo seguía con la lista vieja mientras
+      // la overlay HTML mostraba los datos del feed nuevo (desincronización).
+      pendingFeedReplaceRef.current = true;
       await Promise.all([
         refreshFeed()(dispatch),
         getActiveStories()(dispatch),
@@ -1879,6 +1883,8 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
         return;
       }
       // Refresca el feed del tab activo: "Seguidos" tiene su propio endpoint.
+      // Reemplazo completo → el nativo debe recibir replaceUrls, no append.
+      pendingFeedReplaceRef.current = true;
       if (feedMode === 'following') {
         await getFollowingFeed()(dispatch);
       } else {
