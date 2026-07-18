@@ -185,6 +185,21 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const videosPausedRef = useRef(true)
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([])
   const [isMuted, setIsMuted] = useState(false)
+  // Mute del usuario antes de forzar el unmute de un anuncio: al cerrar el ad
+  // se restaura; sin esto el feed quedaba sonando aunque estuviera silenciado.
+  const muteBeforeAdRef = useRef<boolean | null>(null)
+  const unmuteForAd = useCallback(() => {
+    setIsMuted(prev => {
+      if (muteBeforeAdRef.current === null) muteBeforeAdRef.current = prev;
+      return false;
+    });
+  }, [])
+  const restoreMuteAfterAd = useCallback(() => {
+    if (muteBeforeAdRef.current !== null) {
+      setIsMuted(muteBeforeAdRef.current);
+      muteBeforeAdRef.current = null;
+    }
+  }, [])
   const [videosPaused, setVideosPaused] = useState(true)
   const feedMode = useFeedModeStore((state) => state.feedMode);
   const setFeedMode = useFeedModeStore((state) => state.setFeedMode);
@@ -2020,7 +2035,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
           setSelectedAd(nextAd);
           setActiveAdIndex(mergedIdx);
           setShownAds(prev => new Set(prev instanceof Set ? prev : []).add(videoId));
-          setIsMuted(false);       // el ad siempre con sonido (igual que web)
+          unmuteForAd();       // el ad siempre con sonido (igual que web)
           setAdSequenceCount(1);
           setExpandedDescriptions(prev => ({ ...prev, [videoId]: false }));
         }
@@ -3734,7 +3749,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                                           setSelectedAd(nextAd);
                                           setActiveAdIndex(index);
                                           videoElement.pause();
-                                          setIsMuted(false); // Force unmute for ad
+                                          unmuteForAd(); // Force unmute for ad
                                           setAdSequenceCount(1); // Start sequence
                                         }
                                       }
@@ -3752,7 +3767,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                                     setActiveAdIndex(index);
                                     setShownAds(prev => new Set(prev instanceof Set ? prev : []).add(videoId));
                                     e.currentTarget.pause();
-                                    setIsMuted(false); // Force unmute for ad
+                                    unmuteForAd(); // Force unmute for ad
                                     setAdSequenceCount(1); // Start sequence
                                     // Auto-collapse description if it's open
                                     setExpandedDescriptions(prev => ({ ...prev, [videoId]: false }));
@@ -3791,6 +3806,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                                     setActiveAdIndex(null);
                                     setAdSequenceCount(0);
                                     setLastAdTimestamp(Date.now());
+                                    restoreMuteAfterAd();
                                     videoRefs.current[index]?.play();
                                   }
                                 } else {
@@ -3799,6 +3815,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                                   setActiveAdIndex(null);
                                   setAdSequenceCount(0);
                                   setLastAdTimestamp(Date.now());
+                                  restoreMuteAfterAd();
                                   videoRefs.current[index]?.play();
                                 }
                               }}
