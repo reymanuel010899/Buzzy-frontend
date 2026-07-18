@@ -239,8 +239,12 @@ const ChatModal: React.FC = () => {
     }
   };
 
+  // IMPORTANTE (todos los envíos): el destinatario se toma de currentBackendChat
+  // (derivado síncrono de selectedChat), NUNCA de backendMessages: ese estado de
+  // redux conserva el chat ANTERIOR hasta que resuelve loadChatMessages, y con
+  // red lenta el mensaje se enviaba al contacto equivocado.
   const handleSendContact = (contact: any) => {
-    if (!backendMessages?.other_user?.id) return;
+    if (!currentBackendChat?.other_user?.id) return;
 
     const contactInfo = {
       id: contact.id,
@@ -250,7 +254,7 @@ const ChatModal: React.FC = () => {
     const content = JSON.stringify(contactInfo);
 
     const formData = new FormData();
-    formData.append("recipient_id", backendMessages.other_user.id.toString());
+    formData.append("recipient_id", currentBackendChat.other_user.id.toString());
     formData.append("message_type", "contact");
     formData.append("content", content);
 
@@ -272,7 +276,7 @@ const ChatModal: React.FC = () => {
   };
 
   const handleSystemMessage = (type: string) => {
-    if (!backendMessages?.other_user?.id) return;
+    if (!currentBackendChat?.other_user?.id) return;
 
     const tempId = `temp-${Date.now()}`;
     const content = `[${type.toUpperCase()} enviado]`;
@@ -287,7 +291,7 @@ const ChatModal: React.FC = () => {
     setRealtimeMessages(prev => [...prev, optimisticMsg]);
 
     const formData = new FormData();
-    formData.append("recipient_id", backendMessages.other_user.id.toString());
+    formData.append("recipient_id", currentBackendChat.other_user.id.toString());
     formData.append("message_type", type);
     formData.append("content", content);
 
@@ -295,14 +299,14 @@ const ChatModal: React.FC = () => {
   };
 
   const handleFileUploadDirect = async (file: File) => {
-    if (!backendMessages?.other_user?.id) return;
+    if (!currentBackendChat?.other_user?.id) return;
     await handleFileUploadCore(file);
   };
 
   const handleFileUploadCore = async (file: File) => {
-    if (!backendMessages?.other_user?.id) return;
+    if (!currentBackendChat?.other_user?.id) return;
     const formData = new FormData();
-    formData.append("recipient_id", backendMessages.other_user.id.toString());
+    formData.append("recipient_id", currentBackendChat.other_user.id.toString());
     formData.append("file", file);
 
     let messageType: "image" | "video" | "text" | "voice" | "gif" | "file" | "document" = "text";
@@ -387,11 +391,11 @@ const ChatModal: React.FC = () => {
   };
 
   const handleVoiceUpload = async (blob: Blob) => {
-    if (!backendMessages?.other_user?.id) return;
+    if (!currentBackendChat?.other_user?.id) return;
 
     const file = new File([blob], "voice_message.webm", { type: "audio/webm" });
     const formData = new FormData();
-    formData.append("recipient_id", backendMessages.other_user.id.toString());
+    formData.append("recipient_id", currentBackendChat.other_user.id.toString());
     formData.append("file", file);
     formData.append("message_type", "voice");
     formData.append("content", "");
@@ -880,14 +884,14 @@ const ChatModal: React.FC = () => {
 
     setMessageText(inputRef.current?.value || "");
 
-    const typingReceiverId = backendMessages?.other_user?.id;
+    const typingReceiverId = currentBackendChat?.other_user?.id;
     if (!typingReceiverId) return;
 
     wsSend({
       type: "typing",
       is_typing: true,
       receiver_id: typingReceiverId,
-      chat_uuid: backendMessages?.chat_uuid,
+      chat_uuid: selectedChat,
     });
 
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
@@ -897,7 +901,7 @@ const ChatModal: React.FC = () => {
         type: "typing",
         is_typing: false,
         receiver_id: typingReceiverId,
-        chat_uuid: backendMessages?.chat_uuid,
+        chat_uuid: selectedChat,
       });
     }, 1500);
   };
@@ -1212,6 +1216,10 @@ const ChatModal: React.FC = () => {
   const wsReadSentRef = useRef<string | null>(null);
   useEffect(() => {
     if (!backendMessages?.other_user?.id || !selectedChat || !showMessages) return;
+    // backendMessages puede ser aún el chat anterior mientras carga el nuevo:
+    // sin este guard se notificaba "leído" al receptor equivocado y el ref
+    // bloqueaba el reenvío correcto al terminar la carga.
+    if (backendMessages.chat_uuid && backendMessages.chat_uuid !== selectedChat) return;
     if (wsReadSentRef.current === selectedChat) return;
     wsReadSentRef.current = selectedChat;
     wsSend({
@@ -1258,7 +1266,7 @@ const ChatModal: React.FC = () => {
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault()
     const input = inputRef.current
-    if (!input?.value.trim() || !backendMessages?.other_user?.id) return
+    if (!input?.value.trim() || !currentBackendChat?.other_user?.id) return
 
     const content = input.value.trim();
     const tempId = `temp-${Date.now()}`
@@ -1274,7 +1282,7 @@ const ChatModal: React.FC = () => {
     setRealtimeMessages(prev => [...prev, optimisticMsg])
 
     const formData = new FormData();
-    formData.append("recipient_id", backendMessages.other_user.id.toString());
+    formData.append("recipient_id", currentBackendChat.other_user.id.toString());
     formData.append("content", content);
     formData.append("message_type", "text");
 
