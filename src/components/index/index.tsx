@@ -2535,7 +2535,24 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     setShowGiftMenu(false);
     setShowFullGiftMenu(false);
     setGiftAnimation(null);
+    // Overlays/blackouts de regalo: si se cierra el viewer a mitad de una
+    // animación, el onEnded del video ya no dispara y quedarían pegados
+    // (pantalla negra fija con zIndex 99999).
+    setIsBlackout(false);
+    setViewerGiftOverlay(null);
+    setViewerGiftBlackout(false);
+    setViewerGiftReady(false);
   }, [activeVideo, stopStoryAudio]);
+
+  // Red de seguridad: un blackout jamás debe sobrevivir a su overlay. Si el
+  // overlay desaparece por cualquier vía (desmontaje, error, cierre externo)
+  // sin pasar por onEnded, esto apaga la pantalla negra.
+  useEffect(() => {
+    if (!giftAnimation && isBlackout) setIsBlackout(false);
+  }, [giftAnimation, isBlackout]);
+  useEffect(() => {
+    if (!viewerGiftOverlay && viewerGiftBlackout) setViewerGiftBlackout(false);
+  }, [viewerGiftOverlay, viewerGiftBlackout]);
   const getCurrentProgress = useMemo(() => {
     if (viewingStoryUserIndex === null) return [];
     const currentGroup = groupedStories[viewingStoryUserIndex];
@@ -5475,6 +5492,16 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 }
                 setGiftAnimation(null);
               }}
+              onError={() => {
+                // Si el video del regalo falla en cargar, onEnded jamás dispara:
+                // sin esto el overlay (y el blackout) quedan pegados para siempre.
+                setIsBlackout(false);
+                if (giftAnimBlobRef.current) {
+                  URL.revokeObjectURL(giftAnimBlobRef.current);
+                  giftAnimBlobRef.current = null;
+                }
+                setGiftAnimation(null);
+              }}
             />
             {/* Nombre del regalo abajo */}
             <motion.div
@@ -5550,6 +5577,14 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                 }
               }}
               onEnded={() => {
+                setViewerGiftOverlay(null);
+                setViewerGiftBlackout(false);
+                if (viewerGiftBlobRef.current) {
+                  URL.revokeObjectURL(viewerGiftBlobRef.current);
+                  viewerGiftBlobRef.current = null;
+                }
+              }}
+              onError={() => {
                 setViewerGiftOverlay(null);
                 setViewerGiftBlackout(false);
                 if (viewerGiftBlobRef.current) {
