@@ -688,10 +688,16 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   // abrir chat, stories, ir a perfil, etc. Oculto = GONE + pausa; visible = se
   // muestra (y se reanuda solo si no está en candado/pausa manual).
   const onHomeRoute = location.pathname === '/';
+  // Visibilidad ACTUAL del feed, legible desde listeners con deps [] (el
+  // appStateChange de abajo): sin este ref, el listener evaluaba valores
+  // congelados del montaje y reanudaba el ExoPlayer con el chat/perfil/
+  // historia abiertos (audio del feed sonando debajo de otra pantalla).
+  const feedVisibleRef = useRef(true);
   useEffect(() => {
-    if (!exoActiveRef.current) return;
     const feedHidden = !onHomeRoute || showMessages || viewingStoryUserIndex !== null
       || storyEditorFile !== null;
+    feedVisibleRef.current = !feedHidden;
+    if (!exoActiveRef.current) return;
     BuzzyVideoFeed.setVisible({ visible: !feedHidden }).catch(() => {});
     if (!feedHidden) {
       // Volvimos al feed: reanudar solo si NO está bloqueado/pausado manualmente.
@@ -711,9 +717,9 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       if (!isActive) {
         BuzzyVideoFeed.setPaused({ paused: true }).catch(() => {});
       } else {
-        const feedVisible = location.pathname === '/' && !showMessages
-          && viewingStoryUserIndex === null && storyEditorFile === null;
-        if (feedVisible && !feedLockedRef.current && !exoPausedRef.current) {
+        // feedVisibleRef y no los estados directamente: este listener tiene
+        // deps [] y capturaba los valores del montaje (siempre "feed visible").
+        if (feedVisibleRef.current && !feedLockedRef.current && !exoPausedRef.current) {
           BuzzyVideoFeed.setPaused({ paused: false }).catch(() => {});
         }
       }
