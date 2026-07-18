@@ -254,6 +254,16 @@ export const ShowComments = ({
         setCommentText("")
     }
 
+    // Al cerrar el modal, descartar el estado de respuesta: si sobrevive y se
+    // abren los comentarios de OTRO video, la respuesta se enviaría con el
+    // parent_uuid de un comentario del video anterior.
+    useEffect(() => {
+        if (!showCommentsModal) {
+            setReplyingTo(null)
+            setCommentText("")
+        }
+    }, [showCommentsModal, setCommentText])
+
     const sendComment = () => {
         const replyPrefix = replyingTo ? `@${replyingTo.username} ` : ''
         const realText = commentText.startsWith(replyPrefix)

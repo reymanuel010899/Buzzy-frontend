@@ -40,10 +40,13 @@ export const createComment = (body: CreateCommentBody) => async (dispatch: any) 
       return response.data?.data ?? response.data;
     }
 
-  } catch {
+  } catch (error) {
     dispatch({
       type: FAILED_CREATE_COMMENT,
       payload: ''
     });
+    // Relanzar: si se traga el error, el .catch del caller nunca corre y el
+    // usuario pierde su comentario (texto/audio/imagen) sin ningún aviso.
+    throw error;
   }
 };
