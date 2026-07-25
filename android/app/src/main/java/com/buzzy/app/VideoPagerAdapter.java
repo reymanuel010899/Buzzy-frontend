@@ -373,7 +373,13 @@ public class VideoPagerAdapter extends RecyclerView.Adapter<VideoPagerAdapter.Pa
             .setBufferDurationsMs(
                 15_000,  // minBufferMs: buffer objetivo mínimo
                 30_000,  // maxBufferMs: tope de buffer
-                1_000,   // bufferForPlaybackMs: cuánto buffer para EMPEZAR (arranque rápido)
+
+                2_500,   // bufferForPlaybackMs: cuánto buffer para EMPEZAR. 1s era demasiado
+                         // agresivo para un ARRANQUE EN FRÍO (perfil: el video tocado nunca
+                         // se pre-calienta como vecino) → rebotaba READY↔BUFFERING los
+                         // primeros segundos (el "frizado"). ~2.5s da margen suficiente. En
+                         // el feed no se nota: los vecinos ya vienen buferados y satisfacen
+                         // este umbral al instante.
                 2_000)   // bufferForPlaybackAfterRebufferMs: para retomar tras un corte
             .setPrioritizeTimeOverSizeThresholds(true)
             .build();

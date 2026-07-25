@@ -1019,6 +1019,11 @@ const ChatModal: React.FC = () => {
 
   useEffect(() => {
     if (!showMessages) {
+      // Al cerrar el modal, limpiar el chat seleccionado. Si queda colgado, al
+      // reabrir la lista no renderiza (requiere !selectedChat) y la conversación
+      // tampoco (requiere currentBackendChat, null si el chat no está en la lista):
+      // no se dibuja ningún overlay, el feed queda visible/scrolleable y sin X/backdrop.
+      setSelectedChat(null);
       setChatFolder(ChatFolderFilter.Friends);
       setShowHiddenPinModal(false);
       localStorage.removeItem("hiddenChatAccessToken");
@@ -1032,6 +1037,7 @@ const ChatModal: React.FC = () => {
       setShowChatSearch(false);
       setChatSearchQuery("");
       setChatSearchResults([]);
+      setMessageText("");
     }
   }, [selectedChat, dispatch]);
 
@@ -1350,8 +1356,7 @@ const ChatModal: React.FC = () => {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                onClick={() => setShowMessages(false)}
-                className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[100]"
+                className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[100] pointer-events-none"
               />
 
               <motion.div
@@ -1709,8 +1714,7 @@ const ChatModal: React.FC = () => {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                onClick={() => setSelectedChat(null)}
-                className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60]"
+                className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] pointer-events-none"
               />
 
               <motion.div
@@ -1753,7 +1757,7 @@ const ChatModal: React.FC = () => {
                       <img
                         src={getMediaUrl(currentBackendChat.other_user.avatar || "/profile_pics/avatar.webp")}
                         alt={currentBackendChat.other_user.name}
-                        className="w-10 h-10 rounded-full object-cover"
+                        className="w-10 h-10 rounded-[10px] object-cover"
                       />
                       {currentBackendChat.other_user_online.is_online && (
                         <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-400 border-2 border-black rounded-full shadow-[0_0_5px_rgba(74,222,128,0.9)]" />
@@ -1816,6 +1820,7 @@ const ChatModal: React.FC = () => {
                       whileTap={{ scale: 0.92 }}
                       onClick={(e) => {
                         e.stopPropagation();
+                        setSelectedMessages(new Set());
                         setSelectedChat(null);
                       }}
                       className="w-12 h-12 flex items-center justify-center text-white/60 hover:bg-white/10 hover:text-white transition-all"
@@ -2029,7 +2034,7 @@ const ChatModal: React.FC = () => {
                               longPressTimerRef.current = null;
                             }
                           }}
-                          className="relative flex items-end justify-end gap-2"
+                          className="relative flex items-end justify-end gap-3"
                           // pan-y: el gesto vertical es SCROLL (no long-press). Sin callout/
                           // selección nativa del WebView, que en Android disparaba el menú al
                           // arrastrar sobre el texto del mensaje.
@@ -2038,7 +2043,7 @@ const ChatModal: React.FC = () => {
                           <div className="relative flex items-center">
 
                             <div
-                              className={`max-w-[72vw] ${msg.message_type === 'text' ? 'px-4 py-3' : msg.message_type === 'contact' ? 'p-0 overflow-hidden' : 'p-[1px]'} ${isMe ? 'rounded-tl-[20px] rounded-tr-[20px] rounded-bl-[20px] rounded-br-[4px]' : 'rounded-tl-[20px] rounded-tr-[20px] rounded-br-[20px] rounded-bl-[4px]'} shadow-xl transition-all duration-300 ${selectedMessages.has(msg.uuid) ? 'ring-2 ring-cyan-400/50 bg-white/5' : ''} ${
+                              className={`max-w-[72vw] ${msg.message_type === 'text' ? 'px-4 py-3' : msg.message_type === 'contact' ? 'p-0 overflow-hidden' : 'p-[1px]'} ${isMe ? 'rounded-tl-[5px] rounded-tr-[20px] rounded-bl-[20px] rounded-br-[4px]' : 'rounded-tl-[20px] rounded-tr-[20px] rounded-br-[20px] rounded-bl-[4px]'} shadow-xl transition-all duration-300 ${selectedMessages.has(msg.uuid) ? 'ring-2 ring-cyan-400/50 bg-white/5' : ''} ${
                                 isMe
                                   ? (msg.message_type === 'text' || msg.message_type === 'contact')
                                     ? user.subscription_status?.plan?.name?.toUpperCase() === 'FRIEND'
@@ -2279,7 +2284,7 @@ const ChatModal: React.FC = () => {
 
                               {msg.message_type !== 'image' && msg.message_type !== 'video' && msg.message_type !== 'voice' && (
                                 <div className="flex items-center justify-between w-full mt-1.5 gap-4">
-                                  <div className="flex items-center gap-1">
+                                  <div className="flex items-center gap-2">
                                     <p className="text-[11px] text-white/40 font-normal">
                                       {new Date(msg.created_at).toLocaleTimeString("es-DO", { hour: "2-digit", minute: "2-digit" })}
                                     </p>

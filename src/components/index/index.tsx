@@ -514,7 +514,11 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
   const syncNativeInsets = useCallback(() => {
     if (!exoActiveRef.current) return;
     const nav = document.querySelector('nav');
-    const top = nav ? Math.round(nav.getBoundingClientRect().height) : 0;
+    const navHeight = nav ? Math.round(nav.getBoundingClientRect().height) : 56;
+    // Guard: si la navbar aún no está renderizada (height=0), usa el default (56px).
+    // Evita que el video suba a top:0 durante el app resume cuando hay un resize
+    // ficticio antes de que React termine de renderizar la navbar.
+    const top = navHeight > 0 ? navHeight : 56;
     // 1) Bajar el VIDEO nativo esa altura. 2) Bajar la CAPA HTML del slide la MISMA
     //    altura (CSS var) → el avatar del autor (top-2 del slide) cae debajo del nav.
     BuzzyVideoFeed.setInsets({ top, bottom: 0 }).catch(() => {});
@@ -699,6 +703,11 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     feedVisibleRef.current = !feedHidden;
     if (!exoActiveRef.current) return;
     BuzzyVideoFeed.setVisible({ visible: !feedHidden }).catch(() => {});
+    // Cierra automáticamente el modal de crear cuando el feed se oculta (sale de la app,
+    // abre chat, historias, etc.). Evita que quede pegado comiendo toques al volver.
+    if (feedHidden) {
+      window.dispatchEvent(new Event('buzzy:closeModals'));
+    }
     if (!feedHidden) {
       // Volvimos al feed: reanudar solo si NO está bloqueado/pausado manualmente.
       if (!feedLockedRef.current && !exoPausedRef.current) {
@@ -717,6 +726,10 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
       if (!isActive) {
         BuzzyVideoFeed.setPaused({ paused: true }).catch(() => {});
       } else {
+        // Al volver a foreground: cierra todos los modales (chats, crear video, etc.)
+        // para evitar que queden overlays pegados comiendo toques por inconsistencias
+        // entre el WebView y el nativo en el app resume. El feed se reinitializa limpio.
+        window.dispatchEvent(new Event('buzzy:closeModals'));
         // feedVisibleRef y no los estados directamente: este listener tiene
         // deps [] y capturaba los valores del montaje (siempre "feed visible").
         if (feedVisibleRef.current && !feedLockedRef.current && !exoPausedRef.current) {
@@ -767,6 +780,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     // Feed vacío: siempre permitir. Feed con videos: solo desde el primer video en scroll 0
     checkScrollTop: () => !mediaVideo?.length || (activeVideo === 0 && (feedScrollRef.current?.scrollTop ?? 0) <= 8),
     global: true,
+    enabled: !showMessages,
   });
 
   useEffect(() => {
@@ -5775,23 +5789,26 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
     {activeOptionsVideoId && (() => {
       const vid = mergedFeed.find(d => d.type === 'video' && d.id?.toString() === activeOptionsVideoId);
       const opts = [
+        // `color` son stops CSS reales: antes eran clases Tailwind ("from-pink-500/30")
+        // metidas en un linear-gradient() → CSS inválido → botones invisibles (el menú
+        // abierto no parecía un menú y "bloqueaba el scroll sin motivo aparente").
         {
           icon: <Bookmark size={16} className={savedMap[activeOptionsVideoId] ? 'fill-pink-400 text-pink-400' : 'text-white/80'} />,
-          color: 'from-pink-500/30 to-rose-600/15',
+          color: 'rgba(236,72,153,0.30), rgba(225,29,72,0.15)',
           glow: 'rgba(236,72,153,0.4)',
           active: !!savedMap[activeOptionsVideoId],
           onClick: () => { handleSaveClick(activeOptionsVideoId); setActiveOptionsVideoId(null); },
         },
         {
           icon: <Share2 size={16} className="text-cyan-300" />,
-          color: 'from-cyan-500/25 to-blue-600/15',
+          color: 'rgba(6,182,212,0.25), rgba(37,99,235,0.15)',
           glow: 'rgba(6,182,212,0.35)',
           active: false,
           onClick: () => handleShareVideo((vid as any)?.video_url || '', (vid as any)?.description),
         },
         {
           icon: <Download size={16} className="text-violet-300" />,
-          color: 'from-violet-500/25 to-purple-600/15',
+          color: 'rgba(139,92,246,0.25), rgba(147,51,234,0.15)',
           glow: 'rgba(139,92,246,0.35)',
           active: false,
           onClick: () => handleDownloadVideo((vid as any)?.video_url || '', activeOptionsVideoId),
@@ -5826,9 +5843,11 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
               gap: '8px',
               padding: '8px',
               borderRadius: '16px',
-              background: 'rgba(10,10,16,0.92)',
-              backdropFilter: 'blur(28px)',
-              WebkitBackdropFilter: 'blur(28px)',
+              // SIN backdrop-filter: el video del feed es una surface NATIVA (ExoPlayer)
+              // detrás del WebView transparente — el blur no puede muestrearla y el
+              // WebView de Android lo pintaba como un halo/arco gigante con bandas
+              // sobre el botón "+". Fondo casi opaco para compensar la falta de blur.
+              background: 'rgba(10,10,16,0.96)',
               border: '1px solid rgba(255,255,255,0.08)',
               boxShadow: '0 8px 32px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.04)',
             }}
@@ -5848,7 +5867,7 @@ const StreamingUI = ({ media }: StreamingUIProps) => {
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  background: `linear-gradient(to bottom, ${opt.color.replace('from-', '').replace(' to-', ', ')})`,
+                  background: `linear-gradient(to bottom, ${opt.color})`,
                   boxShadow: opt.active ? `0 0 14px ${opt.glow}` : 'none',
                   border: opt.active ? `1px solid ${opt.glow}` : '1px solid rgba(255,255,255,0.06)',
                 }}

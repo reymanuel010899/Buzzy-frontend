@@ -25,6 +25,14 @@ const BottomNavbar: React.FC = () => {
     return location.pathname === path
   }
 
+  // Cierra el modal automáticamente cuando el feed se oculta (sale de la app, abre chat, etc.)
+  // para evitar que quede pegado comiendo toques al volver.
+  React.useEffect(() => {
+    const handleCloseModals = () => setIsModalOpen(false);
+    window.addEventListener('buzzy:closeModals', handleCloseModals);
+    return () => window.removeEventListener('buzzy:closeModals', handleCloseModals);
+  }, []);
+
   return (
     <>
       <nav className="fixed bottom-0 left-0 right-0 z-50"

@@ -209,6 +209,13 @@ public class VideoFeedPlugin extends Plugin {
                     if (pager == null) return false;
                     // Modal HTML encima → no tocar el feed nativo (deja todo al WebView).
                     if (scrollLocked) return false;
+                    // Feed OCULTO (chat, historias, perfil encima → setVisible(false)) →
+                    // tampoco reenviar. Sin esta guarda, un gesto vertical sobre el chat
+                    // (scrollear la lista, o el tap-con-arrastre al cerrar tocando fuera)
+                    // movía el ViewPager2 INVISIBLE detrás: cambiaba de video, arrancaba
+                    // su audio bajo el modal, y el touchcancel mataba el click del HTML
+                    // (el modal "no cerraba" y el chat "se volvía loco").
+                    if (pagerRoot == null || pagerRoot.getVisibility() != View.VISIBLE) return false;
                     switch (ev.getActionMasked()) {
                         case android.view.MotionEvent.ACTION_DOWN:
                             down[0] = ev.getX(); down[1] = ev.getY();
